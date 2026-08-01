@@ -1,0 +1,17 @@
+[package]
+name = "docsai-convert"
+description = "Conversion pipelines, format detection and asset management for docsai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+docsai-docmark = { workspace = true }
+docsai-model = { workspace = true }
+docsai-odf = { workspace = true }
+docsai-office = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

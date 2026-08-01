@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d39b8c98c84b4ac05040305143709c8ae812fb08f36df0af61227b4147a58663 # shrinks to numbers = [0.0], texts = []
+cc b6d546bba511082d918c04fa30486795c6ee13a44655b21e24f66ee018b621da # shrinks to blocks = [Paragraph(Paragraph { format: ParaFormat { style: None, direct: ParaProps { align: None, indent_left: None, indent_right: None, indent_first_line: None, indent_hanging: None, space_before: None, space_after: None, line_height: None, keep_with_next: None, page_break_before: None, background: None, outline_level: None }, run_direct: FontProps { name: None, size: None, bold: None, italic: None, strike: None, underline: None, color: None, highlight: None, vert_align: None, small_caps: None, caps: None } }, content: [Styled { content: [Styled { content: [Text("")], props: RunProps { style: None, direct: FontProps { name: None, size: None, bold: None, italic: None, strike: None, underline: None, color: None, highlight: None, vert_align: None, small_caps: None, caps: None } } }], props: RunProps { style: None, direct: FontProps { name: None, size: None, bold: None, italic: None, strike: None, underline: None, color: None, highlight: None, vert_align: None, small_caps: None, caps: None } } }] })], title = None
+cc ca330d585bd79b97599a3e9d33e1a9c3b78948b986a710931926dabcbbe4bff5 # shrinks to numbers = [-990038535528.8899], texts = []

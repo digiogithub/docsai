@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/docsai-model",
+    "crates/docsai-docmark",
+    "crates/docsai-office",
+    "crates/docsai-odf",
+    "crates/docsai-convert",
+    "crates/docsai-cli",
+    "crates/docsai-mcp",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/digiogithub/docsai"
+authors = ["docsai contributors"]
+
+[workspace.dependencies]
+docsai-model = { path = "crates/docsai-model", version = "0.1.0" }
+docsai-docmark = { path = "crates/docsai-docmark", version = "0.1.0" }
+docsai-office = { path = "crates/docsai-office", version = "0.1.0" }
+docsai-odf = { path = "crates/docsai-odf", version = "0.1.0" }
+docsai-convert = { path = "crates/docsai-convert", version = "0.1.0" }
+
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+insta = "1"
+proptest = "1"
+quick-xml = "0.37"
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip`: without it serde_json's fast float parser can shift a
+# value by 1 ULP, which would silently corrupt spreadsheet numbers.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+serde_yaml = "0.9"
+sha2 = "0.10"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
