@@ -562,7 +562,11 @@ fn read_run(r: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut Vec<Piece>
                 match ctx.footnotes.get(&id) {
                     Some(blocks) => {
                         st.report.stats.footnotes += 1;
-                        buffer.push(Inline::Footnote(blocks.clone()));
+                        // The reference sits *outside* the run's character
+                        // style: `FootnoteReference` only makes the marker
+                        // superscript, and DocMark draws its own marker.
+                        flush!();
+                        out.push(Piece::inline(Inline::Footnote(blocks.clone())));
                     }
                     None => st.report.warn(Warning::Degraded {
                         what: format!("footnote {id}"),

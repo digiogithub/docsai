@@ -27,15 +27,13 @@ docsai-convert = { path = "crates/docsai-convert", version = "0.1.0" }
 
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-insta = "1"
+comrak = { version = "0.39", default-features = false }
 proptest = "1"
 quick-xml = "0.37"
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: without it serde_json's fast float parser can shift a
 # value by 1 ULP, which would silently corrupt spreadsheet numbers.
 serde_json = { version = "1", features = ["float_roundtrip"] }
-serde_yaml = "0.9"
-sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -15,3 +15,7 @@ docsai-odf = { workspace = true }
 docsai-office = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+comrak.workspace = true
+zip = { workspace = true }

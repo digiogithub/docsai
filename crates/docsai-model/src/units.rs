@@ -155,14 +155,31 @@ const fn div_round(value: i64, divisor: i64) -> i64 {
     }
 }
 
+/// EMU in one pixel at 96 dpi.
+const EMU_PER_PX: i64 = EMU_PER_INCH / DEFAULT_DPI as i64;
+/// EMU in a hundredth of a centimetre.
+const EMU_PER_CENTI_CM: i64 = EMU_PER_CM / 100;
+/// EMU in a hundredth of a point.
+const EMU_PER_CENTI_PT: i64 = EMU_PER_POINT / 100;
+
 impl fmt::Display for Length {
-    /// Renders the length the way DocMark does: whole `px` when it lands on an
-    /// exact pixel at 96 dpi, `cm` with two decimals otherwise.
+    /// Renders the length the way DocMark does, always **losslessly**: the
+    /// first unit that represents it exactly wins, in the order `px`, `cm`,
+    /// `pt`, and raw `emu` as the last resort.
+    ///
+    /// Choosing readability over exactness here would silently move margins
+    /// and image sizes on every round-trip, so exactness comes first: a Word
+    /// margin of 1417 twips prints as `70.85pt`, not as an approximate
+    /// `2.499cm`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0 % (EMU_PER_INCH / DEFAULT_DPI as i64) == 0 {
-            write!(f, "{}px", self.0 / (EMU_PER_INCH / DEFAULT_DPI as i64))
+        if self.0 % EMU_PER_PX == 0 {
+            write!(f, "{}px", self.0 / EMU_PER_PX)
+        } else if self.0 % EMU_PER_CENTI_CM == 0 {
+            write!(f, "{}cm", trim_float(self.cm(), 2))
+        } else if self.0 % EMU_PER_CENTI_PT == 0 {
+            write!(f, "{}pt", trim_float(self.pt(), 2))
         } else {
-            write!(f, "{}cm", trim_float(self.cm(), 3))
+            write!(f, "{}emu", self.0)
         }
     }
 }
@@ -271,6 +288,39 @@ mod tests {
     fn display_prefers_whole_pixels() {
         assert_eq!(Length::from_px(96.0).to_string(), "96px");
         assert_eq!(Length::from_cm(3.5).to_string(), "3.5cm");
+    }
+
+    #[test]
+    fn display_is_always_lossless() {
+        // Parsing back what Display wrote must give the very same EMU, or a
+        // round-trip would move margins and image sizes.
+        fn reparse(text: &str) -> Length {
+            let split = text.find(|c: char| c.is_alphabetic()).unwrap();
+            let (number, unit) = text.split_at(split);
+            let value: f64 = number.parse().unwrap();
+            match unit {
+                "px" => Length::from_px(value),
+                "cm" => Length::from_cm(value),
+                "pt" => Length::from_pt(value),
+                "emu" => Length::from_emu(value as i64),
+                other => panic!("unexpected unit {other}"),
+            }
+        }
+        let samples = [
+            Length::from_twips(1417), // a Word margin: not a whole px or cm
+            Length::from_twips(2500), // a table column width
+            Length::from_cm(3.0),
+            Length::from_px(120.0),
+            Length::from_pt(11.0),
+            Length::from_emu(1), // nothing but EMU can express this
+            Length::from_emu(-899_795),
+        ];
+        for length in samples {
+            let text = length.to_string();
+            assert_eq!(reparse(&text), length, "`{text}` did not round-trip");
+        }
+        assert_eq!(Length::from_twips(1417).to_string(), "70.85pt");
+        assert_eq!(Length::from_emu(1).to_string(), "1emu");
     }
 
     #[test]
