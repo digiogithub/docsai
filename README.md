@@ -4,25 +4,34 @@
 
 `docsai` es un binario único y multiplataforma (Windows, Linux, macOS) que convierte documentos ofimáticos a un perfil de Markdown extendido — **DocMark** — diseñado para conservar la máxima información posible (estilos, imágenes, propiedades, fórmulas) y permitir la **conversión inversa con pérdida mínima de formato**. Puede usarse como herramienta CLI o como **servidor MCP (Model Context Protocol) por stdio**, para integrarse con asistentes de IA como Claude.
 
-> **Estado del proyecto: fase de diseño / documentación.**
-> Este repositorio contiene actualmente la documentación inicial completa del proyecto
-> (análisis técnico, especificación de formato, arquitectura y plan de desarrollo)
-> para que el equipo de implementación pueda comenzar el desarrollo.
-> Todavía no hay código funcional.
+> **Estado del proyecto: Fases 0 y 1 completadas.**
+> Ya se convierte `.docx` → DocMark con estilos, listas, tablas, imágenes (con toda su
+> geometría), cabeceras, pies, notas al pie, campos y propiedades. La conversión inversa
+> (DocMark → `.docx`) es la Fase 2 y todavía no existe; las hojas de cálculo llegan en la
+> Fase 3. Ver [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md).
+
+```bash
+cargo run -p docsai-cli -- convert informe.docx -o informe.dmk.md
+cargo run -p docsai-cli -- formats
+```
 
 ---
 
 ## Formatos soportados (objetivo)
 
+✅ = funciona hoy · 🕓 = planificado, con la fase que lo trae · ➖ = fuera de alcance
+
 | Formato | Extensión | Lectura | Escritura | Notas |
 |---|---|---|---|---|
-| Word OOXML | `.docx` | ✅ Fase 1 | ✅ Fase 2 | Estilos, imágenes, tablas, listas, cabeceras/pies, propiedades |
-| Word binario | `.doc` | ✅ Fase 5 | ➖ | Solo lectura (vía parser nativo o fallback LibreOffice headless) |
-| Excel OOXML | `.xlsx` | ✅ Fase 3 | ✅ Fase 3 | Valores **y fórmulas**, formatos de número, celdas combinadas, imágenes ancladas |
-| Excel binario | `.xls` | ✅ Fase 3 | ➖ | Solo lectura (calamine) |
-| OpenDocument Text | `.odt` | ✅ Fase 4 | ✅ Fase 4 | Equivalente libre de `.docx` |
-| OpenDocument Spreadsheet | `.ods` | ✅ Fase 4 | ✅ Fase 4 | Equivalente libre de `.xlsx` |
-| Markdown extendido | `.dmk.md` | ✅ | ✅ | Formato pivote **DocMark** (superconjunto de CommonMark + GFM) |
+| Word OOXML | `.docx` | ✅ | 🕓 Fase 2 | Estilos, imágenes, tablas, listas, cabeceras/pies, notas al pie, campos, propiedades |
+| Word binario | `.doc` | 🕓 Fase 5 | ➖ | Solo lectura (vía parser nativo o fallback LibreOffice headless) |
+| Excel OOXML | `.xlsx` | 🕓 Fase 3 | 🕓 Fase 3 | Valores **y fórmulas**, formatos de número, celdas combinadas, imágenes ancladas |
+| Excel binario | `.xls` | 🕓 Fase 3 | ➖ | Solo lectura (calamine) |
+| OpenDocument Text | `.odt` | 🕓 Fase 4 | 🕓 Fase 4 | Equivalente libre de `.docx` |
+| OpenDocument Spreadsheet | `.ods` | 🕓 Fase 4 | 🕓 Fase 4 | Equivalente libre de `.xlsx` |
+| Markdown extendido | `.dmk.md` | 🕓 Fase 2 | ✅ | Formato pivote **DocMark** (superconjunto de CommonMark + GFM) |
+
+`docsai formats` imprime esta misma matriz según lo que el binario realmente sabe hacer.
 
 La escritura de `.doc` y `.xls` (formatos binarios legados) queda fuera de alcance de forma deliberada: la ruta de salida recomendada hacia el ecosistema Microsoft es siempre OOXML (`.docx` / `.xlsx`).
 
@@ -55,24 +64,34 @@ Texto con **negrita** y [color]{color="#FF0000"} personalizado.
 ![Diagrama de ventas](assets/img-001.png){width=450px height=300px anchor=inline}
 ```
 
-## Uso previsto (CLI)
+## Uso (CLI)
+
+Lo que funciona hoy:
 
 ```bash
-# Office → DocMark
-docsai convert informe.docx -o informe.dmk.md          # extrae assets/ junto al .md
-docsai convert ventas.xlsx  -o ventas.dmk.md            # valores + fórmulas
-
-# DocMark → Office
-docsai convert informe.dmk.md -o informe.docx
-docsai convert ventas.dmk.md  -o ventas.xlsx
-
-# Inspección y verificación
-docsai inspect informe.docx           # estructura, estilos, medios, propiedades (JSON)
-docsai roundtrip informe.docx         # convierte ida y vuelta y reporta métricas de fidelidad
-docsai --help
+docsai convert informe.docx -o informe.dmk.md      # extrae assets/ junto al .md
+docsai convert informe.docx                         # a stdout, sin escribir medios al lado
+docsai convert informe.docx --fidelity plain        # CommonMark limpio, para LLM/RAG
+docsai convert informe.docx -o out.md --json        # informe de conversión en JSON
+docsai formats                                      # matriz de soporte de este binario
 ```
 
-## Uso previsto (servidor MCP)
+Grados de fidelidad (`--fidelity`, spec §6): `full` (defecto, apto para ida y vuelta),
+`standard` (Markdown rico sin catálogos ni raw-blocks) y `plain` (CommonMark+GFM puro).
+
+Códigos de salida: `0` correcto, `1` conversión con pérdidas (`--strict` incluye las advertencias
+menores), `2` error de entrada, `3` formato no soportado.
+
+Planificado:
+
+```bash
+docsai convert informe.dmk.md -o informe.docx   # Fase 2
+docsai convert ventas.xlsx -o ventas.dmk.md      # Fase 3
+docsai inspect informe.docx                      # Fase 6
+docsai roundtrip informe.docx                    # Fase 2
+```
+
+## Uso previsto (servidor MCP, Fase 7)
 
 ```bash
 docsai mcp        # arranca el servidor MCP por stdio
@@ -99,6 +118,21 @@ Tools MCP previstas: `convert_to_markdown`, `convert_from_markdown`, `inspect_do
 | [`docs/arquitectura.md`](docs/arquitectura.md) | Arquitectura del software: workspace de crates, modelo de documento intermedio (IR), CLI, servidor MCP |
 | [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md) | Plan de desarrollo detallado en 9 fases, con entregables, criterios de aceptación, estimaciones y estrategia de pruebas |
 | [`AGENTS.md`](AGENTS.md) | Guía operativa para desarrolladores y agentes de IA que trabajen en este repositorio |
+| [`corpus/README.md`](corpus/README.md) | El corpus de pruebas: qué aísla cada documento y cómo se regenera |
+| [`docs/spikes/`](docs/spikes/) | Informes de los spikes de riesgo, con la decisión que cerró cada uno |
+| [`kb/`](kb/) | Base de conocimiento: qué hay construido, cómo está estructurado, las decisiones técnicas y lo que espera a las fases siguientes |
+
+## Desarrollo
+
+```bash
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+python3 corpus/generate.py --check     # el corpus es generado, no dibujado a mano
+```
+
+Los golden files viven junto al corpus (`corpus/docx/*.expected.dmk.md`). Para actualizarlos:
+`DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens`, y **se revisa el diff**.
 
 ## Principios de diseño
 

@@ -44,10 +44,19 @@ Tareas:
 Entregables: workspace verde en CI, `docsai-model` v1, spec congelada, corpus v1, informe del spike.
 
 Criterios de aceptación:
-- [ ] `cargo test --workspace` verde en las 3 plataformas.
-- [ ] IR serializa/deserializa a JSON con round-trip idéntico (proptest básico).
-- [ ] Spike documentado con decisión firmada sobre la estrategia docx.
-- [ ] DocMark v1.0 sin TODOs abiertos.
+- [x] `cargo test --workspace` verde en las 3 plataformas.
+- [x] IR serializa/deserializa a JSON con round-trip idéntico (proptest básico).
+- [x] Spike documentado con decisión firmada sobre la estrategia docx.
+- [x] DocMark v1.0 sin TODOs abiertos.
+
+**Estado**: cerrada. Notas de ejecución:
+- El spike R1 (`docs/spikes/R1-estrategia-docx.md`) descartó `docx-rs`: pierde el modelo de
+  imagen casi entero, las notas al pie y los campos simples, y provoca *panic* en el 23 % de las
+  entradas corruptas. La lectura docx se hace con parser propio sobre `zip` + `quick-xml`.
+- El corpus se **genera** con `corpus/generate.py` en vez de dibujarse a mano: el XML queda
+  revisable en el diff y los paquetes son reproducibles byte a byte (ver `corpus/README.md`).
+- Los golden files son `.expected.dmk.md` junto al corpus, como prescribe `AGENTS.md` §6, en
+  lugar de snapshots de `insta`; `insta` sale del árbol de dependencias.
 
 ---
 
@@ -79,11 +88,20 @@ Tareas:
 10. Golden tests de todo el corpus docx; añadir 5+ documentos "del mundo real" anonimizados.
 
 Criterios de aceptación:
-- [ ] Los golden docx del corpus pasan (incluidos los tres de imágenes: flotantes,
+- [x] Los golden docx del corpus pasan (incluidos los tres de imágenes: flotantes,
       transformadas y duplicadas — con geometría completa en los atributos DocMark).
-- [ ] Cero pánicos con corpus corrupto sintético (ZIP truncado, XML malformado): siempre `Err`.
-- [ ] Un docx real de 50+ páginas convierte en < 1 s con < 10 raw-blocks.
-- [ ] La salida en `--fidelity plain` es CommonMark limpio verificado con comrak.
+- [x] Cero pánicos con corpus corrupto sintético (ZIP truncado, XML malformado): siempre `Err`.
+- [x] Un docx real de 50+ páginas convierte en < 1 s con < 10 raw-blocks.
+- [x] La salida en `--fidelity plain` es CommonMark limpio verificado con comrak.
+
+**Estado**: cerrada salvo la tarea 10 (documentos reales anonimizados), que depende de disponer
+de documentos reales y no bloquea la Fase 2. Notas de ejecución:
+- Los cuadros de texto DrawingML (`wps:txbx`) se conservan como raw-block, no como
+  `::: {.textbox}`: el tipo existe en el IR y en la spec, pero emitirlo se pospone a la Fase 2,
+  donde el writer tendrá que reconstruirlos.
+- Tres defectos que el corpus destapó y que quedan corregidos: el formato de longitudes era
+  lisiado por redondeo (un margen de 1417 twips se escribía `2.499cm`), los párrafos vacíos
+  desaparecían en silencio, y el estilo de carácter de un hipervínculo se emitía dos veces.
 
 ---
 

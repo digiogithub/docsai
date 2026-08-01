@@ -181,7 +181,7 @@ gratuita con todo el ecosistema Pandoc (PDF vía LaTeX, HTML, EPUB…).
 | **`calamine`** | Lectura `.xls`, `.xlsx`, `.xlsb`, `.ods` (valores **y fórmulas**) | Maduro, mantenido, muy usado | Lectura perezosa y rápida; lee fórmulas vía `worksheet_formula()`. **No lee estilos/formatos de número con detalle suficiente** → se complementa con lectura propia de `xl/styles.xml` |
 | **`umya-spreadsheet`** | Lectura+escritura `.xlsx` con estilos | Mantenido | Único crate que lee Y escribe xlsx con estilos; parsea todo el workbook en memoria (coste en ficheros grandes; existe `lazy_read`). Candidato principal para la **escritura** xlsx |
 | **`rust_xlsxwriter`** | Escritura `.xlsx` (alternativa) | Muy mantenido (port de XlsxWriter) | Excelente API de escritura con fórmulas y formatos, pero solo escritura y no permite "editar" — válido porque docsai regenera desde IR. Decidir vs umya en spike de Fase 3 |
-| **`docx-rs` (bokuweb)** | Lectura+escritura `.docx` | El más usado (1M+ descargas) | JSON-friendly, escribe bien; la lectura no expone el 100 % de styles.xml/numbering.xml → complementar con `quick-xml` propio donde falte |
+| **`docx-rs` (bokuweb)** | ~~Lectura~~ + posible escritura `.docx` | El más usado (1M+ descargas) | **Descartado para la lectura** tras el spike R1 (`docs/spikes/R1-estrategia-docx.md`, agosto 2026): resuelve bien estilos y numeración, pero pierde casi todo el modelo de imagen (wrap, `behindDoc`, recorte, volteo, rotación, alt, título, hipervínculo), las notas al pie y el `w:instr` de los campos simples, no conserva elementos desconocidos para raw-blocks, y entra en *panic* en el 23 % de 903 entradas corruptas medidas. La lectura docx usa parser propio sobre `zip` + `quick-xml`. Sigue siendo candidato para el **writer** de la Fase 2, decisión independiente |
 | **`docx-rust`** | Alternativa lectura `.docx` | Menor actividad | Mapeo XML más directo; mantener como referencia |
 | **`spreadsheet-ods`** | Lectura+escritura `.ods` | Mantenido | Cubre estilos y fórmulas ODS; evita escribir un writer ODF-spreadsheet propio |
 | **(ninguno)** | `.odt` | — | No hay crate maduro para ODT con estilos: **parser/writer propio** sobre `zip` + `quick-xml` (ODF es regular; esfuerzo acotado) |
@@ -207,11 +207,12 @@ idempotencia del round-trip.
 | `serde` / `serde_yaml` / `serde_json` | Front matter, `inspect --json`, config |
 | `clap` (derive) | CLI |
 | `rmcp` (SDK oficial de MCP, transporte stdio) | Servidor MCP; macros `#[tool]`; implementa spec 2026-07-28 con compatibilidad hacia atrás |
-| `image` | Detección de dimensiones/re-codificación de imágenes; sin soporte WMF/EMF (limitación aceptada) |
+| ~~`image`~~ | **No se usa en la Fase 1.** docsai nunca recodifica un mapa de bits, solo necesita nombrarlo y medirlo, y eso se resuelve leyendo la cabecera del formato (PNG, JPEG, GIF, BMP, TIFF, WebP, EMF, WMF) en `docsai-model::assets`, sin dependencia pesada. Se reevaluará si alguna fase necesita recodificar de verdad |
+| ~~`serde_yaml`~~ | **No se usa.** El front matter tiene un esquema pequeño y conocido y la spec exige determinismo byte a byte, así que se escribe a mano; además el crate está sin mantenimiento activo |
 | `thiserror` / `anyhow` | Errores |
 | `tracing` + `tracing-subscriber` | Logs (siempre a stderr) |
 | `tokio` | Solo en `docsai-mcp` (rmcp lo requiere); el núcleo de conversión es síncrono |
-| `insta` | Snapshot testing de golden files |
+| ~~`insta`~~ | **No se usa.** Los golden files son `.expected.dmk.md` junto al corpus, como prescribe `AGENTS.md` §6: se revisan como texto normal en el diff y no dependen de un formato de snapshot |
 | `cargo-fuzz` | Fuzzing de parsers (Fase 8) |
 | `cargo-dist` | Empaquetado de releases multiplataforma |
 

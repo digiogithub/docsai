@@ -10,8 +10,12 @@ Office (`.doc`, `.docx`, `.xls`, `.xlsx`) y LibreOffice (`.odt`, `.ods`) a un Ma
 extendido llamado **DocMark**, y de vuelta, con pérdida mínima de formato. Se invoca como
 CLI o como servidor **MCP por stdio**.
 
-**Estado actual**: solo existe documentación de diseño. La implementación comienza en la
-Fase 0 del plan. No hay todavía `Cargo.toml` en la raíz.
+**Estado actual**: **Fases 0 y 1 cerradas**. Existe el workspace con los siete crates, el IR
+(`docsai-model`), el lector `.docx` (`docsai-office`), el serializador DocMark
+(`docsai-docmark`), la orquestación (`docsai-convert`) y la CLI con `convert` y `formats`.
+`docsai-odf` y `docsai-mcp` son esqueletos que sólo fijan las reglas de dependencia.
+
+Lo siguiente es la **Fase 2**: parser DocMark, writer `.docx` y el comando `roundtrip`.
 
 ## 2. Documentos que debes leer antes de implementar
 
@@ -26,6 +30,10 @@ Orden de lectura obligatorio:
 4. `docs/analisis-tecnico.md` — por qué se eligió cada librería. No sustituyas una
    dependencia clave (calamine, docx-rs, rmcp, comrak…) sin dejar constancia escrita del
    motivo en ese documento.
+5. `kb/` — base de conocimiento de lo **ya construido**: resumen de las fases cerradas,
+   estructura real del código, decisiones técnicas con su motivo, y las consideraciones para
+   la fase que vayas a abordar. Empieza por `kb/README.md`. Si tu cambio altera la estructura
+   o toma una decisión técnica no obvia, actualízala en el mismo PR.
 
 ## 3. Estructura del repositorio (objetivo)
 
@@ -63,6 +71,13 @@ cargo test --workspace                 # unit + integración + round-trip
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo run -p docsai-cli -- convert corpus/docx/basic-styles.docx -o /tmp/out.dmk.md
+python3 corpus/generate.py --check     # el corpus es generado; CI comprueba que está al día
+```
+
+Actualizar un golden es un acto deliberado, y su diff se revisa a mano:
+
+```bash
+DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens
 ```
 
 CI (GitHub Actions) ejecuta la matriz `{ubuntu-latest, windows-latest, macos-latest}` ×

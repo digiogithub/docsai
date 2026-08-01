@@ -1,0 +1,13 @@
+[package]
+name = "docsai-docmark"
+description = "DocMark serializer and parser (IR <-> extended Markdown)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+docsai-model = { workspace = true }
+thiserror = { workspace = true }
