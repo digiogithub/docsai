@@ -84,8 +84,8 @@ pub struct Workbook {
     pub meta: DocumentMeta,
     pub styles: StyleCatalog,
     pub defined_names: Vec<DefinedName>,
-    pub sheets: Vec<Sheet>,          // Sheet = grid dispersa de Cell + col/row props + merges + panes
-}
+    pub sheets: Vec<Sheet>,          // Sheet = grid dispersa de Cell + col/row props + merges
+}                                    //         + panes + images: Vec<ImageRef> (ancladas a la hoja)
 
 pub struct Cell {
     pub value: CellValue,            // Number | Text | Bool | DateTime | Error | Empty
@@ -94,6 +94,76 @@ pub struct Cell {
     pub style_id: Option<StyleId>,
 }
 ```
+
+### 3.1 Modelo normalizado de imágenes (`ImageRef` + `ImageGeometry`)
+
+Cada formato de entrada tiene su propio modelo gráfico (DrawingML, VML, SpreadsheetDrawingML,
+`draw:frame` ODF, Escher — ver análisis §1.4). El IR los normaliza a un único modelo, que es el
+que la spec DocMark §3.5/§4.1 serializa atributo a atributo:
+
+```rust
+pub struct ImageRef {
+    pub asset: AssetId,                  // clave en el AssetStore (hash de contenido)
+    pub geometry: ImageGeometry,
+    pub alt: String,                     // texto alternativo (accesibilidad)
+    pub title: Option<String>,
+    pub name: Option<String>,            // nombre interno del objeto (docPr @name)
+    pub link: Option<String>,            // hipervínculo sobre la imagen
+    pub external_src: Option<String>,    // imagen enlazada, no embebida
+    pub effects_raw: Option<RawId>,      // efectos DrawingML sin modelo → raw-block asociado
+}
+
+pub struct ImageGeometry {
+    pub display_size: Size,              // EMU; tamaño mostrado (≠ tamaño nativo)
+    pub native_size_px: Option<(u32, u32)>,
+    pub dpi: Option<u32>,
+    pub anchor: Anchor,
+    pub rotation_deg: f32,
+    pub flip: Flip,                      // None | H | V | HV
+    pub crop: Option<CropRect>,          // % del original por lado
+    pub border: Option<SimpleBorder>,
+    pub z_index: Option<i32>,
+}
+
+pub enum Anchor {
+    Inline,                                              // fluye con el texto
+    Floating { relative_to: RelBase,                     // Page | Margin | Paragraph | Character
+               position: HVPos,                          // offsets EMU o alineación simbólica
+               wrap: WrapMode, wrap_side: WrapSide,
+               behind_text: bool },
+    // Solo en hojas de cálculo:
+    SheetTwoCell { from: CellAnchor, to: CellAnchor,     // CellAnchor = (col,row) + offsets EMU
+                   move_with_cells: bool, size_with_cells: bool },
+    SheetOneCell { from: CellAnchor },                   // + display_size fijo
+    SheetAbsolute { pos: Point },
+}
+```
+
+Reglas del modelo:
+- Los readers **traducen a este modelo, no lo esquivan**: un atributo de imagen que un reader
+  no pueda mapear se degrada con advertencia tipada (`Warning::ImageGeometryDegraded`), y los
+  efectos irrepresentables van a raw-block vía `effects_raw` — nunca se descartan en silencio.
+- Los writers hacen la traducción inversa completa (p. ej. `Anchor::Floating` → `wp:anchor`
+  con `positionH/V`, wrap y z-order; `SheetTwoCell` → `xdr:twoCellAnchor`).
+- La conversión cruzada de anclajes (documento de texto ⇄ hoja) no existe: cada `Anchor` de
+  hoja solo es válido dentro de `Workbook` (invariante verificada por el validador del IR).
+
+### 3.2 `AssetStore`
+
+Trait que abstrae el almacenamiento de medios; `docsai-convert` aporta las implementaciones
+(directorio `assets/` en CLI, memoria/base64 en MCP):
+
+- **Deduplicación por hash de contenido**: `put(bytes) -> AssetId` devuelve el mismo id para
+  el mismo contenido; N apariciones de un bitmap comparten fichero, cada `ImageRef` conserva
+  su geometría propia.
+- **Nombres deterministas** `img-<hash8>.<ext>` (la extensión se deriva del sniffing del
+  contenido, no de la fuente) → los round-trips no duplican medios y los diffs de `assets/`
+  son estables.
+- **Manifiesto**: el store registra content-type, tamaño en bytes y dimensiones nativas
+  detectadas (crate `image`); `inspect --json` lo expone y el writer lo usa para rellenar
+  los campos obligatorios del destino sin releer ficheros.
+- **Seguridad**: nombres de asset saneados (nunca derivados de rutas internas del documento →
+  sin path traversal); las imágenes enlazadas externas no se descargan jamás.
 
 Principios del IR:
 - **Estilo = referencia + delta**, nunca formato aplanado (ver análisis §5.2).

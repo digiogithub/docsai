@@ -92,6 +92,44 @@ conceptual muy parecido a OOXML pero con diferencias importantes:
   la demanda real lo justifique. Esto mantiene el principio "binario único sin runtime externo
   obligatorio": LibreOffice mejora `.doc` pero nunca es requisito.
 
+### 1.4 Imágenes y objetos gráficos: análisis transversal
+
+Las imágenes son un requisito de primera clase del proyecto: **todos** los formatos de entrada
+las llevan, con modelos de geometría distintos, y la conversión debe extraerlas y conservar
+tamaño, posición, anclaje y demás propiedades para el round-trip. Modelo por formato:
+
+| Formato | Dónde viven | Modelo de geometría/anclaje |
+|---|---|---|
+| `.docx` | `word/media/*` + `<w:drawing>` (DrawingML) o `<w:pict>` (VML legado) | `wp:inline` (en línea, solo `wp:extent`) o `wp:anchor` (flotante: posición relativa a página/margen/párrafo/carácter, offsets EMU, wrap `square/tight/through/topAndBottom/none`, z-order, `behindDoc`) |
+| `.xlsx` | `xl/media/*` + `xl/drawings/drawing*.xml` (SpreadsheetDrawingML) | Tres anclajes: `xdr:twoCellAnchor` (de celda a celda + offsets, se estira con la rejilla), `xdr:oneCellAnchor` (celda origen + tamaño fijo), `xdr:absoluteAnchor` (posición absoluta en EMU) |
+| `.odt` | `Pictures/*` + `<draw:frame><draw:image>` | `text:anchor-type` = `as-char/char/paragraph/page/frame`; `svg:width/height/x/y`; wrap vía estilo gráfico (`style:wrap`) |
+| `.ods` | `Pictures/*` + `<draw:frame>` dentro de `<table:shapes>` o anclado a celda | Anclaje a celda (`table:end-cell-address` + offsets) o a hoja |
+| `.doc` | Stream `Data`/Escher (OfficeArt) | Binario Escher; en la ruta LibreOffice-fallback se convierte gratis; en la ruta nativa degradada se extraen los BLIPs (imágenes) sin geometría fina |
+
+Propiedades a conservar en todos los casos (definen el modelo normalizado del IR, ver
+`arquitectura.md` §3.1): dimensiones mostradas vs dimensiones nativas del bitmap (y por tanto el
+factor de escala), DPI, recorte (`srcRect` en OOXML, `fo:clip` en ODF), rotación y volteos,
+anclaje y posición con sus offsets, modo de ajuste de texto (wrap), orden Z, texto alternativo y
+título (accesibilidad, `descr`/`svg:desc`), nombre interno del objeto e hipervínculo sobre la
+imagen.
+
+Puntos duros específicos:
+- **Coordenadas heterogéneas**: EMU en OOXML (914 400/pulgada), cm/in en ODF, twips en `.doc`.
+  El IR normaliza todo a EMU con newtypes; DocMark expone `px`/`pt`/`cm` legibles.
+- **VML legado en docx**: documentos antiguos (o convertidos desde `.doc`) usan `<w:pict>` con
+  VML en lugar de DrawingML. Hay que soportar lectura de ambos; la escritura emite siempre
+  DrawingML.
+- **Anclajes twoCell en xlsx**: el tamaño real depende de anchos de columna/altos de fila; para
+  conservar la geometría hay que guardar el anclaje simbólico (celdas + offsets), no el tamaño
+  resuelto — y a la inversa al escribir.
+- **WMF/EMF**: se extraen tal cual (round-trip perfecto) pero no son visualizables en visores
+  Markdown; conversión a PNG/SVG queda en backlog post-1.0. La imagen se referencia igualmente
+  con su geometría completa.
+- **Duplicados**: el mismo bitmap puede aparecer N veces con geometrías distintas; el
+  `AssetStore` deduplica por hash de contenido y cada aparición conserva su geometría propia.
+- **Imágenes enlazadas (no embebidas)**: OOXML/ODF permiten `r:link`/`xlink:href` externo; se
+  conserva la URL con advertencia (no se descarga contenido remoto — implicación de seguridad).
+
 ---
 
 ## 2. Estado del arte open source (qué aprender y qué reutilizar)
@@ -206,6 +244,7 @@ idempotencia del round-trip.
 | R5 | Divergencia de dialectos de fórmula OOXML/OpenFormula | Alta | Medio | v1 conserva dialecto original + campo `formula-dialect`; traducción automática pospuesta (Fase 9/backlog) |
 | R6 | Crates de terceros abandonados a mitad de proyecto | Baja | Medio | Los cuatro crates críticos son de los más usados del ecosistema; el diseño por IR permite sustituir un reader sin tocar el resto |
 | R7 | Tamaño del binario crece descontrolado | Baja | Bajo | `cargo bloat` en CI, features opcionales, LTO en release |
+| R8 | Diversidad de modelos de imagen (DrawingML vs VML vs Escher vs draw:frame) fragmenta el esfuerzo | Media | Medio | Modelo `ImageGeometry` normalizado en el IR definido en Fase 0 (arquitectura §3.1); lectura VML limitada a los atributos del modelo; Escher solo BLIPs en la ruta nativa `.doc` |
 
 ## 7. Fuentes consultadas
 

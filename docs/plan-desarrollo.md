@@ -19,7 +19,10 @@ Tareas:
 1. Crear workspace Cargo con los 7 crates de `arquitectura.md` §2 (aunque casi vacíos).
 2. Implementar `docsai-model` v1: tipos del IR (§3 de arquitectura), `StyleCatalog` con
    herencia, `ConversionReport`, newtypes de unidades (`Length` con EMU/twips/pt/cm).
-   Todo `serde`-serializable, con tests unitarios de las conversiones de unidades.
+   Incluye el **modelo normalizado de imágenes** `ImageRef`/`ImageGeometry`/`Anchor`
+   (arquitectura §3.1) con su validador de invariantes (anclajes de hoja solo en `Workbook`),
+   y el trait `AssetStore` (arquitectura §3.2). Todo `serde`-serializable, con tests
+   unitarios de las conversiones de unidades (EMU⇄pt⇄cm⇄px a 96 dpi).
 3. **Spike de riesgo R1** (timebox 1 semana): leer con `docx-rs` + `quick-xml` tres documentos
    docx reales con estilos custom y verificar que la cascada de 4 niveles es resoluble con la
    información expuesta. Resultado escrito en `docs/spikes/` con decisión: crate + complemento
@@ -28,8 +31,12 @@ Tareas:
    de tablas complejas).
 5. Corpus inicial en `corpus/`: ~15 documentos mínimos hechos a mano (uno por rasgo):
    `docx/basic-text`, `basic-styles`, `nested-lists`, `table-simple`, `table-merged`,
-   `images-inline`, `images-floating`, `headers-footers`, `footnotes`, `custom-styles`;
-   `xlsx/values-types`, `formulas-basic`, `formulas-shared`, `number-formats`, `merged-cells`.
+   `images-inline`, `images-floating` (wrap + posición relativa a página/margen),
+   `images-transformed` (recorte, rotación, volteo, escala ≠ 100 %), `images-duplicated`
+   (mismo bitmap N veces con geometrías distintas), `headers-footers`, `footnotes`,
+   `custom-styles`; `xlsx/values-types`, `formulas-basic`, `formulas-shared`,
+   `number-formats`, `merged-cells`, `images-anchored` (los tres anclajes: two-cell,
+   one-cell, absolute).
    Guion de cómo se creó cada uno en `corpus/README.md`.
 6. CI GitHub Actions: build+test+clippy+fmt en matriz de 3 SO; caché de cargo; badge en README.
 7. Esqueleto CLI (`docsai formats`, `--version`) y plantilla de `insta` para golden tests.
@@ -56,8 +63,14 @@ Tareas:
 3. Párrafos y runs: todo el formato inline de la tabla §3.2 de la spec; hipervínculos; breaks.
 4. Listas: reconstrucción del árbol desde `numbering.xml` + pares `(numId, ilvl)` → `ListCatalog`.
 5. Tablas: grid, `gridSpan`/`vMerge` → rowspan/colspan del IR, anchos, estilo de tabla.
-6. Imágenes: DrawingML inline y flotante → `ImageRef` + extracción a `AssetStore` con nombre por
-   hash; dimensiones y anclaje; WMF/EMF extraídos tal cual con advertencia.
+6. Imágenes (spec §3.5, arquitectura §3.1): DrawingML `wp:inline` y `wp:anchor` → `ImageRef` +
+   extracción a `AssetStore` con deduplicación por hash. Mapeo completo de geometría: tamaño
+   mostrado vs nativo, posición relativa (page/margin/paragraph/character) con offsets o
+   alineación simbólica, wrap y lado, z-order/behind-text, rotación, volteos, recorte
+   (`a:srcRect`), borde simple, alt/título/nombre, hipervínculo sobre imagen, imágenes
+   enlazadas (`r:link`, sin descarga). Lectura también de **VML legado** (`w:pict`) limitada
+   al modelo normalizado. Efectos DrawingML sin modelo → raw-block asociado (`effects_raw`).
+   WMF/EMF extraídos tal cual con geometría completa y advertencia.
 7. Cabeceras/pies/secciones (`sectPr`), notas al pie/al final, campos simples (PAGE, TOC como
    raw/field), propiedades de documento (core+app+custom).
 8. Serializador DocMark (`docsai-docmark`): IR → Markdown según spec §8 (determinista); gestión
@@ -66,7 +79,8 @@ Tareas:
 10. Golden tests de todo el corpus docx; añadir 5+ documentos "del mundo real" anonimizados.
 
 Criterios de aceptación:
-- [ ] Los 10 golden docx del corpus pasan.
+- [ ] Los golden docx del corpus pasan (incluidos los tres de imágenes: flotantes,
+      transformadas y duplicadas — con geometría completa en los atributos DocMark).
 - [ ] Cero pánicos con corpus corrupto sintético (ZIP truncado, XML malformado): siempre `Err`.
 - [ ] Un docx real de 50+ páginas convierte en < 1 s con < 10 raw-blocks.
 - [ ] La salida en `--fidelity plain` es CommonMark limpio verificado con comrak.
@@ -82,6 +96,9 @@ Tareas:
    `:::` → IR. Validación de front matter con errores de línea/columna útiles.
 2. Writer docx: IR → `document.xml` + `styles.xml` + `numbering.xml` + media + props
    (con `docx-rs` donde llegue; XML directo donde no). Re-inyección de raw-blocks `format=ooxml`.
+   Imágenes: re-empaquetado de `word/media/*` desde el `AssetStore` (sin recomprimir bitmaps) y
+   emisión de DrawingML completo desde `ImageGeometry` — inline y flotante con posición, wrap,
+   z-order, rotación, recorte y alt/título; siempre DrawingML aunque la fuente fuese VML.
 3. Comando `roundtrip`: docx→md→docx→md; diff estructural de IR normalizado; métrica de
    fidelidad por categoría (texto, estilos, tablas, imágenes, listas) y salida `--json`.
 4. Test de **idempotencia del serializador** en CI: `serialize(parse(md)) == md` byte a byte
@@ -93,6 +110,9 @@ Tareas:
 Criterios de aceptación:
 - [ ] Round-trip idempotente (2ª pasada == 1ª pasada) en todo el corpus.
 - [ ] Métrica de fidelidad ≥ 95 % en texto/estilos/tablas/listas del corpus.
+- [ ] Imágenes en round-trip: bytes del bitmap idénticos (sin recompresión), sin duplicados en
+      media, y geometría (tamaño, posición, anclaje, wrap, rotación, recorte) preservada — las
+      imágenes aparecen en el mismo sitio y tamaño al abrir el docx regenerado en Word/LibreOffice.
 - [ ] docx generados abren limpios en Word y LibreOffice (checklist).
 - [ ] Editar un `.dmk.md` a mano (añadir párrafo con estilo existente) y regenerar docx funciona.
 
@@ -116,12 +136,20 @@ Tareas:
 5. Writer xlsx desde IR (crate elegido en el spike): valores, fórmulas (recálculo delegado a
    Excel/LibreOffice al abrir: escribir fórmula sin valor cacheado o con el valor conservado),
    numFmt, estilos, merges, anchos, defined names.
-6. Reader xls (calamine) → mismo pipeline (solo lectura; documentar en `formats`).
-7. Corpus: añadir libros con fechas, porcentajes, monedas, fórmulas entre hojas, nombres
-   definidos, 100k celdas (rendimiento).
+6. **Imágenes de hoja** (spec §4.1): lectura propia de `xl/drawings/drawing*.xml` con
+   `quick-xml` (calamine/umya no las cubren con geometría completa) → `ImageRef` con anclajes
+   `SheetTwoCell`/`SheetOneCell`/`SheetAbsolute`, offsets dentro de celda,
+   `move-with-cells`/`size-with-cells`, y el resto del modelo común (rotación, recorte, alt,
+   hipervínculo). Escritura de `drawing*.xml` + relaciones desde el IR. Charts nativos →
+   raw-block con advertencia.
+7. Reader xls (calamine) → mismo pipeline (solo lectura; documentar en `formats`).
+8. Corpus: añadir libros con fechas, porcentajes, monedas, fórmulas entre hojas, nombres
+   definidos, imágenes con los tres tipos de anclaje, 100k celdas (rendimiento).
 
 Criterios de aceptación:
 - [ ] Round-trip xlsx: valores, fórmulas y numFmt intactos en el corpus (fidelidad ≥ 95 %).
+- [ ] Round-trip de imágenes de hoja: los tres anclajes conservados simbólicamente (two-cell
+      sigue estirándose con la rejilla tras la vuelta), bitmaps sin recompresión.
 - [ ] Un xlsx con fechas sobrevive al round-trip sin corromper serials (test dedicado).
 - [ ] xlsx de 100k celdas: < 3 s, < 500 MB RAM.
 - [ ] Excel y LibreOffice recalculan sin errores los ficheros generados (checklist).
@@ -135,15 +163,21 @@ Criterios de aceptación:
 Tareas:
 1. Reader/writer ODT propio (`docsai-odf`, `zip`+`quick-xml`): content/styles/meta;
    **des-automatización** de estilos automáticos al leer (→ deltas) y re-generación al escribir.
-2. Reader ODS con `calamine` (valores/fórmulas) + estilos propios; writer ODS con
-   `spreadsheet-ods` (evaluar en mini-spike; si no da la talla, writer propio).
-3. Fórmulas OpenFormula: conservar dialecto (`formula-dialect=openformula`); NO traducir aún.
-4. Corpus ODF espejo del OOXML (los mismos rasgos), generado con LibreOffice.
-5. Nota de alcance: la conversión cruzada docx⇄odt "funciona" vía IR, pero los raw-blocks de un
+2. Imágenes ODT: `<draw:frame>/<draw:image>` + `Pictures/*` → mismo modelo `ImageGeometry`
+   (anclajes `as-char/char/paragraph/page` → `Inline`/`Floating`; `svg:x/y/width/height`,
+   `style:wrap`, rotación y `fo:clip`); escritura inversa con estilos gráficos ODF.
+3. Reader ODS con `calamine` (valores/fórmulas) + estilos propios; writer ODS con
+   `spreadsheet-ods` (evaluar en mini-spike; si no da la talla, writer propio). Imágenes de
+   hoja ODS (`draw:frame` anclado a celda/hoja) mapeadas a los mismos anclajes de hoja del IR.
+4. Fórmulas OpenFormula: conservar dialecto (`formula-dialect=openformula`); NO traducir aún.
+5. Corpus ODF espejo del OOXML (los mismos rasgos, incluidos los documentos de imágenes),
+   generado con LibreOffice.
+6. Nota de alcance: la conversión cruzada docx⇄odt "funciona" vía IR, pero los raw-blocks de un
    dialecto se descartan con advertencia en el otro. Documentar en README.
 
 Criterios de aceptación:
-- [ ] Round-trip odt y ods sobre corpus ODF con fidelidad ≥ 90 %.
+- [ ] Round-trip odt y ods sobre corpus ODF con fidelidad ≥ 90 % (incluida la geometría de
+      imágenes: tamaño, posición, anclaje y wrap).
 - [ ] docx→DocMark→odt produce documento correcto para el corpus básico (rasgos comunes).
 
 ---
@@ -157,8 +191,9 @@ Tareas:
    `--use-loffice auto|never|require`; conversión `soffice --headless --convert-to docx` en
    directorio temporal sandbox y reentrada por el pipeline docx de Fase 1.
 2. Extractor nativo degradado: `cfb` + FIB + piece table → texto con párrafos y propiedades
-   básicas; imágenes del contenedor si es viable en el timebox. Marcar salida como degradada
-   en el `ConversionReport`.
+   básicas; extracción de imágenes embebidas (BLIPs del stream Escher/OfficeArt) al
+   `AssetStore` — sin geometría fina: se emiten con `anchor=inline` y tamaño nativo, con
+   advertencia `ImageGeometryDegraded`. Marcar salida como degradada en el `ConversionReport`.
 3. Mensajería clara: si no hay LibreOffice, el usuario sabe exactamente qué está perdiendo y cómo
    mejorar el resultado.
 4. Tests: corpus `.doc` generado guardando el corpus docx como .doc con Word/LibreOffice.

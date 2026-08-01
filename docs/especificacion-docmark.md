@@ -132,15 +132,63 @@ se envuelve en un contenedor que aporta los metadatos:
 
 ### 3.5 Imágenes y objetos
 
+Toda imagen se extrae a `assets/` y se referencia con la sintaxis estándar de imagen Markdown
+más un conjunto normalizado de atributos que capturan la geometría completa del original
+(tamaño, posición, anclaje, recorte, rotación…). El mismo modelo de atributos aplica en
+documentos de texto y en hojas de cálculo (§4.1).
+
 ```markdown
-![Texto alternativo](assets/img-3f2a91.png){width=450px height=300px anchor=inline title="Figura 1"}
+Imagen en línea (fluye con el texto):
+
+![Diagrama de ventas](assets/img-3f2a91.png){width=450px height=300px title="Figura 1"}
+
+Imagen flotante con posición y ajuste de texto:
+
+![Logo](assets/img-9c04b7.png){#img-logo width=3.5cm height=3.5cm
+  anchor=floating relative-to=margin x=1.2cm y=0.5cm
+  wrap=square wrap-side=right z-index=2
+  rotation=0 crop="0,0,10%,0" native-size=800x800 dpi=300
+  name="Logo corporativo" link="https://example.com"}
 ```
 
-- Nombre de fichero: `img-<hash8>.<ext>` (hash de contenido → estable entre conversiones).
-- `anchor`: `inline` | `wrap-left` | `wrap-right` | `behind` | `front` (modelo simplificado de
-  anclaje; los parámetros exactos de posición flotante van en atributos `x=`, `y=`, `relative-to=`).
-- Objetos no imagen (OLE, gráficos incrustados): se extraen a `assets/` y se referencian con
-  `![...](assets/obj-xxx.bin){.embedded-object content-type="..."}`, más advertencia en el informe.
+**Atributos de imagen normalizados** (los no aplicables se omiten; unidades explícitas):
+
+| Atributo | Significado | Origen típico |
+|---|---|---|
+| `width`, `height` | Tamaño **mostrado** (obligatorios siempre) | `wp:extent`, `svg:width/height` |
+| `native-size` | Dimensiones en píxeles del bitmap original (`AxB`) | cabecera del fichero |
+| `dpi` | Resolución declarada, si difiere de 96 | metadatos del bitmap |
+| `anchor` | `inline` (defecto) \| `floating` \| `behind` \| `front` | `wp:inline`/`wp:anchor`, `text:anchor-type` |
+| `relative-to` | Referencia de posición: `page` \| `margin` \| `paragraph` \| `character` | `wp:positionH/V @relativeFrom` |
+| `x`, `y` | Offsets desde la referencia (solo flotantes) | `wp:posOffset`, `svg:x/y` |
+| `align-h`, `align-v` | Alineación simbólica (`left/center/right`, `top/middle/bottom`) cuando el original usa alineación en vez de offset | `wp:align` |
+| `wrap` | `square` \| `tight` \| `through` \| `top-bottom` \| `none` | `wp:wrapSquare…`, `style:wrap` |
+| `wrap-side` | `both` \| `left` \| `right` \| `largest` | `@wrapText` |
+| `z-index` | Orden de apilamiento entre objetos flotantes | `@relativeHeight` |
+| `rotation` | Grados en sentido horario | `a:xfrm @rot` |
+| `flip` | `h` \| `v` \| `hv` | `a:xfrm @flipH/V` |
+| `crop` | Recorte `"izq,arr,der,abj"` en % del original | `a:srcRect`, `fo:clip` |
+| `border` | Borde simple `"1pt solid #000000"` (bordes complejos → raw) | `pic:spPr` |
+| `name` | Nombre interno del objeto en el documento | `wp:docPr @name` |
+| `title` | Título/leyenda | `wp:docPr @title` |
+| `link` | Hipervínculo sobre la imagen | `a:hlinkClick` |
+| `external-src` | URL original si la imagen estaba **enlazada**, no embebida | `r:link`, `xlink:href` |
+
+Reglas:
+- El texto alternativo (accesibilidad, `wp:docPr @descr` / `svg:desc`) va en el campo alt
+  estándar de Markdown `![…]`, no en un atributo — así lo muestran todos los visores.
+- Nombre de fichero: `img-<hash8>.<ext>` (hash del contenido → estable entre conversiones y
+  con deduplicación: N apariciones del mismo bitmap comparten fichero, cada una con sus
+  atributos de geometría propios).
+- `width`/`height` son **siempre** obligatorios en la serialización aunque coincidan con el
+  tamaño nativo: el round-trip no debe depender de releer el bitmap.
+- WMF/EMF se extraen con su extensión original y geometría completa; el serializador añade
+  `render=unsupported` como pista para visores (advertencia en el informe).
+- Efectos de imagen sin representación (sombras, biseles, estilos 3D DrawingML) se conservan
+  como raw-block asociado mediante `effects-raw=<id>` que referencia un `::: {.raw}` contiguo.
+- Objetos no imagen (OLE, SmartArt, gráficos incrustados): se extraen a `assets/` y se
+  referencian con `![...](assets/obj-xxx.bin){.embedded-object content-type="..."}`, más
+  advertencia en el informe.
 
 ### 3.6 Secciones, cabeceras y pies, cuadros de texto
 
@@ -205,6 +253,36 @@ Reglas:
   referencian con `style=`.
 - Hojas enormes: por defecto se vuelca el rango usado completo; `--max-cells` permite truncar
   **solo en modo unidireccional** (nunca al preparar un round-trip; truncar invalida la vuelta).
+
+### 4.1 Imágenes en hojas de cálculo
+
+Las hojas también llevan imágenes (logos, capturas, diagramas) ancladas a la rejilla. Se
+declaran en un bloque `sheet-images` al final de cada hoja, usando la misma sintaxis y los
+mismos atributos de imagen de §3.5 más los atributos de anclaje propios de hoja de cálculo:
+
+```markdown
+::: {.sheet-images}
+![Logo de la empresa](assets/img-9c04b7.png){anchor=two-cell
+  from="B2" from-offset="12px,3px" to="D8" to-offset="0,0" move-with-cells=true size-with-cells=false}
+
+![Firma](assets/img-11ab42.png){anchor=one-cell from="F20" from-offset="0,0" width=180px height=60px}
+
+![Marca de agua](assets/img-77cd01.png){anchor=absolute x=5cm y=8cm width=10cm height=10cm}
+:::
+```
+
+Reglas:
+- `anchor` en hojas: `two-cell` (de celda a celda; la imagen se mueve/estira con la rejilla,
+  según `move-with-cells`/`size-with-cells`) | `one-cell` (celda origen + tamaño fijo) |
+  `absolute` (posición absoluta). Corresponden a `xdr:twoCellAnchor`/`oneCellAnchor`/
+  `absoluteAnchor` de OOXML y a los anclajes celda/hoja de ODF.
+- En `two-cell` **no se serializan** `width`/`height` (el tamaño lo define la rejilla); en
+  `one-cell` y `absolute` son obligatorios, como en §3.5.
+- `from`/`to` usan referencias A1; los offsets dentro de la celda van en `from-offset`/`to-offset`.
+- El resto de propiedades (rotación, recorte, alt, hipervínculo, `native-size`…) funcionan igual
+  que en §3.5.
+- Gráficos (charts) nativos de la hoja no son imágenes: en v1 se conservan como raw-block con
+  advertencia (backlog: exportarlos también como imagen de cortesía en modo unidireccional).
 
 ## 5. Mapeo de estilos configurable (modo "publicación")
 

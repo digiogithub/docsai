@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | Word OOXML | `.docx` | ✅ Fase 1 | ✅ Fase 2 | Estilos, imágenes, tablas, listas, cabeceras/pies, propiedades |
 | Word binario | `.doc` | ✅ Fase 5 | ➖ | Solo lectura (vía parser nativo o fallback LibreOffice headless) |
-| Excel OOXML | `.xlsx` | ✅ Fase 3 | ✅ Fase 3 | Valores **y fórmulas**, formatos de número, celdas combinadas |
+| Excel OOXML | `.xlsx` | ✅ Fase 3 | ✅ Fase 3 | Valores **y fórmulas**, formatos de número, celdas combinadas, imágenes ancladas |
 | Excel binario | `.xls` | ✅ Fase 3 | ➖ | Solo lectura (calamine) |
 | OpenDocument Text | `.odt` | ✅ Fase 4 | ✅ Fase 4 | Equivalente libre de `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ Fase 4 | ✅ Fase 4 | Equivalente libre de `.xlsx` |
@@ -34,7 +34,7 @@ DocMark es un perfil de Markdown extendido definido en este proyecto (ver [`docs
 - **Atributos inline y de bloque** `{#id .clase clave="valor"}` (sintaxis compatible con Pandoc) para anclar estilos, dimensiones de imagen, propiedades de celda, etc.
 - **Contenedores fenced** `::: {...}` para secciones, cuadros de texto, cabeceras y pies.
 - **Tablas extendidas** con metadatos por celda (fórmulas, tipos, formatos de número, combinaciones) para hojas de cálculo.
-- **Activos externos**: las imágenes se extraen a un directorio `assets/` junto al `.md`, referenciadas con atributos que preservan tamaño, anclaje y texto alternativo.
+- **Activos externos**: las imágenes se extraen a un directorio `assets/` (deduplicadas por hash de contenido) y se referencian con un modelo completo de atributos de geometría: tamaño mostrado y nativo, posición y anclaje (en línea, flotante con wrap y z-order, o anclada a celdas en hojas de cálculo), rotación, recorte, volteo, texto alternativo e hipervínculo.
 - **Escotilla de fidelidad** (`raw-block`) para fragmentos sin representación Markdown posible, que se conservan de forma opaca y se restauran en la conversión inversa.
 
 Ejemplo mínimo:
