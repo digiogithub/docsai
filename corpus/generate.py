@@ -354,8 +354,8 @@ def graphic(rid: str, w: int, h: int, *, xfrm: str = "", crop: str = "", ln: str
 
 
 def inline_image(rid: str, w: int, h: int, *, alt: str = "", title: str = "",
-                 name: str = "Picture 1", doc_id: int = 1, extra_pic: str = "",
-                 hlink: str = "") -> str:
+                 name: str = "Picture 1", doc_id: int = 1, xfrm: str = "",
+                 crop: str = "", ln: str = "", hlink: str = "") -> str:
     title_attr = f' title="{title}"' if title else ""
     doc_pr = f'<wp:docPr id="{doc_id}" name="{name}" descr="{alt}"{title_attr}>{hlink}</wp:docPr>'
     return (
@@ -364,7 +364,7 @@ def inline_image(rid: str, w: int, h: int, *, alt: str = "", title: str = "",
         f'<wp:extent cx="{w}" cy="{h}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
         + doc_pr
         + '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
-        + graphic(rid, w, h, **({"xfrm": extra_pic} if extra_pic else {}))
+        + graphic(rid, w, h, xfrm=xfrm, crop=crop, ln=ln)
         + "</wp:inline></w:drawing></w:r>"
     )
 
@@ -684,34 +684,17 @@ def docx_images_transformed() -> None:
                  f'<a:ext cx="{cm(2)}" cy="{cm(1.5)}"/></a:xfrm>')
     crop = '<a:srcRect l="10000" t="5000" r="20000" b="0"/>'
     border = ('<a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill>'
-              "</a:ln>")
+              '<a:prstDash val="solid"/></a:ln>')
     body = (
         p(r("Imagen rotada 45 grados:"))
         + p(anchor_image("rIdImg1", cm(4), cm(3), xfrm=xfrm_rot,
                          alt="Rotada", name="Rotada"))
         + p(r("Imagen recortada con borde:"))
         + p(inline_image("rIdImg1", cm(3), cm(2.25), alt="Recortada", doc_id=2,
-                         name="Recortada").replace(
-            "<a:stretch><a:fillRect/></a:stretch>",
-            "<a:stretch><a:fillRect/></a:stretch>",
-        ))
+                         name="Recortada", crop=crop, ln=border))
         + p(r("Imagen volteada y escalada al 50 %:"))
         + p(anchor_image("rIdImg2", cm(2), cm(1.5), xfrm=xfrm_flip,
                          alt="Volteada", name="Volteada", doc_id=13))
-    )
-    # Inject the crop and the border into the second (inline) drawing only.
-    marker = '<a:blip r:embed="rIdImg1"/><a:stretch>'
-    first = body.find(marker)
-    second = body.find(marker, first + 1)
-    body = (
-        body[:second]
-        + f'<a:blip r:embed="rIdImg1"/>{crop}<a:stretch>'
-        + body[second + len(marker):]
-    )
-    body = body.replace(
-        f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>',
-        f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>{border}</pic:spPr>',
-        1,
     )
     build_docx(
         "images-transformed.docx",
