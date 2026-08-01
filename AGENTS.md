@@ -30,6 +30,10 @@ Orden de lectura obligatorio:
 4. `docs/analisis-tecnico.md` — por qué se eligió cada librería. No sustituyas una
    dependencia clave (calamine, docx-rs, rmcp, comrak…) sin dejar constancia escrita del
    motivo en ese documento.
+5. `kb/` — base de conocimiento de lo **ya construido**: resumen de las fases cerradas,
+   estructura real del código, decisiones técnicas con su motivo, y las consideraciones para
+   la fase que vayas a abordar. Empieza por `kb/README.md`. Si tu cambio altera la estructura
+   o toma una decisión técnica no obvia, actualízala en el mismo PR.
 
 ## 3. Estructura del repositorio (objetivo)
 

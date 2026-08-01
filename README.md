@@ -120,6 +120,7 @@ Tools MCP previstas: `convert_to_markdown`, `convert_from_markdown`, `inspect_do
 | [`AGENTS.md`](AGENTS.md) | Guía operativa para desarrolladores y agentes de IA que trabajen en este repositorio |
 | [`corpus/README.md`](corpus/README.md) | El corpus de pruebas: qué aísla cada documento y cómo se regenera |
 | [`docs/spikes/`](docs/spikes/) | Informes de los spikes de riesgo, con la decisión que cerró cada uno |
+| [`kb/`](kb/) | Base de conocimiento: qué hay construido, cómo está estructurado, las decisiones técnicas y lo que espera a las fases siguientes |
 
 ## Desarrollo
 
