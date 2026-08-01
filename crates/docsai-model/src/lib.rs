@@ -4,7 +4,7 @@
 //! ever talks to another converter (arquitectura §1). The crate is
 //! deliberately free of I/O and of heavy dependencies: it knows nothing about
 //! ZIP, XML or the filesystem, and media live behind the
-//! [`AssetStore`](assets::AssetStore) trait.
+//! [`AssetStore`] trait.
 //!
 //! Design rules the types encode:
 //!

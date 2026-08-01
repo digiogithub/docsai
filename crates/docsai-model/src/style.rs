@@ -368,7 +368,7 @@ impl StyleCatalog {
     /// Walks the `based_on` chain from the document defaults up to `id` and
     /// merges every level, producing fully resolved formatting.
     ///
-    /// Cycles are broken by [`MAX_INHERITANCE_DEPTH`] and by a visited set, so
+    /// Cycles are broken by a depth limit and by a visited set, so
     /// a malformed `styles.xml` cannot hang or overflow the stack.
     ///
     /// ```

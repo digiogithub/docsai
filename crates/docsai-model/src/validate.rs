@@ -2,8 +2,8 @@
 //!
 //! The invariants a reader can violate but the writers rely on. Chief among
 //! them (arquitectura §3.1): sheet anchors are only legal inside a
-//! [`Workbook`](crate::sheet::Workbook), and document anchors only inside a
-//! [`TextDocument`](crate::text::TextDocument). Cross-anchoring does not
+//! [`crate::sheet::Workbook`], and document anchors only inside a
+//! [`crate::text::TextDocument`]. Cross-anchoring does not
 //! exist, and the validator is what makes that a checked rule instead of a
 //! comment.
 

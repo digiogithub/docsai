@@ -259,7 +259,7 @@ pub struct Heading {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct List {
-    /// The definition in [`ListCatalog`](crate::list::ListCatalog), when the
+    /// The definition in [`crate::list::ListCatalog`], when the
     /// list is not the document's default one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub def: Option<ListId>,
