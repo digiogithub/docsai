@@ -21,13 +21,15 @@ Practical difference between the two folders:
 | [04 — Considerations for the next phases](04-next-phases.md) | What Phase 2 and later will already find solved, and what awaits them |
 | [05 — Phase 3 spreadsheets](05-phase-3-spreadsheets.md) | XLSX/XLS ⇄ DocMark: what landed, decisions, gaps |
 | [06 — Phase 2 round-trip closure](06-phase-2-roundtrip-closure.md) | Residual DOCX writer fidelity + corpus idempotence |
+| [07 — Phase 4 ODF](07-phase-4-odf.md) | ODT/ODS ⇄ DocMark: package, de-automatization, OpenFormula |
 
 ## Status in one line
 
-**Phases 0–3 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
-identity (Phases 1–2, including floating DrawingML and footnote bodies) and
-xlsx ⇄ DocMark plus xls read (Phase 3). `docsai convert` / `roundtrip` cover both
-text and spreadsheet packages. ODF and MCP remain later phases.
+**Phases 0–4 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
+identity (Phases 1–2, including floating DrawingML and footnote bodies), xlsx ⇄
+DocMark plus xls read (Phase 3), and odt/ods ⇄ DocMark (Phase 4). `docsai convert`
+/ `roundtrip` cover text and spreadsheet packages across both OOXML and ODF.
+MCP remains a later phase.
 
 ## Quick checks
 

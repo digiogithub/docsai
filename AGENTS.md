@@ -10,16 +10,19 @@ Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`) and LibreOffice documents
 (`.odt`, `.ods`) to an extended Markdown called **DocMark**, and back, with
 minimal format loss. It is invoked as a CLI or as an **MCP server over stdio**.
 
-**Current status**: **Phases 0–3 are closed** for the core path. The workspace
+**Current status**: **Phases 0–4 are closed** for the core path. The workspace
 has the seven crates, the IR (`docsai-model`), the `.docx` and `.xlsx` readers
 **and writers** plus `.xls` read (`docsai-office`), DocMark serialize **and parse**
-for text and workbooks (`docsai-docmark`), orchestration (`docsai-convert`), and
-the CLI with `convert`, `formats` and `roundtrip`. The DOCX writer covers floating
-DrawingML, image transforms, and full footnote bodies; the full docx corpus
-round-trips with DocMark identity. `docsai-odf` and `docsai-mcp` remain skeletons
-that only fix the dependency rules.
+for text and workbooks (`docsai-docmark`), ODT/ODS readers **and writers**
+(`docsai-odf`), orchestration (`docsai-convert`), and the CLI with `convert`,
+`formats` and `roundtrip`. The DOCX writer covers floating DrawingML, image
+transforms, and full footnote bodies; the full docx corpus round-trips with
+DocMark identity. ODF packages use the same IR with automatic-style
+de-automatization and OpenFormula preserved. `docsai-mcp` remains a skeleton
+that only fixes the dependency rules.
 
-Next up is **Phase 4**: ODF (`.odt` / `.ods` ⇄ DocMark).
+Next up is **Phase 5**: legacy `.doc` reading (parallelizable historically with
+Phase 4; ODF is done).
 
 ## 2. Documents you must read before implementing
 

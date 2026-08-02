@@ -27,8 +27,8 @@ cargo run -p docsai-cli -- formats
 | Word binary | `.doc` | 🕓 Phase 5 | ➖ | Read only (native parser or LibreOffice headless fallback) |
 | Excel OOXML | `.xlsx` | ✅ | ✅ | Values **and formulas**, number formats, merged cells, anchored images |
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
-| OpenDocument Text | `.odt` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.docx` |
-| OpenDocument Spreadsheet | `.ods` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.xlsx` |
+| OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
+| OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
 
 `docsai formats` prints this same matrix for what the binary can actually do.

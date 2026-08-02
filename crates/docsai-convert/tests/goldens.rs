@@ -1,4 +1,4 @@
-//! Golden tests over the docx and xlsx corpora (`AGENTS.md` §6).
+//! Golden tests over the Office and ODF corpora (`AGENTS.md` §6).
 //!
 //! Each corpus document has its expected DocMark beside it as
 //! `<name>.expected.dmk.md`. Updating a golden is a deliberate act:
@@ -40,6 +40,16 @@ fn convert(path: &Path, fidelity: Fidelity) -> (String, ConversionReport, Memory
             let (document, report) = docsai_office::read_xlsx(file, &mut assets)
                 .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             (document, report, Format::Xlsx)
+        }
+        "odt" => {
+            let (document, report) = docsai_odf::read_odt(file, &mut assets)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            (document, report, Format::Odt)
+        }
+        "ods" => {
+            let (document, report) = docsai_odf::read_ods(file, &mut assets)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            (document, report, Format::Ods)
         }
         _ => {
             let (document, report) = docsai_office::read_docx(file, &mut assets)
@@ -112,6 +122,20 @@ fn the_xlsx_corpus_matches_its_goldens() {
     assert_goldens(&docs);
 }
 
+#[test]
+fn the_odt_corpus_matches_its_goldens() {
+    let docs = documents("odt", "odt");
+    assert!(docs.len() >= 8, "only {} odt documents found", docs.len());
+    assert_goldens(&docs);
+}
+
+#[test]
+fn the_ods_corpus_matches_its_goldens() {
+    let docs = documents("ods", "ods");
+    assert!(docs.len() >= 4, "only {} ods documents found", docs.len());
+    assert_goldens(&docs);
+}
+
 fn first_difference(expected: &str, actual: &str) -> String {
     for (index, (want, got)) in expected.lines().zip(actual.lines()).enumerate() {
         if want != got {
@@ -130,6 +154,8 @@ fn serialisation_is_deterministic() {
     for document in documents("docx", "docx")
         .into_iter()
         .chain(documents("xlsx", "xlsx"))
+        .chain(documents("odt", "odt"))
+        .chain(documents("ods", "ods"))
     {
         let (first, _, _) = convert(&document, Fidelity::Full);
         let (second, _, _) = convert(&document, Fidelity::Full);
@@ -147,6 +173,8 @@ fn every_document_uses_unix_line_endings_and_no_bom() {
     for document in documents("docx", "docx")
         .into_iter()
         .chain(documents("xlsx", "xlsx"))
+        .chain(documents("odt", "odt"))
+        .chain(documents("ods", "ods"))
     {
         let (markdown, _, _) = convert(&document, Fidelity::Full);
         assert!(

@@ -27,6 +27,12 @@ pub enum ConvertError {
     Write(#[from] docsai_office::WriteError),
 
     #[error("{0}")]
+    OdfRead(#[from] docsai_odf::ReadError),
+
+    #[error("{0}")]
+    OdfWrite(#[from] docsai_odf::WriteError),
+
+    #[error("{0}")]
     Parse(#[from] docsai_docmark::ParseError),
 
     #[error("i/o error on `{path}`: {source}")]
@@ -84,15 +90,15 @@ pub const SUPPORT: &[FormatSupport] = &[
     },
     FormatSupport {
         format: Format::Odt,
-        read: false,
-        write: false,
-        note: "arrives in Phase 4",
+        read: true,
+        write: true,
+        note: "Phase 4",
     },
     FormatSupport {
         format: Format::Ods,
-        read: false,
-        write: false,
-        note: "arrives in Phase 4",
+        read: true,
+        write: true,
+        note: "Phase 4",
     },
     FormatSupport {
         format: Format::DocMark,
@@ -119,23 +125,31 @@ mod tests {
     #[test]
     fn the_matrix_matches_what_the_crates_actually_do() {
         // The matrix is what `docsai formats` prints, so it must not drift
-        // ahead of the readers.
+        // ahead of the readers/writers.
         for support in SUPPORT.iter().filter(|s| s.format != Format::DocMark) {
+            let readable = docsai_office::READABLE.contains(&support.format)
+                || docsai_odf::READABLE.contains(&support.format);
+            let writable = docsai_office::WRITABLE.contains(&support.format)
+                || docsai_odf::WRITABLE.contains(&support.format);
             assert_eq!(
-                support.read,
-                docsai_office::READABLE.contains(&support.format),
-                "read support for {} is out of step with the office crate",
+                support.read, readable,
+                "read support for {} is out of step with the format crates",
+                support.format
+            );
+            assert_eq!(
+                support.write, writable,
+                "write support for {} is out of step with the format crates",
                 support.format
             );
         }
         assert!(can_read(Format::Docx));
         assert!(can_write(Format::Docx));
+        assert!(can_read(Format::Odt));
+        assert!(can_write(Format::Odt));
+        assert!(can_read(Format::Ods));
+        assert!(can_write(Format::Ods));
         assert!(can_read(Format::DocMark));
         assert!(can_write(Format::DocMark));
-        assert_eq!(
-            can_write(Format::Docx),
-            docsai_office::WRITABLE.contains(&Format::Docx)
-        );
     }
 
     #[test]

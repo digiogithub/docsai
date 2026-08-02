@@ -35,6 +35,24 @@ already known.
 
 ---
 
+## Phase 4 — ODF (ODT / ODS)
+
+> **Status: closed for the core path.** Details in
+> [`07-phase-4-odf.md`](07-phase-4-odf.md). Custom `docsai-odf` with de-automatization,
+> OpenFormula preserved, corpus + goldens + convert wiring.
+
+### Delivered (summary)
+
+- ODT/ODS read and write, package rules (`mimetype` first/stored), draw frames.
+- Convert `SUPPORT` and round-trip paths for both formats.
+- Detection via package mimetype (`Certain`).
+
+### Still open (non-blocking)
+
+- LibreOffice open checklist; richer named-style / column-width fidelity.
+
+---
+
 ## Phase 3 — Spreadsheets (XLSX/XLS)
 
 > **Status: implemented** for the core path. Details in
@@ -76,20 +94,6 @@ already known.
   grid. The attribute writer already accounts for this.
 - **Formulas keep their dialect**; they are not translated (risk R5). `FormulaDialect` is already
   in the IR.
-
----
-
-## Phase 4 — ODF (ODT and ODS)
-
-- `docsai-odf` is a skeleton with the `FORMATS` constant; the dependency rule is already enforced
-  by the compiler.
-- The known hard point is **de-automatizing styles**: ODF `office:automatic-styles` represent
-  direct formatting and must be mapped to IR deltas. The “reference + delta” model is ready to
-  receive them: `FontProps::minus()` is exactly the inverse operation.
-- `detect()` already recognizes ODF by `content.xml` + `mimetype`; it only disambiguates `.odt`
-  from `.ods` by extension, which will need refining by reading the `mimetype`.
-- The image model already has the concepts ODF needs (`as-char`/`char`/`paragraph`/
-  `page` → `Inline`/`Floating`, `fo:clip` → `CropRect`).
 
 ---
 

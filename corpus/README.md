@@ -33,8 +33,8 @@ performance and adversarial corpora of Phase 8 will be added separately; the
 
 ## Golden files
 
-Each `docx/<name>.docx` has its expected DocMark beside it,
-`docx/<name>.expected.dmk.md`. They are compared by the tests in
+Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`) has its expected DocMark
+beside it as `<name>.expected.dmk.md`. They are compared by the tests in
 `crates/docsai-convert/tests/goldens.rs`. To update them:
 
 ```bash
@@ -85,3 +85,32 @@ the `xlsx` reader exists.
 4. If the trait is not implemented yet, the golden will document the current
    degradation (a raw-block, for example). That is correct: it makes the gap
    visible.
+
+## Text documents (`odt/`)
+
+OpenDocument Text packages for **Phase 4**. Same traits as the docx set where
+applicable; generated as ODF packages (content.xml / styles.xml / meta.xml).
+
+| File | Trait it isolates |
+|---|---|
+| `basic-text.odt` | Paragraphs and plain text |
+| `basic-styles.odt` | Character and paragraph direct formatting via automatic styles |
+| `nested-lists.odt` | Nested numbered and bullet lists |
+| `table-simple.odt` | Simple table |
+| `table-merged.odt` | Column/row spans |
+| `images-inline.odt` | `draw:frame` as-char images |
+| `images-floating.odt` | Anchored frames with wrap |
+| `images-transformed.odt` | Rotation / flip / clip |
+| `headers-footers.odt` | Master-page header and footer |
+| `footnotes.odt` | Footnote bodies |
+
+## Spreadsheets (`ods/`)
+
+OpenDocument Spreadsheet packages for **Phase 4**.
+
+| File | Trait it isolates |
+|---|---|
+| `values-types.ods` | String, float, boolean, date cell values |
+| `formulas-basic.ods` | OpenFormula with `of:` prefix |
+| `merged-cells.ods` | Column/row spans and covered cells |
+| `images-anchored.ods` | Frames anchored to cells / sheet |
