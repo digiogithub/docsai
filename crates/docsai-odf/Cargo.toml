@@ -14,3 +14,6 @@ quick-xml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 zip = { workspace = true }
+
+[package.metadata.dist]
+dist = false

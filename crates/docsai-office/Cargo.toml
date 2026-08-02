@@ -17,3 +17,6 @@ zip = { workspace = true }
 calamine = { workspace = true }
 cfb = { workspace = true }
 
+
+[package.metadata.dist]
+dist = false

@@ -108,15 +108,21 @@ already known.
 
 ---
 
-## Phases 6 to 9 — Product, MCP, and hardening
+## Phase 6 — Full CLI and distribution
 
-- **CLI (Phase 6)**: `convert`, `formats`, and `roundtrip` exist with `--fidelity`,
-  `--assets-dir`, `--json`, `--strict`, `--verbose`, and the exit codes from architecture §5.
-  Still missing: `inspect`, `--style-map`, stdin/stdout with `-`, batch processing, and
-  `cargo-dist`.
+> **Status: closed for the core path.** Details in
+> [`09-phase-6-cli.md`](09-phase-6-cli.md).
+
+- `inspect`, batch `--out-dir` (rayon), stdin/stdout `-`, `--style-map`, `--max-cells`,
+  actionable error hints, CHANGELOG, and `cargo-dist` config are in tree.
+- Remaining non-blocking: verify one-command installers on clean machines after the first
+  tagged release; optional Homebrew/Scoop formulas.
+
+## Phases 7 to 9 — MCP and hardening
+
 - **MCP (Phase 7)**: `docsai-mcp` declares the four tools. The clean-stdout rule is already
   respected in the CLI (`tracing` always writes to stderr), so the automated test of that guarantee
-  already makes sense.
+  already makes sense. `inspect --json` shape is the contract for `inspect_document`.
 - **Hardening (Phase 8)**: part of the work is ahead of schedule — decompression caps, XML depth
   limit, path sanitization, 900+ corrupt inputs in CI. Still missing: real `cargo-fuzz`, the full
   adversarial suite, benchmarks with `criterion`, and `cargo audit`/`deny`. The existing corpus

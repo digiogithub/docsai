@@ -30,6 +30,7 @@ clap = { version = "4", features = ["derive"] }
 comrak = { version = "0.39", default-features = false }
 proptest = "1"
 quick-xml = "0.37"
+rayon = "1.10"
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: without it serde_json's fast float parser can shift a
 # value by 1 ULP, which would silently corrupt spreadsheet numbers.

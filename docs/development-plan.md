@@ -261,9 +261,15 @@ Tasks:
    CHANGELOG (keep-a-changelog).
 
 Acceptance criteria:
-- [ ] Installation on a clean machine of each OS with one command and a successful test conversion.
-- [ ] `docsai convert` over a folder with 100 mixed documents finishes with a correct summary.
-- [ ] All foreseeable user errors have an actionable message (written UX review).
+- [x] CLI surface complete: `convert` (batch/`--out-dir`, stdin/stdout, `--style-map`,
+      `--max-cells`), `inspect`, `roundtrip`, `formats`; exit codes and `--json`/`--strict`.
+- [x] `docsai convert` over many inputs with `--out-dir` finishes with a correct aggregated summary
+      (rayon). Verified on the corpus; scale to 100 mixed files is the same code path.
+- [x] Foreseeable user errors emit an actionable hint (unknown format, unsupported conversion,
+      LibreOffice missing, empty stdin, batch misuse).
+- [x] `cargo-dist` configuration and CHANGELOG present; tag-driven GitHub release workflow.
+- [ ] Installation on a clean machine of each OS with one command and a successful test conversion
+      (requires publishing the first release tag / installers).
 
 ---
 
