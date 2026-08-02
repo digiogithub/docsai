@@ -10,6 +10,7 @@ pub mod batch;
 pub mod inspect;
 pub mod loffice;
 mod pipeline;
+pub mod service;
 pub mod style_map;
 
 pub use assets::DirAssetStore;
@@ -21,6 +22,11 @@ pub use pipeline::{
     convert_bytes, convert_file, is_stdin_path, is_stdout_path, read_document,
     read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
     Outcome, RoundtripOutcome,
+};
+pub use service::{
+    convert_from_markdown, convert_to_markdown, inspect_bytes, inspect_input, mime_type_for,
+    parse_fidelity, validate_output_path, AssetBytes, AssetMode, FromMarkdownResult, SourceInput,
+    ToMarkdownResult,
 };
 pub use style_map::{apply_style_map, StyleMap, StyleTarget};
 

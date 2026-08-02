@@ -206,6 +206,7 @@ idempotence.
 | `serde` / `serde_yaml` / `serde_json` | Front matter, `inspect --json`, config |
 | `clap` (derive) | CLI |
 | `rmcp` (official MCP SDK, stdio transport) | MCP server; `#[tool]` macros; implements the 2026-07-28 spec with backward compatibility |
+| `rmcp` MSRV | **1.88+** (`rmcp` 3.x). Workspace `rust-version` tracks this floor; CI uses stable |
 | ~~`image`~~ | **Not used in Phase 1.** docsai never re-encodes a bitmap; it only needs to name and measure it, which is done by reading the format header (PNG, JPEG, GIF, BMP, TIFF, WebP, EMF, WMF) in `docsai-model::assets`, without a heavy dependency. Will be re-evaluated if some phase truly needs re-encoding |
 | ~~`serde_yaml`~~ | **Not used.** Front matter has a small known schema and the spec requires byte-for-byte determinism, so it is written by hand; the crate is also without active maintenance |
 | `thiserror` / `anyhow` | Errors |

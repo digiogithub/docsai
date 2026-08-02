@@ -24,15 +24,16 @@ Practical difference between the two folders:
 | [07 — Phase 4 ODF](07-phase-4-odf.md) | ODT/ODS ⇄ DocMark: package, de-automatization, OpenFormula |
 | [08 — Phase 5 legacy DOC](08-phase-5-legacy-doc.md) | `.doc` native degraded read + LibreOffice fallback |
 | [09 — Phase 6 CLI & distribution](09-phase-6-cli.md) | inspect, batch, style-map, stdin/stdout, cargo-dist |
+| [10 — Phase 7 MCP](10-phase-7-mcp.md) | `docsai mcp`, four tools, path/base64, limits |
 
 ## Status in one line
 
-**Phases 0–6 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
+**Phases 0–7 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
 identity (Phases 1–2, including floating DrawingML and footnote bodies), xlsx ⇄
 DocMark plus xls read (Phase 3), odt/ods ⇄ DocMark (Phase 4), legacy `.doc`
-read (Phase 5: native degraded + optional LibreOffice → docx), and the full CLI
+read (Phase 5: native degraded + optional LibreOffice → docx), the full CLI
 product surface (Phase 6: `inspect`, batch `--out-dir`, `--style-map`, stdin/stdout,
-`cargo-dist`). MCP remains Phase 7.
+`cargo-dist`), and the MCP stdio server (Phase 7: four tools, path/base64).
 
 ## Quick checks
 
@@ -43,4 +44,5 @@ cargo fmt --all -- --check
 python3 corpus/generate.py --check                      # corpus is up to date
 cargo run -p docsai-cli -- formats                      # real support matrix of the binary
 cargo run -p docsai-cli -- inspect corpus/docx/basic-text.docx
+cargo run -p docsai-cli -- mcp   # stdio MCP server (Phase 7)
 ```

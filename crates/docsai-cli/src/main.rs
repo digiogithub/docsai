@@ -29,7 +29,8 @@ docsai convert *.docx --out-dir md/\n  \
 docsai convert - --to docmark < report.docx\n  \
 docsai inspect report.docx --json\n  \
 docsai roundtrip report.docx\n  \
-docsai formats"
+docsai formats\n  \
+docsai mcp"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -113,6 +114,12 @@ enum Command {
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
+    /// Run the MCP server over stdio (for Claude Desktop / Claude Code / MCP Inspector).
+    ///
+    /// Logs always go to stderr; stdout is reserved for JSON-RPC.
+    /// Limits: `DOCSAI_MCP_MAX_INPUT_BYTES` (default 50MiB),
+    /// `DOCSAI_MCP_TIMEOUT_SECS` (default 120, `0` disables).
+    Mcp,
 }
 
 fn main() -> ExitCode {
@@ -138,6 +145,11 @@ fn main() -> ExitCode {
 
 fn run(cli: &Cli) -> anyhow::Result<u8> {
     match &cli.command {
+        Command::Mcp => {
+            // The MCP crate owns the tokio runtime and stderr-only tracing.
+            docsai_mcp::run()?;
+            Ok(EXIT_OK)
+        }
         Command::Formats { json } => {
             print_formats(*json);
             Ok(EXIT_OK)

@@ -10,10 +10,10 @@ docsai/
 │   ├── docsai-model/           # the IR. No I/O, no heavy dependencies
 │   ├── docsai-docmark/         # DocMark serializer + parser (Phase 2)
 │   ├── docsai-office/          # .docx reader (xlsx Phase 3, doc Phase 5)
-│   ├── docsai-odf/             # skeleton (Phase 4)
-│   ├── docsai-convert/         # orchestration: detection, pipelines, assets
-│   ├── docsai-cli/             # `docsai` binary
-│   └── docsai-mcp/             # skeleton (Phase 7)
+│   ├── docsai-odf/             # ODT/ODS readers and writers (Phase 4)
+│   ├── docsai-convert/         # orchestration: detection, pipelines, assets, MCP I/O
+│   ├── docsai-cli/             # `docsai` binary (incl. `mcp` subcommand)
+│   └── docsai-mcp/             # MCP stdio server (Phase 7, rmcp)
 ├── corpus/
 │   ├── generate.py             # generates ALL corpus files
 │   ├── README.md               # what each document isolates
@@ -31,14 +31,14 @@ docsai/
 | `docsai-model` | lib | ~3,500 | The IR and common types | *(nothing from the workspace)* |
 | `docsai-docmark` | lib | ~1,850 | IR ⇄ DocMark | model |
 | `docsai-office` | lib | ~3,500 | OOXML and legacy readers/writers | model |
-| `docsai-odf` | lib | 21 | ODF readers/writers | model |
-| `docsai-convert` | lib | ~500 | Detection, pipelines, asset management | the four above |
-| `docsai-cli` | bin | ~200 | The `docsai` binary | convert, model |
-| `docsai-mcp` | lib | 26 | MCP server over stdio | convert |
+| `docsai-odf` | lib | — | ODF readers/writers | model |
+| `docsai-convert` | lib | — | Detection, pipelines, assets, MCP bytes helpers | the four above |
+| `docsai-cli` | bin | — | The `docsai` binary (`convert`/`inspect`/`mcp`/…) | convert, mcp, model |
+| `docsai-mcp` | lib | — | MCP server over stdio (`rmcp`) | convert, model |
 
 **Dependency rule (`AGENTS.md` §3)**: no format crate imports another format crate.
-`docsai-odf` and `docsai-mcp` already exist, empty, precisely so the compiler enforces that
-rule from day one rather than discovering it broken in Phase 4.
+`docsai-mcp` depends only on `docsai-convert` (and `docsai-model` for types); it must
+not import `docsai-office` / `docsai-odf` / `docsai-docmark` directly.
 
 ## `docsai-model` — the IR
 

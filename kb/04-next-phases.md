@@ -118,15 +118,20 @@ already known.
 - Remaining non-blocking: verify one-command installers on clean machines after the first
   tagged release; optional Homebrew/Scoop formulas.
 
-## Phases 7 to 9 — MCP and hardening
+## Phase 7 — MCP
 
-- **MCP (Phase 7)**: `docsai-mcp` declares the four tools. The clean-stdout rule is already
-  respected in the CLI (`tracing` always writes to stderr), so the automated test of that guarantee
-  already makes sense. `inspect --json` shape is the contract for `inspect_document`.
+> **Status: closed for the core path.** Details in
+> [`10-phase-7-mcp.md`](10-phase-7-mcp.md).
+
+- `docsai mcp` + four tools over `rmcp` stdio; path/base64; duplex protocol tests.
+- Remaining polish: interactive MCP Inspector / Claude Desktop soak on a real machine.
+
+## Phases 8 to 9 — Hardening
+
 - **Hardening (Phase 8)**: part of the work is ahead of schedule — decompression caps, XML depth
   limit, path sanitization, 900+ corrupt inputs in CI. Still missing: real `cargo-fuzz`, the full
   adversarial suite, benchmarks with `criterion`, and `cargo audit`/`deny`. The existing corpus
-  serves as a seed for fuzzing.
+  serves as a seed for fuzzing. MCP write-path security review is also Phase 8.
 
 ---
 

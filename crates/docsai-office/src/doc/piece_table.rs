@@ -108,7 +108,7 @@ fn parse_clx(clx: &[u8]) -> Result<Vec<Piece>, ReadError> {
     let plc = &clx[pos..pos + lcb];
     // PlcPcd: (n+1) CP u32s + n Pcd (8 bytes). 4(n+1) + 8n = 12n + 4 = lcb
     // => 12n = lcb - 4 => n = (lcb - 4) / 12
-    if lcb < 16 || (lcb - 4) % 12 != 0 {
+    if lcb < 16 || !(lcb - 4).is_multiple_of(12) {
         return Err(bad_clx(format!("PlcPcd size {lcb} is not 12n+4")));
     }
     let n = (lcb - 4) / 12;

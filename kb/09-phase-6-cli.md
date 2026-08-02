@@ -71,5 +71,5 @@ Stable fields used by CLI and reserved for MCP `inspect_document`:
 ## Out of scope / follow-ups
 
 - Homebrew tap / Scoop / winget formulas (cargo-dist can grow these later).
-- `docsai mcp` subcommand (Phase 7).
+- `docsai mcp` subcommand — delivered in Phase 7 (`kb/10-phase-7-mcp.md`).
 - Criterion benches and fuzz (Phase 8).

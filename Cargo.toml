@@ -13,7 +13,8 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# rmcp 3.x requires 1.88+; CI uses stable so this tracks the MCP SDK floor.
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/digiogithub/docsai"
 authors = ["docsai contributors"]
@@ -24,18 +25,27 @@ docsai-docmark = { path = "crates/docsai-docmark", version = "0.1.0" }
 docsai-office = { path = "crates/docsai-office", version = "0.1.0" }
 docsai-odf = { path = "crates/docsai-odf", version = "0.1.0" }
 docsai-convert = { path = "crates/docsai-convert", version = "0.1.0" }
+docsai-mcp = { path = "crates/docsai-mcp", version = "0.1.0" }
 
 anyhow = "1"
+base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 comrak = { version = "0.39", default-features = false }
 proptest = "1"
 quick-xml = "0.37"
 rayon = "1.10"
+rmcp = { version = "3.1", default-features = false, features = [
+    "server",
+    "client",
+    "macros",
+    "transport-io",
+] }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: without it serde_json's fast float parser can shift a
 # value by 1 ULP, which would silently corrupt spreadsheet numbers.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

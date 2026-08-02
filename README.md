@@ -4,17 +4,19 @@
 
 `docsai` is a single cross-platform binary (Windows, Linux, macOS) that converts office documents to an extended Markdown profile — **DocMark** — designed to keep as much information as possible (styles, images, properties, formulas) and to allow the **reverse conversion with minimal format loss**. It can be used as a CLI tool or as an **MCP (Model Context Protocol) server over stdio**, for integration with AI assistants such as Claude.
 
-> **Project status: Phases 0–6 completed for the core path.**
+> **Project status: Phases 0–7 completed for the core path.**
 > `.docx` / `.odt` ⇄ DocMark, `.xlsx` / `.ods` ⇄ DocMark, `.xls` read, and legacy
 > `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
 > Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
-> and `cargo-dist` release packaging. See
+> and `cargo-dist` release packaging. Phase 7 adds the MCP stdio server
+> (`docsai mcp`) with four tools. See
 > [`docs/development-plan.md`](docs/development-plan.md).
 
 ```bash
 cargo run -p docsai-cli -- convert report.docx -o report.dmk.md
 cargo run -p docsai-cli -- inspect report.docx
 cargo run -p docsai-cli -- formats
+cargo run -p docsai-cli -- mcp
 ```
 ---
 
@@ -96,6 +98,7 @@ docsai inspect report.docx                         # metadata, styles, media, st
 docsai inspect report.docx --json                  # same, machine-readable
 docsai formats                                      # support matrix for this binary
 docsai roundtrip report.docx
+docsai mcp                                          # MCP server over stdio (Phase 7)
 ```
 
 Fidelity levels (`--fidelity`, spec §6): `full` (default, round-trip grade),
@@ -118,13 +121,13 @@ LibreOffice is missing). Override the binary with `DOCSAI_LIBREOFFICE`.
 Exit codes: `0` success, `1` conversion with losses (`--strict` also treats minor
 warnings as failures), `2` input error, `3` unsupported format. Logs always go to
 stderr (`RUST_LOG` / `--verbose`); stdout stays free for DocMark or `--json`.
-## Intended usage (MCP server, Phase 7)
+## MCP server
 
 ```bash
 docsai mcp        # starts the MCP server over stdio
 ```
 
-Registration in an MCP client (e.g. Claude Desktop / Claude Code):
+Registration in an MCP client (e.g. Claude Desktop / Claude Code / MCP Inspector):
 
 ```json
 {
@@ -134,7 +137,20 @@ Registration in an MCP client (e.g. Claude Desktop / Claude Code):
 }
 ```
 
-Planned MCP tools: `convert_to_markdown`, `convert_from_markdown`, `inspect_document`, `list_supported_formats`. Details in [`docs/architecture.md`](docs/architecture.md).
+Tools: `convert_to_markdown`, `convert_from_markdown`, `inspect_document`,
+`list_supported_formats`. Each tool accepts a filesystem `path` **or**
+`content_base64` + `filename`. Asset delivery defaults to `inline-base64`
+(optional `assets=files` with `assets_dir`). Logs always go to **stderr**;
+stdout is the JSON-RPC channel only.
+
+Environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DOCSAI_MCP_MAX_INPUT_BYTES` | `52428800` (50 MiB) | Cap on path size and decoded base64 |
+| `DOCSAI_MCP_TIMEOUT_SECS` | `120` (`0` = off) | Per-tool wall-clock timeout |
+
+Details in [`docs/architecture.md`](docs/architecture.md) §6 and [`kb/10-phase-7-mcp.md`](kb/10-phase-7-mcp.md).
 
 ## Project documentation
 

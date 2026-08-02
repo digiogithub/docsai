@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 7 MCP server**: `docsai mcp` over stdio (`rmcp`) with tools
+  `convert_to_markdown`, `convert_from_markdown`, `inspect_document`, and
+  `list_supported_formats`. Path and base64 input modes, inline or on-disk assets,
+  `DOCSAI_MCP_MAX_INPUT_BYTES` / `DOCSAI_MCP_TIMEOUT_SECS` limits.
+- `docsai-convert::service` helpers for in-memory / bytes conversion shared by MCP.
 - `docsai inspect` — structure report (metadata, styles, sections/sheets, media, stats)
-  without converting; `--json` for the machine-readable shape shared with MCP later.
+  without converting; `--json` for the machine-readable shape shared with MCP.
 - Batch conversion: `docsai convert *.docx --out-dir md/` with rayon parallelism and an
   aggregated summary (`--json` supported).
 - Stdin/stdout pipelines: pass `-` as the input and/or `--output -` for DocMark text.
@@ -25,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CLI `--help` documents the full Phase 6 command surface with examples.
 - README usage section covers inspect, batch, style maps, and install paths.
+- Workspace MSRV raised to **1.88** (required by `rmcp` 3.x).
 
 ## [0.1.0] — 2026-08-01
 
