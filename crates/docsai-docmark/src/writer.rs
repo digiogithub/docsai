@@ -371,6 +371,12 @@ impl<'a> Writer<'a> {
         for row in &table.rows {
             let mut cells: Vec<String> = Vec::new();
             for cell in &row.cells {
+                if cell.covered {
+                    // Occupies one grid slot under a rowspan above; keep the
+                    // GFM rectangle rectangular without re-emitting content.
+                    cells.push(String::new());
+                    continue;
+                }
                 cells.push(self.render_table_cell(cell));
                 // A horizontal span leaves the absorbed columns empty so that
                 // the GFM grid stays rectangular.

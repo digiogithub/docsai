@@ -14,8 +14,10 @@ minimal format loss. It is invoked as a CLI or as an **MCP server over stdio**.
 has the seven crates, the IR (`docsai-model`), the `.docx` and `.xlsx` readers
 **and writers** plus `.xls` read (`docsai-office`), DocMark serialize **and parse**
 for text and workbooks (`docsai-docmark`), orchestration (`docsai-convert`), and
-the CLI with `convert`, `formats` and `roundtrip`. `docsai-odf` and `docsai-mcp`
-remain skeletons that only fix the dependency rules.
+the CLI with `convert`, `formats` and `roundtrip`. The DOCX writer covers floating
+DrawingML, image transforms, and full footnote bodies; the full docx corpus
+round-trips with DocMark identity. `docsai-odf` and `docsai-mcp` remain skeletons
+that only fix the dependency rules.
 
 Next up is **Phase 4**: ODF (`.odt` / `.ods` ⇄ DocMark).
 

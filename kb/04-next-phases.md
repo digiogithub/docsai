@@ -7,56 +7,31 @@ already known.
 
 ## Phase 2 — DocMark → DOCX writing + round-trip
 
-> **Status: implemented** in-tree (`parse` / `parse_with_base`, `write_docx`,
-> `convert` DocMark↔DOCX, CLI `roundtrip`). Remaining polish is fidelity on
-> complex drawings, full footnote body rewrite, and floating anchors.
+> **Status: closed for the core path.** Details in
+> [`06-phase-2-roundtrip-closure.md`](06-phase-2-roundtrip-closure.md). Remaining
+> optional polish: proptest IR→md→IR and Word/LibreOffice open checklist.
 
-## Phase 2 (original plan) — DocMark → DOCX writing + round-trip
-
-This is the immediate phase. It closes the cycle and builds the fidelity infrastructure.
-
-### What is already done for it
+### Delivered
 
 | | |
 |---|---|
-| **The spec is frozen** | v1.0, with the changelog in §10. The parser has a fixed contract to work against, not a moving draft |
-| **The serializer is deterministic** | The idempotence test `serialize(parse(md)) == md` already has half the equation guaranteed |
-| **Lengths do not lose precision** | Every written length re-reads exactly. Without this, the fidelity metric would have an artificial floor |
-| **The IR is complete** | `Block::TextBox`, `Workbook`, sheet anchors… already exist, even if the docx reader does not produce all of them |
-| **The invariant validator** | Already invoked on every conversion; the parser inherits that safety net |
-| **Raw-blocks are exact** | They store the original bytes, so `format=ooxml` re-injection is copy and paste |
-| **Goldens are the reference** | 14 documents with their expected DocMark: the parser has 14 known inputs and their expected IR |
+| DocMark parser + serializer identity on all docx goldens | `serialize_parse_is_identity_on_docx_goldens` |
+| DOCX writer with floating DrawingML, transforms, full footnotes | `docsai-office::write_docx` |
+| CLI / pipeline `roundtrip` | Office→DocMark→Office→DocMark identity on full docx corpus |
+| List nesting `ilvl`, table spans, fence chunking fixes | See kb/06 |
 
-### What needs to be built
+### Still open (non-blocking)
 
-1. **DocMark parser** (`docsai-docmark`): comrak + custom layer for `{...}` attributes and fenced
-   divs `:::`. Comrak is already in the tree as a test dependency, so evaluation is done.
-2. **docx writer** (`docsai-office`): IR → `document.xml`, `styles.xml`, `numbering.xml`, media and
-   properties.
-3. **`roundtrip` command** with structural diff of the normalized IR and per-category metric.
-4. **Serializer idempotence test** over all goldens.
-5. **Property testing**: random IR → md → IR must be the identity. The arbitrary IR generator
-   **already exists** in `crates/docsai-model/tests/json_roundtrip.rs` and can be reused almost as-is.
+- proptest: random IR → DocMark → IR identity (generator already in model tests).
+- External validation checklist in Word / LibreOffice (no soffice in CI yet).
+- First-class text-box write (still flattened with warning; IR + spec ready).
 
-### Traps already identified
+### Traps that bit during residual closure
 
-- **Escaping must be reversible, not merely correct.** `escape()` escapes `\` first, so
-  unescaping is deterministic. The `escaping_is_idempotent_in_shape` test fixes that property; the
-  parser must be its exact inverse.
-- **The three fidelity modes are not symmetric.** Only `full` is reversible. `standard` and
-  `plain` lose information on purpose, and `roundtrip` only makes sense over `full`.
-- **`[]{.empty}`, `[]{.break kind=page}`, and `{.field ...}` are custom syntax** on top of
-  CommonMark: the parser needs them explicitly. They are in the spec §3.1, §3.2, and §10.
-- **A list item never carries two `{...}` blocks.** `list=` goes inside the attribute block of the
-  first item.
-- **The docx writer must put absorbed cells back.** The IR marks `covered=true` and
-  `colspan`/`rowspan` on the cell that opens the area; OOXML expects `w:gridSpan` and `w:vMerge`.
-- **Text boxes are still raw-block.** If Phase 2 wants real `::: {.textbox}`, the reader must be
-  extended first — it is noted in the plan.
-- **Decide whether `docx-rs` works as a writer.** Still open. Spike R1 only closed reading.
-- **Validating in Word and LibreOffice** is an acceptance criterion and there is no LibreOffice in
-  the current CI environment: it must be planned for (manual checklist per release, or headless
-  `soffice` on the Linux runner).
+- Blank-line chunking must update `:::` fence depth **before** testing the blank.
+- Nested lists need parse depth > 0 or every item is written as `ilvl=0`.
+- GFM empty cells after `colspan`/`rowspan` are pads, not content — rebuild `covered`.
+- Do not invent `w:start=1` when the IR left `start` unset.
 
 ---
 
@@ -131,9 +106,10 @@ This is the immediate phase. It closes the cycle and builds the fidelity infrast
 
 ## Phases 6 to 9 — Product, MCP, and hardening
 
-- **CLI (Phase 6)**: `convert` and `formats` exist with `--fidelity`, `--assets-dir`, `--json`,
-  `--strict`, `--verbose`, and the exit codes from architecture §5. Still missing: `inspect`,
-  `roundtrip`, `--style-map`, stdin/stdout with `-`, batch processing, and `cargo-dist`.
+- **CLI (Phase 6)**: `convert`, `formats`, and `roundtrip` exist with `--fidelity`,
+  `--assets-dir`, `--json`, `--strict`, `--verbose`, and the exit codes from architecture §5.
+  Still missing: `inspect`, `--style-map`, stdin/stdout with `-`, batch processing, and
+  `cargo-dist`.
 - **MCP (Phase 7)**: `docsai-mcp` declares the four tools. The clean-stdout rule is already
   respected in the CLI (`tracing` always writes to stderr), so the automated test of that guarantee
   already makes sense.

@@ -613,6 +613,7 @@ impl<'a> BodyParser<'a> {
                 }
             }
         }
+        normalize_gfm_spans(&mut table);
         Ok(table)
     }
 
@@ -670,15 +671,46 @@ impl<'a> BodyParser<'a> {
             let rest = strip_list_indent(&rest, item.marker_len);
             blocks.push(Block::Paragraph(para));
             if !rest.trim().is_empty() {
-                // May contain nested list and/or more paragraphs
-                let nested = self.parse_normal_blocks(&rest, line)?;
-                // If first nested is list, keep tight
+                // Nested lists must carry depth+1 so the docx writer emits the
+                // correct `w:ilvl` (and DocMark nesting survives Office round-trip).
+                let nested = self.parse_blocks_at_list_depth(&rest, line, depth + 1)?;
                 blocks.extend(nested);
             }
-            // Remove empty trailing?
             list.items.push(ListItem { blocks });
         }
         Ok(list)
+    }
+
+    /// Like [`parse_normal_blocks`], but nested lists inherit `list_depth`.
+    fn parse_blocks_at_list_depth(
+        &mut self,
+        text: &str,
+        start_line: usize,
+        list_depth: u8,
+    ) -> Result<Vec<Block>, ParseError> {
+        let chunks = split_top_level(text);
+        let mut out = Vec::new();
+        let mut line = start_line;
+        for chunk in chunks {
+            let chunk_line = line;
+            line += chunk.bytes().filter(|b| *b == b'\n').count() + 2;
+            if chunk.trim().is_empty() {
+                continue;
+            }
+            let trimmed = chunk.trim_start_matches('\n');
+            if looks_like_list(trimmed) {
+                let list = self.parse_list(trimmed, chunk_line, list_depth)?;
+                self.report.stats.lists += 1;
+                out.push(Block::List(list));
+                continue;
+            }
+            if let Some(ParsedBlock::Normal(b)) =
+                self.parse_container_or_block(chunk, chunk_line)?
+            {
+                out.push(b);
+            }
+        }
+        Ok(out)
     }
 
     fn parse_paragraph_block(&mut self, text: &str) -> Result<Paragraph, ParseError> {
@@ -1551,6 +1583,100 @@ fn parse_raw_block(attrs: &Attrs, body: &str) -> Result<RawFragment, ParseError>
 // Chunk / list / table utilities
 // ---------------------------------------------------------------------------
 
+fn cell_is_visually_empty(cell: &TableCell) -> bool {
+    cell.blocks.is_empty()
+        || matches!(
+            cell.blocks.as_slice(),
+            [Block::Paragraph(p)] if p.is_empty()
+        )
+}
+
+/// GFM cannot omit absorbed cells, so the serializer pads colspan/rowspan with
+/// empty placeholders. Rebuild the IR shape the docx reader uses: real cells
+/// only, with `covered=true` markers for rowspan continuations.
+fn normalize_gfm_spans(table: &mut Table) {
+    // Drop empty placeholders that only exist to keep a colspan rectangular.
+    for row in &mut table.rows {
+        let mut out = Vec::with_capacity(row.cells.len());
+        let mut absorb = 0u16;
+        for cell in std::mem::take(&mut row.cells) {
+            if absorb > 0 {
+                if cell_is_visually_empty(&cell) && cell.colspan <= 1 && cell.rowspan <= 1 {
+                    absorb -= 1;
+                    continue;
+                }
+                absorb = 0;
+            }
+            if cell.colspan > 1 {
+                absorb = cell.colspan.saturating_sub(1);
+            }
+            out.push(cell);
+        }
+        row.cells = out;
+    }
+
+    // Mark empty cells that sit under an active rowspan as covered, matching
+    // the docx reader. Walk grid columns so multi-colspan parents occupy the
+    // right slots.
+    let ncols = table.width().max(1);
+    let mut remain = vec![0u16; ncols];
+    for row in &mut table.rows {
+        let mut col = 0usize;
+        let mut out = Vec::with_capacity(row.cells.len() + 2);
+        let pending = std::mem::take(&mut row.cells);
+        let mut iter = pending.into_iter();
+        while col < ncols {
+            if remain[col] > 0 {
+                // Prefer converting an empty GFM pad into a covered marker.
+                match iter.next() {
+                    Some(cell)
+                        if cell_is_visually_empty(&cell)
+                            && cell.colspan <= 1
+                            && cell.rowspan <= 1 =>
+                    {
+                        out.push(TableCell {
+                            covered: true,
+                            ..Default::default()
+                        });
+                    }
+                    Some(cell) => {
+                        // Content where a continuation was expected: keep it,
+                        // and still clear the remaining rowspan for this slot.
+                        out.push(cell);
+                    }
+                    None => {
+                        out.push(TableCell {
+                            covered: true,
+                            ..Default::default()
+                        });
+                    }
+                }
+                remain[col] -= 1;
+                col += 1;
+                continue;
+            }
+
+            let Some(cell) = iter.next() else {
+                break;
+            };
+            let span = cell.colspan.max(1) as usize;
+            if cell.rowspan > 1 {
+                for slot in remain
+                    .iter_mut()
+                    .skip(col)
+                    .take(span.min(ncols.saturating_sub(col)))
+                {
+                    *slot = cell.rowspan - 1;
+                }
+            }
+            out.push(cell);
+            col += span;
+        }
+        out.extend(iter);
+        row.cells = out;
+    }
+}
+
 fn split_top_level(text: &str) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start = 0usize;
@@ -1559,24 +1685,10 @@ fn split_top_level(text: &str) -> Vec<&str> {
     let mut fence_depth = 0i32;
     while i < bytes.len() {
         if bytes[i] == b'\n' {
-            // Check blank line
-            let mut j = i + 1;
-            while j < bytes.len() && bytes[j] == b'\r' {
-                j += 1;
-            }
-            if j < bytes.len() && bytes[j] == b'\n' {
-                // blank line at j
-                if fence_depth == 0 {
-                    let chunk = &text[start..i];
-                    if !chunk.trim().is_empty() {
-                        chunks.push(chunk);
-                    }
-                    start = j + 1;
-                    i = j + 1;
-                    continue;
-                }
-            }
-            // track fences on this line
+            // Account for fences on the line that just ended *before* deciding
+            // whether a following blank line is a top-level chunk boundary.
+            // Otherwise a closing `:::` still looks "open" when the blank that
+            // follows it is inspected, and the rest of the body is swallowed.
             let line_start = text[..i].rfind('\n').map(|p| p + 1).unwrap_or(0);
             let line = &text[line_start..i];
             let t = line.trim();
@@ -1587,6 +1699,20 @@ fn split_top_level(text: &str) -> Vec<&str> {
                 } else {
                     fence_depth += 1;
                 }
+            }
+
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] == b'\r' {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'\n' && fence_depth == 0 {
+                let chunk = &text[start..i];
+                if !chunk.trim().is_empty() {
+                    chunks.push(chunk);
+                }
+                start = j + 1;
+                i = j + 1;
+                continue;
             }
         }
         i += 1;
@@ -1941,6 +2067,21 @@ mod tests {
     #[test]
     fn round_trip_nested_lists() {
         round_trip_golden("nested-lists");
+    }
+
+    #[test]
+    fn round_trip_headers_footers_and_tables() {
+        // Residual Phase 2 fixtures that need no on-disk media.
+        for name in [
+            "headers-footers",
+            "table-simple",
+            "table-merged",
+            "footnotes",
+            "custom-styles",
+            "fields-raw",
+        ] {
+            round_trip_golden(name);
+        }
     }
 
     #[test]
