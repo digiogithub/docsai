@@ -6,13 +6,15 @@
 #![forbid(unsafe_code)]
 
 pub mod assets;
+pub mod loffice;
 mod pipeline;
 
 pub use assets::DirAssetStore;
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions};
+pub use loffice::UseLoffice;
 pub use pipeline::{
-    convert_file, read_document, read_path, roundtrip_file, ConvertOptions, Outcome,
-    RoundtripOutcome,
+    convert_file, read_document, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
+    Outcome, RoundtripOutcome,
 };
 
 use docsai_model::Format;
@@ -50,6 +52,10 @@ pub enum ConvertError {
 
     #[error("the produced document breaks an IR invariant: {0}")]
     Invalid(String),
+
+    /// LibreOffice was required or failed while converting a legacy format.
+    #[error("LibreOffice fallback: {message}")]
+    Loffice { message: String },
 }
 
 /// One row of the support matrix shown by `docsai formats`.
@@ -72,9 +78,9 @@ pub const SUPPORT: &[FormatSupport] = &[
     },
     FormatSupport {
         format: Format::Doc,
-        read: false,
+        read: true,
         write: false,
-        note: "reading arrives in Phase 5; writing is out of scope",
+        note: "Phase 5: native degraded text; full fidelity via --use-loffice when LibreOffice is installed",
     },
     FormatSupport {
         format: Format::Xlsx,

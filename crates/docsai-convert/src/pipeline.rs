@@ -19,6 +19,8 @@ pub struct ConvertOptions {
     pub assets_dir: Option<PathBuf>,
     /// Target format. Inferred from the output extension when absent.
     pub target: Option<Format>,
+    /// LibreOffice headless policy for legacy formats (Phase 5).
+    pub use_loffice: crate::UseLoffice,
 }
 
 impl Default for ConvertOptions {
@@ -27,6 +29,7 @@ impl Default for ConvertOptions {
             fidelity: Fidelity::Full,
             assets_dir: None,
             target: None,
+            use_loffice: crate::UseLoffice::Auto,
         }
     }
 }
@@ -113,6 +116,15 @@ pub fn read_path(
     input: &Path,
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, Format, ConversionReport), ConvertError> {
+    read_path_with_options(input, assets, &ConvertOptions::default())
+}
+
+/// Reads a document from a path, honouring LibreOffice policy in `options`.
+pub fn read_path_with_options(
+    input: &Path,
+    assets: &mut dyn AssetStore,
+    options: &ConvertOptions,
+) -> Result<(Document, Format, ConversionReport), ConvertError> {
     let hint = input.file_name().and_then(|n| n.to_str());
     let (format, score) = {
         let mut probe = File::open(input).map_err(|source| ConvertError::Io {
@@ -149,6 +161,14 @@ pub fn read_path(
         })?;
         return Ok((document, format, report));
     }
+
+    // Phase 5: optional LibreOffice pre-conversion for legacy .doc.
+    if crate::loffice::benefits_from_loffice(format) {
+        if let Some(result) = try_loffice_doc(input, format, assets, options)? {
+            return Ok(result);
+        }
+    }
+
     let file = File::open(input).map_err(|source| ConvertError::Io {
         path: input.display().to_string(),
         source,
@@ -167,6 +187,61 @@ pub fn read_path(
         )
     })?;
     Ok((document, format, report))
+}
+
+/// Attempts LibreOffice `.doc` → `.docx` → IR. Returns `Ok(None)` when the
+/// policy says to skip or LO is unavailable under `Auto`.
+fn try_loffice_doc(
+    input: &Path,
+    source_format: Format,
+    assets: &mut dyn AssetStore,
+    options: &ConvertOptions,
+) -> Result<Option<(Document, Format, ConversionReport)>, ConvertError> {
+    let soffice = crate::loffice::find_soffice();
+    let use_it = crate::loffice::should_use(options.use_loffice, soffice.is_some())?;
+    if !use_it {
+        if options.use_loffice == crate::UseLoffice::Auto {
+            tracing::info!(
+                "LibreOffice not found; reading {} with the native degraded .doc path. \
+                 Install LibreOffice or set DOCSAI_LIBREOFFICE for full fidelity.",
+                input.display()
+            );
+        }
+        return Ok(None);
+    }
+    let soffice = soffice.ok_or_else(|| ConvertError::Loffice {
+        message: "internal: soffice missing after should_use".into(),
+    })?;
+
+    let tmp = tempfile::tempdir().map_err(|source| ConvertError::Io {
+        path: "tempdir".into(),
+        source,
+    })?;
+    let docx_path = crate::loffice::convert_to_docx(&soffice, input, tmp.path())?;
+    let file = File::open(&docx_path).map_err(|source| ConvertError::Io {
+        path: docx_path.display().to_string(),
+        source,
+    })?;
+    let (document, mut report) = docsai_office::read_docx(file, assets)?;
+    report.warn(docsai_model::Warning::Degraded {
+        what: "doc-via-libreoffice".into(),
+        why: format!(
+            "legacy .doc pre-converted to docx with `{}` before the docx pipeline",
+            soffice.display()
+        ),
+    });
+    docsai_model::validate::validate(&document).map_err(|errors| {
+        ConvertError::Invalid(
+            errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    })?;
+    // Keep the logical source format as Doc so reports/front matter stay honest.
+    let _ = source_format;
+    Ok(Some((document, Format::Doc, report)))
 }
 
 /// Converts a file on disk.
@@ -191,7 +266,7 @@ pub fn convert_file(
         .unwrap_or_else(|| default_assets_dir(input, output));
     let mut store = DirAssetStore::new(assets_dir.clone());
 
-    let (document, source_format, mut report) = read_path(input, &mut store)?;
+    let (document, source_format, mut report) = read_path_with_options(input, &mut store, options)?;
     if !crate::can_read(source_format) {
         return Err(ConvertError::Unsupported {
             from: source_format,
@@ -284,9 +359,12 @@ pub fn roundtrip_file(
         .unwrap_or_else(|| default_assets_dir(input, output));
 
     let mut store1 = MemoryAssetStore::new();
-    let (document1, source_format, mut report) = read_path(input, &mut store1)?;
+    let (document1, source_format, mut report) =
+        read_path_with_options(input, &mut store1, options)?;
     let office_format = match source_format {
         Format::Docx | Format::Xlsx | Format::Odt | Format::Ods => source_format,
+        // Legacy .doc round-trips through docx (write path for .doc is out of scope).
+        Format::Doc => Format::Docx,
         Format::DocMark => match &document1 {
             Document::Workbook(_) => Format::Xlsx,
             Document::Text(_) => Format::Docx,

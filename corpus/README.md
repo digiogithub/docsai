@@ -33,9 +33,12 @@ performance and adversarial corpora of Phase 8 will be added separately; the
 
 ## Golden files
 
-Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`) has its expected DocMark
-beside it as `<name>.expected.dmk.md`. They are compared by the tests in
-`crates/docsai-convert/tests/goldens.rs`. To update them:
+Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`, and the degraded `doc/`
+fixtures) has its expected DocMark beside it as `<name>.expected.dmk.md` when a
+golden is maintained. They are compared by the tests in
+`crates/docsai-convert/tests/goldens.rs` (OOXML/ODF) and
+`crates/docsai-convert/tests/doc_phase5.rs` (legacy `.doc`). To update OOXML/ODF
+goldens:
 
 ```bash
 DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens
@@ -62,6 +65,18 @@ without looking is a test that has stopped checking anything.
 | `footnotes.docx` | `footnotes.xml` with two notes, one with inner formatting |
 | `custom-styles.docx` | Custom style, inherited style with direct delta, character style and custom document properties |
 | `fields-raw.docx` | `w:sdt` content control, complex `TOC` field and simple `DATE` field |
+
+## Legacy Word binary (`doc/`)
+
+Phase 5 fixtures for the native degraded MS-DOC path. Produced as CFB packages by
+`docsai_office::doc::test_fixture` and embedded (base64) in `generate.py` so the
+generator stays dependency-free.
+
+| File | Trait it isolates |
+|---|---|
+| `basic-text.doc` | Piece-table Unicode text split on paragraph marks |
+| `encrypted.doc` | FIB `fEncrypted` → clear `ReadError::Encrypted` |
+| `basic-text.expected.dmk.md` | Golden DocMark for the native path (`--use-loffice never`) |
 
 ## Spreadsheets (`xlsx/`)
 
