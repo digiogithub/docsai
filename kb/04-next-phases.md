@@ -97,20 +97,6 @@ already known.
 
 ---
 
-## Phase 4 — ODF (ODT and ODS)
-
-- `docsai-odf` is a skeleton with the `FORMATS` constant; the dependency rule is already enforced
-  by the compiler.
-- The known hard point is **de-automatizing styles**: ODF `office:automatic-styles` represent
-  direct formatting and must be mapped to IR deltas. The “reference + delta” model is ready to
-  receive them: `FontProps::minus()` is exactly the inverse operation.
-- `detect()` already recognizes ODF by `content.xml` + `mimetype`; it only disambiguates `.odt`
-  from `.ods` by extension, which will need refining by reading the `mimetype`.
-- The image model already has the concepts ODF needs (`as-char`/`char`/`paragraph`/
-  `page` → `Inline`/`Floating`, `fo:clip` → `CropRect`).
-
----
-
 ## Phase 5 — Legacy DOC
 
 - `detect()` already recognizes the OLE2 container and disambiguates `.doc` from `.xls` by name;
