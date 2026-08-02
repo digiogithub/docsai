@@ -144,6 +144,38 @@ impl Length {
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
+
+    /// Parses a DocMark length (`450px`, `3.5cm`, `70.85pt`, `123emu`, or a bare
+    /// number treated as pixels at 96 dpi).
+    ///
+    /// ```
+    /// use docsai_model::units::Length;
+    /// assert_eq!(Length::parse("450px"), Some(Length::from_px(450.0)));
+    /// assert_eq!(Length::parse("3.5cm"), Some(Length::from_cm(3.5)));
+    /// assert_eq!(Length::parse("70.85pt"), Some(Length::from_pt(70.85)));
+    /// assert_eq!(Length::parse("123emu"), Some(Length::from_emu(123)));
+    /// assert_eq!(Length::parse("96"), Some(Length::from_px(96.0)));
+    /// assert_eq!(Length::parse("nope"), None);
+    /// ```
+    pub fn parse(text: &str) -> Option<Length> {
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let split = text.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(text.len());
+        let (number, unit) = text.split_at(split);
+        let value: f64 = number.parse().ok()?;
+        match unit {
+            "" | "px" => Some(Length::from_px(value)),
+            "cm" => Some(Length::from_cm(value)),
+            "mm" => Some(Length::from_mm(value)),
+            "pt" => Some(Length::from_pt(value)),
+            "in" | "inch" => Some(Length::from_inch(value)),
+            "emu" => Some(Length::from_emu(value.round() as i64)),
+            "twip" | "twips" => Some(Length::from_twips(value.round() as i64)),
+            _ => None,
+        }
+    }
 }
 
 const fn div_round(value: i64, divisor: i64) -> i64 {
@@ -292,20 +324,6 @@ mod tests {
 
     #[test]
     fn display_is_always_lossless() {
-        // Parsing back what Display wrote must give the very same EMU, or a
-        // round-trip would move margins and image sizes.
-        fn reparse(text: &str) -> Length {
-            let split = text.find(|c: char| c.is_alphabetic()).unwrap();
-            let (number, unit) = text.split_at(split);
-            let value: f64 = number.parse().unwrap();
-            match unit {
-                "px" => Length::from_px(value),
-                "cm" => Length::from_cm(value),
-                "pt" => Length::from_pt(value),
-                "emu" => Length::from_emu(value as i64),
-                other => panic!("unexpected unit {other}"),
-            }
-        }
         let samples = [
             Length::from_twips(1417), // a Word margin: not a whole px or cm
             Length::from_twips(2500), // a table column width
@@ -317,10 +335,20 @@ mod tests {
         ];
         for length in samples {
             let text = length.to_string();
-            assert_eq!(reparse(&text), length, "`{text}` did not round-trip");
+            assert_eq!(Length::parse(&text), Some(length), "`{text}` did not round-trip");
         }
         assert_eq!(Length::from_twips(1417).to_string(), "70.85pt");
         assert_eq!(Length::from_emu(1).to_string(), "1emu");
+    }
+
+    #[test]
+    fn parse_accepts_bare_pixels_and_rejects_garbage() {
+        assert_eq!(Length::parse("450px"), Some(Length::from_px(450.0)));
+        assert_eq!(Length::parse("  3.5cm "), Some(Length::from_cm(3.5)));
+        assert_eq!(Length::parse("123"), Some(Length::from_px(123.0)));
+        assert_eq!(Length::parse(""), None);
+        assert_eq!(Length::parse("cm"), None);
+        assert_eq!(Length::parse("12xy"), None);
     }
 
     #[test]

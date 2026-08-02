@@ -1,37 +1,37 @@
-# Base de conocimiento de `docsai`
+# Knowledge base for `docsai`
 
-Documentación de trabajo sobre **lo que hay construido**, cómo está organizado y qué hay que
-tener en cuenta al abordar las fases siguientes. Complementa —no sustituye— la documentación de
-diseño de [`docs/`](../docs/), que describe el proyecto completo tal como se concibió.
+Working documentation on **what is already built**, how it is organized, and what to keep in
+mind when tackling the next phases. It complements — does not replace — the design documentation
+in [`docs/`](../docs/), which describes the full project as originally conceived.
 
-Diferencia práctica entre ambas carpetas:
+Practical difference between the two folders:
 
-| Carpeta | Responde a |
+| Folder | Answers |
 |---|---|
-| [`docs/`](../docs/) | Qué se quiere construir y por qué: análisis, spec DocMark, arquitectura, plan por fases |
-| `kb/` (esta) | Qué está construido hoy, cómo, y qué se sabe ya sobre lo que viene |
+| [`docs/`](../docs/) | What we want to build and why: analysis, DocMark spec, architecture, phased plan |
+| `kb/` (this one) | What is built today, how, and what is already known about what comes next |
 
-## Índice
+## Index
 
-| Documento | Contenido |
+| Document | Contents |
 |---|---|
-| [01 — Resumen de las fases 0 y 1](01-resumen-fases-0-1.md) | Qué se entregó, criterios de aceptación, qué quedó fuera y por qué |
-| [02 — Estructura del proyecto](02-estructura-proyecto.md) | Crates, módulos, reglas de dependencia y por dónde entra cada cosa |
-| [03 — Decisiones técnicas](03-decisiones-tecnicas.md) | Las decisiones no obvias, con su motivo y su coste |
-| [04 — Consideraciones para las siguientes fases](04-siguientes-fases.md) | Lo que la Fase 2 y posteriores encontrarán ya resuelto, y lo que les espera |
+| [01 — Summary of phases 0 and 1](01-phases-0-1-summary.md) | What was delivered, acceptance criteria, what was left out and why |
+| [02 — Project structure](02-project-structure.md) | Crates, modules, dependency rules, and where each piece enters |
+| [03 — Technical decisions](03-technical-decisions.md) | The non-obvious decisions, with their rationale and cost |
+| [04 — Considerations for the next phases](04-next-phases.md) | What Phase 2 and later will already find solved, and what awaits them |
 
-## Estado en una línea
+## Status in one line
 
-**Fases 0 y 1 cerradas**: `docsai convert x.docx -o x.dmk.md` funciona con estilos, listas,
-tablas, imágenes (geometría completa), cabeceras, pies, notas al pie, campos y propiedades. La
-vuelta (DocMark → `.docx`) es la Fase 2 y no existe todavía.
+**Phases 0 and 1 closed**: `docsai convert x.docx -o x.dmk.md` works with styles, lists,
+tables, images (full geometry), headers, footers, footnotes, fields, and properties. The reverse
+path (DocMark → `.docx`) is Phase 2 and does not exist yet.
 
-## Comprobaciones rápidas
+## Quick checks
 
 ```bash
 cargo test --workspace                                  # 164 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-python3 corpus/generate.py --check                      # el corpus está al día
-cargo run -p docsai-cli -- formats                      # matriz de soporte real del binario
+python3 corpus/generate.py --check                      # corpus is up to date
+cargo run -p docsai-cli -- formats                      # real support matrix of the binary
 ```

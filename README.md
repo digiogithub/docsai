@@ -1,103 +1,104 @@
 # docsai
 
-**Conversor bidireccional de documentos Office / LibreOffice ⇄ Markdown extendido, escrito en Rust.**
+**Bidirectional converter between Office / LibreOffice documents and extended Markdown, written in Rust.**
 
-`docsai` es un binario único y multiplataforma (Windows, Linux, macOS) que convierte documentos ofimáticos a un perfil de Markdown extendido — **DocMark** — diseñado para conservar la máxima información posible (estilos, imágenes, propiedades, fórmulas) y permitir la **conversión inversa con pérdida mínima de formato**. Puede usarse como herramienta CLI o como **servidor MCP (Model Context Protocol) por stdio**, para integrarse con asistentes de IA como Claude.
+`docsai` is a single cross-platform binary (Windows, Linux, macOS) that converts office documents to an extended Markdown profile — **DocMark** — designed to keep as much information as possible (styles, images, properties, formulas) and to allow the **reverse conversion with minimal format loss**. It can be used as a CLI tool or as an **MCP (Model Context Protocol) server over stdio**, for integration with AI assistants such as Claude.
 
-> **Estado del proyecto: Fases 0 y 1 completadas.**
-> Ya se convierte `.docx` → DocMark con estilos, listas, tablas, imágenes (con toda su
-> geometría), cabeceras, pies, notas al pie, campos y propiedades. La conversión inversa
-> (DocMark → `.docx`) es la Fase 2 y todavía no existe; las hojas de cálculo llegan en la
-> Fase 3. Ver [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md).
+> **Project status: Phases 0 and 1 completed.**
+> `.docx` → DocMark already works with styles, lists, tables, images (full geometry),
+> headers, footers, footnotes, fields and properties. The reverse conversion
+> (DocMark → `.docx`) is Phase 2 and does not exist yet; spreadsheets arrive in
+> Phase 3. See [`docs/development-plan.md`](docs/development-plan.md).
 
 ```bash
-cargo run -p docsai-cli -- convert informe.docx -o informe.dmk.md
+cargo run -p docsai-cli -- convert report.docx -o report.dmk.md
 cargo run -p docsai-cli -- formats
 ```
 
 ---
 
-## Formatos soportados (objetivo)
+## Supported formats (target)
 
-✅ = funciona hoy · 🕓 = planificado, con la fase que lo trae · ➖ = fuera de alcance
+✅ = works today · 🕓 = planned, with the phase that lands it · ➖ = out of scope
 
-| Formato | Extensión | Lectura | Escritura | Notas |
+| Format | Extension | Read | Write | Notes |
 |---|---|---|---|---|
-| Word OOXML | `.docx` | ✅ | 🕓 Fase 2 | Estilos, imágenes, tablas, listas, cabeceras/pies, notas al pie, campos, propiedades |
-| Word binario | `.doc` | 🕓 Fase 5 | ➖ | Solo lectura (vía parser nativo o fallback LibreOffice headless) |
-| Excel OOXML | `.xlsx` | 🕓 Fase 3 | 🕓 Fase 3 | Valores **y fórmulas**, formatos de número, celdas combinadas, imágenes ancladas |
-| Excel binario | `.xls` | 🕓 Fase 3 | ➖ | Solo lectura (calamine) |
-| OpenDocument Text | `.odt` | 🕓 Fase 4 | 🕓 Fase 4 | Equivalente libre de `.docx` |
-| OpenDocument Spreadsheet | `.ods` | 🕓 Fase 4 | 🕓 Fase 4 | Equivalente libre de `.xlsx` |
-| Markdown extendido | `.dmk.md` | 🕓 Fase 2 | ✅ | Formato pivote **DocMark** (superconjunto de CommonMark + GFM) |
+| Word OOXML | `.docx` | ✅ | 🕓 Phase 2 | Styles, images, tables, lists, headers/footers, footnotes, fields, properties |
+| Word binary | `.doc` | 🕓 Phase 5 | ➖ | Read only (native parser or LibreOffice headless fallback) |
+| Excel OOXML | `.xlsx` | 🕓 Phase 3 | 🕓 Phase 3 | Values **and formulas**, number formats, merged cells, anchored images |
+| Excel binary | `.xls` | 🕓 Phase 3 | ➖ | Read only (calamine) |
+| OpenDocument Text | `.odt` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.docx` |
+| OpenDocument Spreadsheet | `.ods` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.xlsx` |
+| Extended Markdown | `.dmk.md` | 🕓 Phase 2 | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
 
-`docsai formats` imprime esta misma matriz según lo que el binario realmente sabe hacer.
+`docsai formats` prints this same matrix for what the binary can actually do.
 
-La escritura de `.doc` y `.xls` (formatos binarios legados) queda fuera de alcance de forma deliberada: la ruta de salida recomendada hacia el ecosistema Microsoft es siempre OOXML (`.docx` / `.xlsx`).
+Writing `.doc` and `.xls` (legacy binary formats) is deliberately out of scope: the recommended output path into the Microsoft ecosystem is always OOXML (`.docx` / `.xlsx`).
 
-## ¿Qué es DocMark?
+## What is DocMark?
 
-DocMark es un perfil de Markdown extendido definido en este proyecto (ver [`docs/especificacion-docmark.md`](docs/especificacion-docmark.md)). Es **Markdown legible y editable a mano**, que se renderiza de forma razonable en GitHub o cualquier visor CommonMark, pero que añade capas de metadatos para no perder información:
+DocMark is an extended Markdown profile defined in this project (see [`docs/docmark-specification.md`](docs/docmark-specification.md)). It is **human-readable and hand-editable Markdown** that renders reasonably on GitHub or any CommonMark viewer, but adds metadata layers so information is not lost:
 
-- **Front matter YAML** con las propiedades del documento (título, autor, idioma…) y el **catálogo de estilos** original.
-- **Atributos inline y de bloque** `{#id .clase clave="valor"}` (sintaxis compatible con Pandoc) para anclar estilos, dimensiones de imagen, propiedades de celda, etc.
-- **Contenedores fenced** `::: {...}` para secciones, cuadros de texto, cabeceras y pies.
-- **Tablas extendidas** con metadatos por celda (fórmulas, tipos, formatos de número, combinaciones) para hojas de cálculo.
-- **Activos externos**: las imágenes se extraen a un directorio `assets/` (deduplicadas por hash de contenido) y se referencian con un modelo completo de atributos de geometría: tamaño mostrado y nativo, posición y anclaje (en línea, flotante con wrap y z-order, o anclada a celdas en hojas de cálculo), rotación, recorte, volteo, texto alternativo e hipervínculo.
-- **Escotilla de fidelidad** (`raw-block`) para fragmentos sin representación Markdown posible, que se conservan de forma opaca y se restauran en la conversión inversa.
+- **YAML front matter** with document properties (title, author, language…) and the original **style catalogue**.
+- **Inline and block attributes** `{#id .class key="value"}` (Pandoc-compatible syntax) to attach styles, image dimensions, cell properties, and more.
+- **Fenced containers** `::: {...}` for sections, text boxes, headers and footers.
+- **Extended tables** with per-cell metadata (formulas, types, number formats, merges) for spreadsheets.
+- **External assets**: images are extracted to an `assets/` directory (deduplicated by content hash) and referenced with a full geometry attribute model: display and native size, position and anchoring (inline, floating with wrap and z-order, or cell-anchored in spreadsheets), rotation, crop, flip, alternative text and hyperlink.
+- **Fidelity hatch** (`raw-block`) for fragments with no Markdown representation, kept opaque and restored on the reverse conversion.
 
-Ejemplo mínimo:
+Minimal example:
 
 ```markdown
 ---
 docmark: "1.0"
 source-format: docx
-title: "Informe Anual"
+title: "Annual Report"
 styles:
   Heading1: { font: "Calibri Light", size: 16pt, color: "#2E74B5" }
 ---
 
-# Informe Anual {.Heading1}
+# Annual Report {.Heading1}
 
-Texto con **negrita** y [color]{color="#FF0000"} personalizado.
+Text with **bold** and [color]{color="#FF0000"} custom colour.
 
-![Diagrama de ventas](assets/img-001.png){width=450px height=300px anchor=inline}
+![Sales chart](assets/img-001.png){width=450px height=300px anchor=inline}
 ```
 
-## Uso (CLI)
+## Usage (CLI)
 
-Lo que funciona hoy:
+What works today:
 
 ```bash
-docsai convert informe.docx -o informe.dmk.md      # extrae assets/ junto al .md
-docsai convert informe.docx                         # a stdout, sin escribir medios al lado
-docsai convert informe.docx --fidelity plain        # CommonMark limpio, para LLM/RAG
-docsai convert informe.docx -o out.md --json        # informe de conversión en JSON
-docsai formats                                      # matriz de soporte de este binario
+docsai convert report.docx -o report.dmk.md      # extracts assets/ next to the .md
+docsai convert report.docx                         # to stdout, without writing media beside it
+docsai convert report.docx --fidelity plain        # clean CommonMark, for LLM/RAG
+docsai convert report.docx -o out.md --json        # conversion report as JSON
+docsai formats                                      # support matrix for this binary
 ```
 
-Grados de fidelidad (`--fidelity`, spec §6): `full` (defecto, apto para ida y vuelta),
-`standard` (Markdown rico sin catálogos ni raw-blocks) y `plain` (CommonMark+GFM puro).
+Fidelity levels (`--fidelity`, spec §6): `full` (default, round-trip grade),
+`standard` (rich Markdown without catalogues or raw-blocks) and `plain` (pure
+CommonMark+GFM).
 
-Códigos de salida: `0` correcto, `1` conversión con pérdidas (`--strict` incluye las advertencias
-menores), `2` error de entrada, `3` formato no soportado.
+Exit codes: `0` success, `1` conversion with losses (`--strict` also treats minor
+warnings as failures), `2` input error, `3` unsupported format.
 
-Planificado:
+Planned:
 
 ```bash
-docsai convert informe.dmk.md -o informe.docx   # Fase 2
-docsai convert ventas.xlsx -o ventas.dmk.md      # Fase 3
-docsai inspect informe.docx                      # Fase 6
-docsai roundtrip informe.docx                    # Fase 2
+docsai convert report.dmk.md -o report.docx   # Phase 2
+docsai convert sales.xlsx -o sales.dmk.md      # Phase 3
+docsai inspect report.docx                      # Phase 6
+docsai roundtrip report.docx                    # Phase 2
 ```
 
-## Uso previsto (servidor MCP, Fase 7)
+## Intended usage (MCP server, Phase 7)
 
 ```bash
-docsai mcp        # arranca el servidor MCP por stdio
+docsai mcp        # starts the MCP server over stdio
 ```
 
-Registro en un cliente MCP (p. ej. Claude Desktop / Claude Code):
+Registration in an MCP client (e.g. Claude Desktop / Claude Code):
 
 ```json
 {
@@ -107,41 +108,41 @@ Registro en un cliente MCP (p. ej. Claude Desktop / Claude Code):
 }
 ```
 
-Tools MCP previstas: `convert_to_markdown`, `convert_from_markdown`, `inspect_document`, `list_supported_formats`. Ver detalle en [`docs/arquitectura.md`](docs/arquitectura.md).
+Planned MCP tools: `convert_to_markdown`, `convert_from_markdown`, `inspect_document`, `list_supported_formats`. Details in [`docs/architecture.md`](docs/architecture.md).
 
-## Documentación del proyecto
+## Project documentation
 
-| Documento | Contenido |
+| Document | Contents |
 |---|---|
-| [`docs/analisis-tecnico.md`](docs/analisis-tecnico.md) | Análisis de formatos, librerías Rust evaluadas, proyectos open source previos (Pandoc, MarkItDown, Docling, mammoth…), decisiones y riesgos |
-| [`docs/especificacion-docmark.md`](docs/especificacion-docmark.md) | Especificación del formato DocMark (Markdown extendido) v1.0-draft |
-| [`docs/arquitectura.md`](docs/arquitectura.md) | Arquitectura del software: workspace de crates, modelo de documento intermedio (IR), CLI, servidor MCP |
-| [`docs/plan-desarrollo.md`](docs/plan-desarrollo.md) | Plan de desarrollo detallado en 9 fases, con entregables, criterios de aceptación, estimaciones y estrategia de pruebas |
-| [`AGENTS.md`](AGENTS.md) | Guía operativa para desarrolladores y agentes de IA que trabajen en este repositorio |
-| [`corpus/README.md`](corpus/README.md) | El corpus de pruebas: qué aísla cada documento y cómo se regenera |
-| [`docs/spikes/`](docs/spikes/) | Informes de los spikes de riesgo, con la decisión que cerró cada uno |
-| [`kb/`](kb/) | Base de conocimiento: qué hay construido, cómo está estructurado, las decisiones técnicas y lo que espera a las fases siguientes |
+| [`docs/technical-analysis.md`](docs/technical-analysis.md) | Format analysis, evaluated Rust libraries, prior open-source projects (Pandoc, MarkItDown, Docling, mammoth…), decisions and risks |
+| [`docs/docmark-specification.md`](docs/docmark-specification.md) | DocMark format specification (extended Markdown) v1.0-draft |
+| [`docs/architecture.md`](docs/architecture.md) | Software architecture: crate workspace, intermediate document model (IR), CLI, MCP server |
+| [`docs/development-plan.md`](docs/development-plan.md) | Detailed development plan in 9 phases, with deliverables, acceptance criteria, estimates and testing strategy |
+| [`AGENTS.md`](AGENTS.md) | Operational guide for developers and AI agents working in this repository |
+| [`corpus/README.md`](corpus/README.md) | The test corpus: what each document isolates and how it is regenerated |
+| [`docs/spikes/`](docs/spikes/) | Risk-spike reports, with the decision that closed each one |
+| [`kb/`](kb/) | Knowledge base: what is built, how it is structured, technical decisions and what later phases will face |
 
-## Desarrollo
+## Development
 
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-python3 corpus/generate.py --check     # el corpus es generado, no dibujado a mano
+python3 corpus/generate.py --check     # the corpus is generated, not hand-drawn
 ```
 
-Los golden files viven junto al corpus (`corpus/docx/*.expected.dmk.md`). Para actualizarlos:
-`DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens`, y **se revisa el diff**.
+Golden files live next to the corpus (`corpus/docx/*.expected.dmk.md`). To update them:
+`DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens`, and **review the diff**.
 
-## Principios de diseño
+## Design principles
 
-1. **Binario único, sin runtime externo**: pura biblioteca Rust siempre que sea posible; los fallbacks externos (LibreOffice headless para `.doc`) son opcionales y detectados en tiempo de ejecución, nunca requeridos.
-2. **IR pivote**: todos los formatos convergen en un modelo de documento intermedio (inspirado en el AST de Pandoc y en DoclingDocument); los conversores nunca se hablan entre sí directamente.
-3. **Fidelidad medible**: la pérdida de formato no se estima, se mide — el comando `roundtrip` y la suite de tests de ida y vuelta forman parte del producto.
-4. **Markdown primero legible, después completo**: los metadatos extendidos degradan con elegancia; un visor Markdown normal muestra un documento útil aunque ignore los atributos.
-5. **Los datos del usuario nunca se pierden en silencio**: lo que no se pueda representar se conserva en bloques raw o se reporta como advertencia explícita.
+1. **Single binary, no external runtime**: pure Rust libraries whenever possible; external fallbacks (LibreOffice headless for `.doc`) are optional and detected at runtime, never required.
+2. **Pivot IR**: every format converges on an intermediate document model (inspired by Pandoc's AST and DoclingDocument); converters never talk to each other directly.
+3. **Measurable fidelity**: format loss is not estimated, it is measured — the `roundtrip` command and the round-trip test suite are part of the product.
+4. **Markdown readable first, complete second**: extended metadata degrades gracefully; a normal Markdown viewer shows a useful document even if it ignores the attributes.
+5. **User data is never lost silently**: what cannot be represented is kept in raw blocks or reported as an explicit warning.
 
-## Licencia
+## License
 
-Ver [LICENSE](LICENSE).
+See [LICENSE](LICENSE).

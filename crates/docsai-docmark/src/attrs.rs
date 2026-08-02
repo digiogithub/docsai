@@ -99,6 +99,152 @@ impl Attrs {
             format!(" {}", self.render())
         }
     }
+
+    /// The id, if any (`#id`).
+    pub fn id_ref(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    /// Classes in insertion order.
+    pub fn classes(&self) -> &[String] {
+        &self.classes
+    }
+
+    /// True when `class` is present.
+    pub fn has_class(&self, class: &str) -> bool {
+        self.classes.iter().any(|c| c == class)
+    }
+
+    /// First class, commonly the style id.
+    pub fn first_class(&self) -> Option<&str> {
+        self.classes.first().map(String::as_str)
+    }
+
+    /// Value of `key`, if present.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.pairs.get(key).map(String::as_str)
+    }
+
+    /// Removes and returns the value of `key`.
+    pub fn take(&mut self, key: &str) -> Option<String> {
+        self.pairs.remove(key)
+    }
+
+    /// All key/value pairs in sorted order.
+    pub fn pairs(&self) -> &BTreeMap<String, String> {
+        &self.pairs
+    }
+
+    /// Parses a Pandoc-style attribute block, with or without surrounding `{}`.
+    ///
+    /// ```
+    /// use docsai_docmark::attrs::Attrs;
+    /// let a = Attrs::parse(r#"{#img-1 .Quote title="Figura 1" width=450px}"#).unwrap();
+    /// assert_eq!(a.id_ref(), Some("img-1"));
+    /// assert!(a.has_class("Quote"));
+    /// assert_eq!(a.get("width"), Some("450px"));
+    /// assert_eq!(a.get("title"), Some("Figura 1"));
+    /// ```
+    pub fn parse(input: &str) -> Option<Attrs> {
+        let input = input.trim();
+        let inner = if input.starts_with('{') && input.ends_with('}') && input.len() >= 2 {
+            &input[1..input.len() - 1]
+        } else {
+            input
+        };
+        let mut attrs = Attrs::new();
+        let mut rest = inner.trim();
+        while !rest.is_empty() {
+            rest = rest.trim_start();
+            if rest.is_empty() {
+                break;
+            }
+            if let Some(stripped) = rest.strip_prefix('#') {
+                let (id, next) = take_token(stripped);
+                if id.is_empty() {
+                    return None;
+                }
+                attrs.id = Some(id.to_string());
+                rest = next;
+                continue;
+            }
+            if let Some(stripped) = rest.strip_prefix('.') {
+                let (class, next) = take_token(stripped);
+                if class.is_empty() {
+                    return None;
+                }
+                attrs.class(class);
+                rest = next;
+                continue;
+            }
+            let (key, after_key) = take_ident(rest);
+            if key.is_empty() {
+                return None;
+            }
+            let after_key = after_key.trim_start();
+            let Some(after_eq) = after_key.strip_prefix('=') else {
+                return None;
+            };
+            let after_eq = after_eq.trim_start();
+            let (value, next) = take_value(after_eq)?;
+            attrs.set(key, value);
+            rest = next;
+        }
+        Some(attrs)
+    }
+}
+
+/// Identifier or class/id token: letters, digits, `_`, `-`, `.` (for class names).
+fn take_token(input: &str) -> (&str, &str) {
+    let end = input
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+        .map(|(i, _)| i)
+        .unwrap_or(input.len());
+    (&input[..end], &input[end..])
+}
+
+fn take_ident(input: &str) -> (&str, &str) {
+    let end = input
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_')))
+        .map(|(i, _)| i)
+        .unwrap_or(input.len());
+    (&input[..end], &input[end..])
+}
+
+fn take_value(input: &str) -> Option<(String, &str)> {
+    if let Some(rest) = input.strip_prefix('"') {
+        let mut out = String::new();
+        let mut chars = rest.char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '\\' => match chars.next() {
+                    Some((_, '"')) => out.push('"'),
+                    Some((_, '\\')) => out.push('\\'),
+                    Some((_, 'n')) => out.push('\n'),
+                    Some((_, other)) => {
+                        out.push('\\');
+                        out.push(other);
+                    }
+                    None => out.push('\\'),
+                },
+                '"' => return Some((out, &rest[i + 1..])),
+                other => out.push(other),
+            }
+        }
+        None
+    } else {
+        let end = input
+            .char_indices()
+            .find(|(_, c)| c.is_whitespace())
+            .map(|(i, _)| i)
+            .unwrap_or(input.len());
+        if end == 0 {
+            return None;
+        }
+        Some((input[..end].to_string(), &input[end..]))
+    }
 }
 
 #[cfg(test)]
@@ -151,5 +297,31 @@ mod tests {
         let mut a = Attrs::new();
         a.set("k", "1").set("k", "2");
         assert_eq!(a.render(), "{k=2}");
+    }
+
+    #[test]
+    fn parse_round_trips_with_render() {
+        let samples = [
+            r#"{#img-1 .Quote title="Figura 1" width=450px}"#,
+            "{#x .Alpha .Beta a=2 z=1}",
+            r#"{color=#FF0000 link="https://example.com/a b" name="Logo corporativo" width=450px}"#,
+            "{on=true}",
+            "{.Heading1}",
+            "{align=center indent-first-line=24px}",
+        ];
+        for sample in samples {
+            let parsed = Attrs::parse(sample).unwrap_or_else(|| panic!("parse {sample}"));
+            assert_eq!(parsed.render(), sample, "render mismatch for {sample}");
+        }
+    }
+
+    #[test]
+    fn parse_getters_and_take() {
+        let mut a = Attrs::parse(r#"{#id .A .B k=v}"#).unwrap();
+        assert_eq!(a.id_ref(), Some("id"));
+        assert_eq!(a.classes(), &["A".to_string(), "B".to_string()]);
+        assert_eq!(a.get("k"), Some("v"));
+        assert_eq!(a.take("k"), Some("v".into()));
+        assert_eq!(a.get("k"), None);
     }
 }

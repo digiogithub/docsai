@@ -1,83 +1,87 @@
-# Corpus de pruebas
+# Test corpus
 
-Documentos de prueba versionados. **Un rasgo por fichero**: cuando un golden falla, el fichero
-que falla señala el área del lector que se ha roto.
+Versioned test documents. **One trait per file**: when a golden fails, the failing
+file points at the reader area that broke.
 
-Ningún documento contiene datos reales ni privados (`AGENTS.md` §6).
+No document contains real or private data (`AGENTS.md` §6).
 
-## Cómo se generan
+## How they are generated
 
-Todos los ficheros los produce `corpus/generate.py`, sin dependencias más allá de la biblioteca
-estándar de Python 3:
+Every file is produced by `corpus/generate.py`, with no dependencies beyond the
+Python 3 standard library:
 
 ```bash
-python3 corpus/generate.py          # regenera todo
-python3 corpus/generate.py --check  # falla si el árbol está desfasado (lo ejecuta CI)
+python3 corpus/generate.py          # regenerate everything
+python3 corpus/generate.py --check  # fails if the tree is out of date (run by CI)
 ```
 
-Que el corpus sea **generado y no dibujado a mano** es deliberado:
+That the corpus is **generated rather than hand-drawn** is deliberate:
 
-- El XML de cada documento vive en el generador, donde se revisa en un `git diff` normal; un
-  `.docx` hecho con Word es una caja opaca en la revisión.
-- Los paquetes se escriben con marca de tiempo y orden de miembros fijos, así que regenerar
-  produce archivos byte a byte idénticos y el repositorio no acumula ruido binario.
-- Los medios (PNG, GIF, EMF) se sintetizan en Python puro, sin Pillow, para que el generador
-  funcione igual en las tres plataformas de CI.
+- The XML of each document lives in the generator, where it is reviewed in a
+  normal `git diff`; a `.docx` made with Word is an opaque box in review.
+- Packages are written with a fixed timestamp and member order, so regenerating
+  produces byte-identical files and the repository does not accumulate binary
+  noise.
+- Media (PNG, GIF, EMF) are synthesised in pure Python, without Pillow, so the
+  generator works the same on the three CI platforms.
 
-La contrapartida: son documentos *mínimos*, no documentos de Word reales. Los documentos reales
-anonimizados que pide la Fase 1 (tarea 10) y los corpus de rendimiento y adversarios de la Fase 8
-se añadirán aparte; el test de rendimiento de 50 páginas sintetiza su propio documento en tiempo
-de ejecución (`crates/docsai-convert/tests/goldens.rs`).
+The trade-off: these are *minimal* documents, not real Word documents. The
+anonymised real-world documents required by Phase 1 (task 10) and the
+performance and adversarial corpora of Phase 8 will be added separately; the
+50-page performance test synthesises its own document at runtime
+(`crates/docsai-convert/tests/goldens.rs`).
 
 ## Golden files
 
-Cada `docx/<nombre>.docx` tiene al lado su DocMark esperado, `docx/<nombre>.expected.dmk.md`.
-Los comparan los tests de `crates/docsai-convert/tests/goldens.rs`. Para actualizarlos:
+Each `docx/<name>.docx` has its expected DocMark beside it,
+`docx/<name>.expected.dmk.md`. They are compared by the tests in
+`crates/docsai-convert/tests/goldens.rs`. To update them:
 
 ```bash
 DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens
 ```
 
-El diff resultante **se revisa a mano** antes de confirmarlo: un golden actualizado sin mirar es
-un test que ha dejado de comprobar nada.
+The resulting diff **is reviewed by hand** before confirming: a golden updated
+without looking is a test that has stopped checking anything.
 
-## Documentos de texto (`docx/`)
+## Text documents (`docx/`)
 
-| Fichero | Rasgo que aísla |
+| File | Trait it isolates |
 |---|---|
-| `basic-text.docx` | Párrafos, salto de línea manual, párrafo vacío y los caracteres que Markdown escapa |
-| `basic-styles.docx` | Negrita, cursiva, tachado, subrayado, color, resaltado, fuente y tamaño, sub/superíndice, hipervínculo, alineación y sangrías |
-| `nested-lists.docx` | `numbering.xml` con tres niveles numerados y dos de viñetas; reconstrucción del árbol desde pares `(numId, ilvl)` |
-| `table-simple.docx` | Tabla regular con estilo de tabla y rejilla |
-| `table-merged.docx` | `gridSpan` y `vMerge` → `colspan`/`rowspan` y celdas absorbidas |
-| `images-inline.docx` | Imágenes `wp:inline`: PNG con alt/título/nombre, GIF entre texto, EMF vectorial |
-| `images-floating.docx` | `wp:anchor`: offsets relativos al margen con `wrapSquare`, alineación simbólica relativa a la página con `wrapTopAndBottom`, y marca de agua con `behindDoc` |
-| `images-transformed.docx` | Rotación 45°, recorte `a:srcRect` con borde `a:ln`, volteo H+V y escala ≠ 100 % |
-| `images-duplicated.docx` | El mismo mapa de bits en tres partes distintas del paquete con geometrías distintas: prueba la deduplicación del `AssetStore` |
-| `images-vml.docx` | `w:pict` con VML heredado (documentos convertidos desde `.doc`) |
-| `headers-footers.docx` | `sectPr` con cabecera por defecto y de primera página, pie con campos `PAGE`/`NUMPAGES`, dos columnas y `titlePg` |
-| `footnotes.docx` | `footnotes.xml` con dos notas, una con formato dentro |
-| `custom-styles.docx` | Estilo personalizado, estilo heredado con delta directo, estilo de carácter y propiedades personalizadas del documento |
-| `fields-raw.docx` | Control de contenido `w:sdt`, campo complejo `TOC` y campo simple `DATE` |
+| `basic-text.docx` | Paragraphs, manual line break, empty paragraph and characters that Markdown escapes |
+| `basic-styles.docx` | Bold, italic, strike, underline, colour, highlight, font and size, sub/superscript, hyperlink, alignment and indents |
+| `nested-lists.docx` | `numbering.xml` with three numbered levels and two bullet levels; tree rebuild from `(numId, ilvl)` pairs |
+| `table-simple.docx` | Regular table with table style and grid |
+| `table-merged.docx` | `gridSpan` and `vMerge` → `colspan`/`rowspan` and absorbed cells |
+| `images-inline.docx` | `wp:inline` images: PNG with alt/title/name, GIF between text, EMF vector |
+| `images-floating.docx` | `wp:anchor`: margin-relative offsets with `wrapSquare`, symbolic page-relative alignment with `wrapTopAndBottom`, and watermark with `behindDoc` |
+| `images-transformed.docx` | 45° rotation, `a:srcRect` crop with `a:ln` border, H+V flip and scale ≠ 100 % |
+| `images-duplicated.docx` | The same bitmap in three distinct package parts with different geometries: tests `AssetStore` deduplication |
+| `images-vml.docx` | `w:pict` with legacy VML (documents converted from `.doc`) |
+| `headers-footers.docx` | `sectPr` with default and first-page header, footer with `PAGE`/`NUMPAGES` fields, two columns and `titlePg` |
+| `footnotes.docx` | `footnotes.xml` with two notes, one with inner formatting |
+| `custom-styles.docx` | Custom style, inherited style with direct delta, character style and custom document properties |
+| `fields-raw.docx` | `w:sdt` content control, complex `TOC` field and simple `DATE` field |
 
-## Hojas de cálculo (`xlsx/`)
+## Spreadsheets (`xlsx/`)
 
-Generadas en la Fase 0 para que el corpus esté completo; las consume la **Fase 3**, que es cuando
-existirá el lector de `xlsx`.
+Generated in Phase 0 so the corpus is complete; consumed by **Phase 3**, when
+the `xlsx` reader exists.
 
-| Fichero | Rasgo que aísla |
+| File | Trait it isolates |
 |---|---|
-| `values-types.xlsx` | Los seis tipos de celda: entero, decimal, booleano, error, fecha (serial + `numFmt`) y cadena en línea |
-| `formulas-basic.xlsx` | Fórmulas con valor cacheado, referencia entre celdas y un nombre definido |
-| `formulas-shared.xlsx` | Fórmulas compartidas (`t="shared"`) y de matriz (`t="array"`) |
-| `number-formats.xlsx` | Moneda, fecha, porcentaje y millares por `numFmtId` |
-| `merged-cells.xlsx` | `mergeCells` horizontal y vertical, y ancho de columna personalizado |
-| `images-anchored.xlsx` | Los tres anclajes de hoja: `twoCellAnchor`, `oneCellAnchor` y `absoluteAnchor` |
+| `values-types.xlsx` | The six cell types: integer, decimal, boolean, error, date (serial + `numFmt`) and inline string |
+| `formulas-basic.xlsx` | Formulas with cached value, cell reference and a defined name |
+| `formulas-shared.xlsx` | Shared formulas (`t="shared"`) and array formulas (`t="array"`) |
+| `number-formats.xlsx` | Currency, date, percentage and thousands via `numFmtId` |
+| `merged-cells.xlsx` | Horizontal and vertical `mergeCells`, and custom column width |
+| `images-anchored.xlsx` | The three sheet anchors: `twoCellAnchor`, `oneCellAnchor` and `absoluteAnchor` |
 
-## Añadir un documento
+## Adding a document
 
-1. Escribe una función `docx_<rasgo>()` en `generate.py` y añádela a `GENERATORS`.
-2. Regenera (`python3 corpus/generate.py`) y añade la fila a la tabla de arriba.
-3. Genera su golden y **revisa el diff**.
-4. Si el rasgo aún no está implementado, el golden documentará la degradación actual (un
-   raw-block, por ejemplo). Eso es correcto: hace visible lo que falta.
+1. Write a `docx_<trait>()` function in `generate.py` and add it to `GENERATORS`.
+2. Regenerate (`python3 corpus/generate.py`) and add the row to the table above.
+3. Generate its golden and **review the diff**.
+4. If the trait is not implemented yet, the golden will document the current
+   degradation (a raw-block, for example). That is correct: it makes the gap
+   visible.
