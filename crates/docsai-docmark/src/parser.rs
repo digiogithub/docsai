@@ -1706,12 +1706,13 @@ fn strip_heading(text: &str) -> Option<(u8, &str)> {
 
 fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
     let text = text.trim_end();
-    // Find last `{` that starts an attrs block at end
+    // Paragraph-level attrs are always emitted with a leading space (`Attrs::suffix`).
+    // Span/link/image attrs attach tightly: `[text]{.underline}`, `![](p){width=1}`.
+    // Only peel a trailing `{...}` when whitespace precedes it (or it is the whole line).
     let bytes = text.as_bytes();
     if !bytes.last().is_some_and(|b| *b == b'}') {
         return (text, None);
     }
-    // scan backwards for matching `{` not inside quotes
     let chars: Vec<char> = text.chars().collect();
     let mut i = chars.len() - 1;
     let mut depth = 0i32;
@@ -1729,27 +1730,22 @@ fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
                 '{' => {
                     depth -= 1;
                     if depth == 0 {
+                        // Require whitespace before `{`, or attrs-only line.
+                        if i > 0 && !chars[i - 1].is_whitespace() {
+                            return (text, None);
+                        }
                         let attr_str: String = chars[i..].iter().collect();
                         if let Some(attrs) = Attrs::parse(&attr_str) {
-                            let content_end = i;
-                            // drop optional space before attrs
-                            let mut end = content_end;
-                            if end > 0 && chars[end - 1] == ' ' {
+                            let mut end = i;
+                            while end > 0 && chars[end - 1].is_whitespace() {
                                 end -= 1;
                             }
-                            let content: String = chars[..end].iter().collect();
-                            // Leak-free: return slices via indices into original
-                            // We need &str into text - recompute
-                            let _content = &text[..content.len()];
-                            // careful: content len in bytes
                             let byte_end = text
                                 .char_indices()
                                 .nth(end)
                                 .map(|(b, _)| b)
                                 .unwrap_or(text.len());
-                            let content = &text[..byte_end];
-                            let _ = content_end;
-                            return (content, Some(attrs));
+                            return (&text[..byte_end], Some(attrs));
                         }
                         return (text, None);
                     }
@@ -1850,5 +1846,55 @@ mod tests {
             },
         );
         assert_eq!(out, md, "serialize(parse(md)) must equal md");
+    }
+
+    fn round_trip_golden(name: &str) {
+        let path = format!(
+            "{}/../../corpus/docx/{name}.expected.dmk.md",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let md = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let mut assets = MemoryAssetStore::new();
+        let base = std::path::Path::new(&path).parent();
+        let (doc, _) =
+            parse_with_base(&md, base, &mut assets).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (out, _) = crate::serialize(
+            &doc,
+            &assets,
+            &crate::Options {
+                fidelity: crate::Fidelity::Full,
+                assets_dir: "assets".into(),
+                source_format: docsai_model::Format::Docx,
+            },
+        );
+        assert_eq!(out, md, "{name}: serialize(parse(md)) must equal md");
+    }
+
+    #[test]
+    fn round_trip_basic_styles() {
+        round_trip_golden("basic-styles");
+    }
+
+    #[test]
+    fn round_trip_nested_lists() {
+        round_trip_golden("nested-lists");
+    }
+
+    #[test]
+    fn parses_nested_lists_golden() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/docx/nested-lists.expected.dmk.md"
+        );
+        let md = std::fs::read_to_string(path).unwrap();
+        let mut assets = MemoryAssetStore::new();
+        let (doc, _) = parse(&md, &mut assets).expect("parse nested-lists");
+        let Document::Text(text) = doc else {
+            panic!("expected text");
+        };
+        assert!(
+            text.blocks().any(|b| matches!(b, Block::List(_))),
+            "expected at least one list"
+        );
     }
 }
