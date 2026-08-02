@@ -9,6 +9,12 @@ ya se conocen.
 
 Es la fase inmediata. Cierra el ciclo y monta la infraestructura de fidelidad.
 
+> **Parcialmente hecha.** El parser DocMark → IR ya está, y con él la mitad de
+> la infraestructura de fidelidad. Lo que sigue abajo se escribió antes de
+> empezarla; lo que se aprendió al hacerla —incluidos dieciséis defectos reales
+> y las trampas que heredará el writer— está en
+> [05 — Estado de la Fase 2](05-fase-2-estado.md).
+
 ### Lo que ya está hecho para ella
 
 | | |
@@ -48,7 +54,9 @@ Es la fase inmediata. Cierra el ciclo y monta la infraestructura de fidelidad.
   `colspan`/`rowspan` en la celda que abre el área; OOXML espera `w:gridSpan` y `w:vMerge`.
 - **Los cuadros de texto siguen siendo raw-block.** Si la Fase 2 quiere `::: {.textbox}` de
   verdad, hay que ampliar antes el lector — está anotado en el plan.
-- **Decidir si `docx-rs` sirve como writer.** Sigue abierto. El spike R1 sólo cerró la lectura.
+- **Decidir si `docx-rs` sirve como writer.** Sigue abierto. El spike R1 sólo cerró la lectura;
+  el R2 cerró la del parser DocMark, y de paso confirmó que escribir a mano da un control que
+  una librería generalista no.
 - **Validar en Word y LibreOffice** es criterio de aceptación y no hay LibreOffice en el entorno
   de CI actual: hay que preverlo (checklist manual por release, o `soffice` headless en el runner
   Linux).

@@ -72,6 +72,63 @@ pub fn read_document<R: Read + Seek>(
     Ok((document, format, report))
 }
 
+/// Reads a DocMark file back into the IR.
+///
+/// The media it references are loaded from `assets_dir` so that image links
+/// resolve to real bytes; a link with no file behind it is a warning, not an
+/// error.
+pub fn read_docmark(
+    path: &Path,
+    assets_dir: Option<&Path>,
+) -> Result<(Document, ConversionReport), ConvertError> {
+    let text = std::fs::read_to_string(path).map_err(|source| ConvertError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let dir = assets_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| default_assets_dir(path, None));
+    let mut store = DirAssetStore::new(dir.clone());
+    load_assets(&dir, &mut store)?;
+
+    let (document, _info, report) =
+        docsai_docmark::parse(&text, &store).map_err(|e| ConvertError::Invalid(e.to_string()))?;
+    docsai_model::validate::validate(&document).map_err(|errors| {
+        ConvertError::Invalid(
+            errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    })?;
+    Ok((document, report))
+}
+
+/// Loads every file in an assets directory into the store, so that the parser
+/// can match image links by name.
+fn load_assets(dir: &Path, store: &mut DirAssetStore) -> Result<(), ConvertError> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        // No directory means no media, which is not an error: a document may
+        // simply have none.
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&path).map_err(|source| ConvertError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        // The name is derived from the content, so re-storing the same bytes
+        // reproduces the name the link uses.
+        let _ = store.put(&bytes);
+    }
+    Ok(())
+}
+
 /// Converts a file on disk.
 ///
 /// With `output` set, the DocMark is written there and media go to the assets
@@ -238,6 +295,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ConvertError::Io { .. }));
+    }
+
+    #[test]
+    fn a_converted_document_reads_back_with_its_media() {
+        let dir = temp_dir("docmark-back");
+        let output = dir.join("out.dmk.md");
+        convert_file(
+            &corpus("images-inline.docx"),
+            Some(&output),
+            &ConvertOptions::default(),
+        )
+        .expect("converts");
+
+        let (document, report) = read_docmark(&output, None).expect("reads back");
+        let Document::Text(text) = &document else {
+            panic!("expected a text document");
+        };
+        assert!(!text.sections.is_empty());
+        assert!(
+            !report.has_severe(),
+            "reading back reported {:?}",
+            report.warnings
+        );
+
+        // Every image found its bytes: an unresolved link would have warned.
+        let images = text
+            .sections
+            .iter()
+            .flat_map(|s| s.blocks.iter())
+            .filter(|b| matches!(b, docsai_model::text::Block::Image(_)))
+            .count();
+        assert!(images > 0, "the corpus document has block images");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

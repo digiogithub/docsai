@@ -1,19 +1,26 @@
 //! DocMark: the extended-Markdown pivot format.
 //!
-//! Fase 1 lands the **serialiser** (IR → DocMark). The parser (DocMark → IR)
-//! is Fase 2 and deliberately absent here.
+//! Both directions live here: [`serialize`] (IR → DocMark) and [`parse`]
+//! (DocMark → IR). They are written by hand and are meant to be edited
+//! together; [`normalize`] states exactly what they guarantee about each other.
 //!
 //! The output is normative and deterministic (spec §8): two serialisations of
 //! the same IR are byte-identical, line endings are always `\n`, and the
 //! encoding is UTF-8 without BOM.
 //!
 //! ```
-//! use docsai_docmark::{serialize, Options};
+//! use docsai_docmark::{normalize, parse, serialize, Options};
 //! use docsai_model::{Document, MemoryAssetStore, text::TextDocument};
 //!
 //! let doc = Document::Text(TextDocument::default());
-//! let (markdown, _report) = serialize(&doc, &MemoryAssetStore::new(), &Options::default());
+//! let store = MemoryAssetStore::new();
+//! let (markdown, _report) = serialize(&doc, &store, &Options::default());
 //! assert!(markdown.starts_with("---\ndocmark: \"1.0\"\n"));
+//!
+//! // Reading back lands on the normal form, and stays there from then on.
+//! let (back, _info, _report) = parse(&markdown, &store)?;
+//! assert_eq!(back, normalize(&doc));
+//! # Ok::<(), docsai_docmark::ParseError>(())
 //! ```
 
 #![forbid(unsafe_code)]
@@ -21,8 +28,13 @@
 pub mod attrs;
 pub mod escape;
 mod frontmatter;
+pub(crate) mod normalize;
+mod parser;
 pub mod units;
-mod writer;
+pub(crate) mod writer;
+
+pub use normalize::normalize;
+pub use parser::{parse, FrontMatter, ParseError, ParseInfo};
 
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format};

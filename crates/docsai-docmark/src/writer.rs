@@ -16,7 +16,7 @@ use docsai_model::text::{
 use docsai_model::units::Length;
 
 use crate::attrs::Attrs;
-use crate::escape::{escape, TextContext};
+use crate::escape::{escape_at, TextContext};
 use crate::units::{len, number, percent, pt};
 use crate::{Fidelity, Options};
 
@@ -171,7 +171,7 @@ impl<'a> Writer<'a> {
             }
             Block::List(list) => self.render_list(list, depth),
             Block::Table(table) => self.render_table(table),
-            Block::Image(image) => self.render_image(image),
+            Block::Image(image) => self.render_image(image, TextContext::Block),
             Block::TextBox(text_box) => {
                 let body = self.render_blocks(&text_box.blocks, depth);
                 if self.plain() {
@@ -240,7 +240,21 @@ impl<'a> Writer<'a> {
         extra: Option<(&str, &str)>,
     ) -> String {
         self.report.stats.paragraphs += 1;
-        let content = self.render_inlines(&paragraph.content, TextContext::Block);
+        // An ATX heading is one line, so whatever cannot live on one line is
+        // collapsed here rather than allowed to break the block apart.
+        let mut inlines = match prefix {
+            Some(_) => self.flatten_to_one_line(&paragraph.content, "heading"),
+            None => paragraph.content.clone(),
+        };
+        // A hard break with nothing before it on the line writes nothing, and a
+        // break that writes nothing must not stand between two runs of text:
+        // whether `&` needs escaping depends on the letter that follows it, and
+        // that letter would then be in the next run.
+        crate::normalize::drop_breaks_that_open_a_line(&mut inlines, prefix.is_none());
+        // A heading's body follows `# `, so it does not start a line; a list
+        // item's body does, and `- # x` really is a heading inside the item.
+        let content =
+            self.render_inlines(&inlines, TextContext::Block, prefix.is_none(), None, None);
         let mut attrs = if self.plain() {
             Attrs::new()
         } else {
@@ -250,7 +264,9 @@ impl<'a> Writer<'a> {
             attrs.set(key, value);
         }
 
-        let body = content.trim_end_matches(' ');
+        // A paragraph cannot end in whitespace: the block separator eats the
+        // newline of a trailing hard break and would leave its two spaces behind.
+        let body = content.trim_end();
         match prefix {
             Some(hashes) => format!("{hashes} {body}{}", attrs.suffix()),
             // An empty paragraph is real content in a word processor (it is
@@ -423,7 +439,12 @@ impl<'a> Writer<'a> {
     fn render_table_cell(&mut self, cell: &TableCell) -> String {
         let mut text = match cell.blocks.as_slice() {
             [] => String::new(),
-            [Block::Paragraph(p)] => self.render_inlines(&p.content, TextContext::TableCell),
+            // A cell's content sits after `| `, occupies exactly one line, and
+            // CommonMark parses no block structure inside it.
+            [Block::Paragraph(p)] => {
+                let inlines = self.flatten_to_one_line(&p.content, "table cell");
+                self.render_inlines(&inlines, TextContext::TableCell, false, None, None)
+            }
             blocks => {
                 let rendered = self.render_blocks(blocks, 0);
                 rendered.replace('\n', " ")
@@ -454,6 +475,16 @@ impl<'a> Writer<'a> {
         if let Some(style) = &table.style {
             attrs.set("style", style.as_str());
         }
+        if !table.col_widths.is_empty() {
+            let widths: Vec<String> = table.col_widths.iter().map(|w| len(*w)).collect();
+            attrs.set("col-widths", widths.join(","));
+        }
+        // The complex form has no implicit header row — there is no GFM
+        // delimiter to imply one — so the flag is written when it is set,
+        // where the GFM form writes it when it is *not*.
+        if table.header_row {
+            attrs.set("header-row", "true");
+        }
         let mut out = format!("::: {}\n", attrs.render());
         for row in &table.rows {
             out.push_str("::: {.row}\n");
@@ -483,28 +514,133 @@ impl<'a> Writer<'a> {
     // Inlines
     // ----------------------------------------------------------------------
 
-    fn render_inlines(&mut self, inlines: &[Inline], context: TextContext) -> String {
-        let mut out = String::new();
+    /// Collapses what a single line cannot hold.
+    ///
+    /// A heading, a GFM table cell and a link label each occupy exactly one
+    /// line of Markdown: a hard break inside one would split the construct in
+    /// two, and an inline raw fragment travels as a block and cannot go there
+    /// at all. Both losses are reported.
+    ///
+    /// [`crate::normalize`] applies the same rule, so the round-trip lands on
+    /// the same place twice.
+    fn flatten_to_one_line(&mut self, inlines: &[Inline], what: &str) -> Vec<Inline> {
+        let mut out = Vec::new();
         for inline in inlines {
-            out.push_str(&self.render_inline(inline, context));
+            match inline {
+                Inline::Break(BreakKind::Line) => {
+                    self.report.warn(Warning::Degraded {
+                        what: format!("line break inside a {what}"),
+                        why: "a single line of Markdown cannot hold one; written as a space".into(),
+                    });
+                    out.push(Inline::Text(" ".into()));
+                }
+                Inline::Raw(raw) => {
+                    self.report.warn(Warning::RawBlockDropped {
+                        id: raw.id.as_str().to_string(),
+                        format: raw.format.clone(),
+                    });
+                }
+                Inline::Styled { content, props } => out.push(Inline::Styled {
+                    content: self.flatten_to_one_line(content, what),
+                    props: props.clone(),
+                }),
+                Inline::Link {
+                    target,
+                    content,
+                    props,
+                } => out.push(Inline::Link {
+                    target: target.clone(),
+                    content: self.flatten_to_one_line(content, what),
+                    props: props.clone(),
+                }),
+                other => out.push(other.clone()),
+            }
         }
         out
     }
 
-    fn render_inline(&mut self, inline: &Inline, context: TextContext) -> String {
+    fn render_inlines(
+        &mut self,
+        inlines: &[Inline],
+        context: TextContext,
+        starts_line: bool,
+        before: Option<char>,
+        after: Option<char>,
+    ) -> String {
+        // Adjacent text is merged first, so the output cannot depend on how a
+        // paragraph happens to be split into runs: `&` needs escaping only when
+        // a letter follows it, and that letter may live in the next run.
+        let inlines = merge_adjacent_text(inlines);
+        let mut out = String::new();
+        let mut at_line_start = starts_line;
+        for (index, inline) in inlines.iter().enumerate() {
+            // What sits either side decides whether emphasis markers would
+            // flank; across a construct boundary it is punctuation or nothing,
+            // so `None` there gives the same answer.
+            let (left, right) = crate::normalize::neighbours(&inlines, index, before, after);
+            let piece = self.render_inline(inline, context, at_line_start, left, right);
+            if !piece.is_empty() {
+                at_line_start = piece.ends_with('\n');
+            }
+            // A text run ending in `!` in front of a link or a span would turn
+            // it into an image. Only a text run can leave a bare `!` there —
+            // every other inline ends in `}`, `)` or its own marker — so
+            // escaping it here is enough.
+            if out.ends_with('!') && piece.starts_with('[') {
+                out.pop();
+                out.push_str("\\!");
+            }
+            out.push_str(&piece);
+        }
+        out
+    }
+
+    fn render_inline(
+        &mut self,
+        inline: &Inline,
+        context: TextContext,
+        starts_line: bool,
+        before: Option<char>,
+        after: Option<char>,
+    ) -> String {
         match inline {
-            Inline::Text(text) => escape(text, context),
+            Inline::Text(text) => escape_at(text, context, starts_line),
             Inline::Styled { content, props } => {
-                let inner = self.render_inlines(content, context);
-                self.wrap_styled(inner, props)
+                self.wrap_styled(content, props, context, starts_line, before, after)
             }
             Inline::Link {
                 target,
                 content,
                 props,
             } => {
-                let content = strip_redundant_style(content, props);
-                let label = self.render_inlines(&content, TextContext::LinkLabel);
+                let mut props = props.clone();
+                let content = strip_redundant_style(content, &props);
+                let content = crate::normalize::collapse_emphasis(content, &mut props);
+                let content = self.flatten_to_one_line(&content, "link label");
+                let content = merge_adjacent_text(&content);
+                let props = &props;
+                // The label always follows `[`.
+                let label = self.render_inlines(&content, context, false, Some('['), Some(']'));
+                // A link's own emphasis is drawn inside its label, exactly as
+                // for a run: `[**texto**](url)`. Putting it outside would make
+                // the run wrap the link instead of the other way round, and the
+                // reverse conversion would not land back here.
+                let resolved = self.styles.resolve(props.style.as_ref());
+                let font = props.direct.minus(&resolved.font);
+                // The label's neighbours are the link's own brackets, but the
+                // markers still have to flank the content inside them — the
+                // same test every other run gets.
+                let marker_props = RunProps::direct(font.clone());
+                let label = if crate::normalize::cannot_carry_emphasis(
+                    &content,
+                    Some('['),
+                    Some(']'),
+                    &marker_props,
+                ) {
+                    label
+                } else {
+                    wrap_emphasis(label, &font)
+                };
                 let link = format!("[{label}]({})", escape_link_target(target));
                 if self.plain() || props.is_empty() {
                     link
@@ -534,7 +670,8 @@ impl<'a> Writer<'a> {
                 cached,
                 instruction,
             } => {
-                let text = escape(cached, context);
+                // The value always follows `[`.
+                let text = escape_at(cached, context, false);
                 if self.plain() {
                     return text;
                 }
@@ -545,6 +682,11 @@ impl<'a> Writer<'a> {
                 }
                 format!("[{text}]{}", attrs.render())
             }
+            // A hard break is two spaces and a newline: with nothing before it
+            // on the line it would leave a whitespace-only line, and Markdown
+            // reads one of those as a paragraph break. `render_paragraph` has
+            // already dropped those; this is the net underneath.
+            Inline::Break(BreakKind::Line) if starts_line => String::new(),
             Inline::Break(BreakKind::Line) => "  \n".to_string(),
             Inline::Break(kind) => {
                 if self.plain() {
@@ -555,7 +697,7 @@ impl<'a> Writer<'a> {
                     format!("[]{}", attrs.render())
                 }
             }
-            Inline::Image(image) => self.render_image(image),
+            Inline::Image(image) => self.render_image(image, context),
             Inline::Raw(raw) => {
                 if self.full() {
                     // An inline raw fragment still travels as a block-level
@@ -573,31 +715,100 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// Wraps rendered text in the emphasis markers and the span its formatting
-    /// needs. Order is fixed: strike inside italic inside bold inside the span.
-    fn wrap_styled(&mut self, inner: String, props: &RunProps) -> String {
-        if inner.is_empty() {
-            return inner;
-        }
+    /// Wraps a run's content in the emphasis markers and the span its
+    /// formatting needs. Order is fixed: strike inside italic inside bold
+    /// inside the span.
+    fn wrap_styled(
+        &mut self,
+        content: &[Inline],
+        props: &RunProps,
+        context: TextContext,
+        starts_line: bool,
+        before: Option<char>,
+        after: Option<char>,
+    ) -> String {
+        // A run whose only child is a run of pure emphasis writes as one run,
+        // and the marker order is fixed, so `~~**a**~~` and `**~~a~~**` would
+        // otherwise depend on how the IR happened to nest them. Collapsing here
+        // makes the output canonical, which is what spec §8 asks for.
+        let mut props = props.clone();
+        let content = crate::normalize::collapse_emphasis(content.to_vec(), &mut props);
+        // Merged before anything looks at its edges: whether the markers can
+        // flank depends on the first and last characters actually written, not
+        // on how the runs happen to be split. A child that repeats the
+        // formatting of this run drops it here too, which is both redundant to
+        // write and impossible to read back.
+        let content = merge_adjacent_text(&content);
+        let resolved_for_children = self.styles.resolve(props.style.as_ref());
+        let content = crate::normalize::strip_inherited_emphasis(
+            content,
+            &props.direct.minus(&resolved_for_children.font),
+        );
+        let content = merge_adjacent_text(&content);
+        let content = content.as_slice();
+        let props = &props;
+
         let resolved = self.styles.resolve(props.style.as_ref());
         let font = props.direct.minus(&resolved.font);
 
-        let mut text = inner;
-        if font.strike == Some(true) {
-            text = format!("~~{text}~~");
+        // Whatever marker or bracket goes in front means the content no longer
+        // starts the line, so it must be escaped accordingly.
+        let mut attrs = Attrs::new();
+        if !self.plain() {
+            self.style_attrs(&mut attrs, props);
         }
-        if font.italic == Some(true) {
-            text = format!("*{text}*");
+        // Markers are only written when CommonMark would honour them. Inside
+        // an attribute block they always are — the brackets are punctuation on
+        // both sides — so only a bare run has to ask its neighbours.
+        let bracketed = !attrs.is_empty();
+        // Inside an attribute block the markers' neighbours are the brackets;
+        // outside, they are whatever sits either side of the run. Either way
+        // the same flanking test decides, and whitespace at the content's edge
+        // rules the markers out in both.
+        let (marker_before, marker_after) = if bracketed {
+            (Some('['), Some(']'))
+        } else {
+            (before, after)
+        };
+        let marker_props = RunProps::direct(font.clone());
+        let wanted = crate::normalize::marker_char(&marker_props).is_some();
+        let emphasised = !crate::normalize::cannot_carry_emphasis(
+            content,
+            marker_before,
+            marker_after,
+            &marker_props,
+        );
+        if wanted && !emphasised {
+            self.report.warn(Warning::Degraded {
+                what: "emphasis next to text or another marker".into(),
+                why: "CommonMark would not read the markers there; the run keeps its text only"
+                    .into(),
+            });
         }
-        if font.bold == Some(true) {
-            text = format!("**{text}**");
-        }
-        if self.plain() {
-            return text;
+        // A run that writes neither markers nor brackets is transparent: its
+        // content keeps the neighbours and the line position the run had.
+        let prefixed = emphasised || bracketed;
+        let (inner_before, inner_after) = if prefixed {
+            (Some('['), Some(']'))
+        } else {
+            (before, after)
+        };
+        let inner = self.render_inlines(
+            content,
+            context,
+            starts_line && !prefixed,
+            inner_before,
+            inner_after,
+        );
+        if inner.is_empty() {
+            return inner;
         }
 
-        let mut attrs = Attrs::new();
-        self.style_attrs(&mut attrs, props);
+        let text = if emphasised {
+            wrap_emphasis(inner, &font)
+        } else {
+            inner
+        };
         if attrs.is_empty() {
             text
         } else {
@@ -606,7 +817,8 @@ impl<'a> Writer<'a> {
     }
 
     /// Everything about a run that the emphasis markers cannot express.
-    fn style_attrs(&self, attrs: &mut Attrs, props: &RunProps) {
+    fn style_attrs(&mut self, attrs: &mut Attrs, props: &RunProps) {
+        report_unswitchable_props(&mut self.report, props);
         if let Some(style) = &props.style {
             attrs.class(style.as_str());
         }
@@ -656,9 +868,10 @@ impl<'a> Writer<'a> {
     // Images
     // ----------------------------------------------------------------------
 
-    fn render_image(&mut self, image: &ImageRef) -> String {
+    fn render_image(&mut self, image: &ImageRef, context: TextContext) -> String {
         self.report.stats.images += 1;
-        let alt = escape(&image.alt, TextContext::LinkLabel);
+        // The alt text always follows `![`.
+        let alt = escape_at(&image.alt, context, false);
         let path = match self.assets.info(&image.asset) {
             Some(info) => format!("{}/{}", self.options.assets_dir, info.file_name),
             None => image
@@ -833,6 +1046,94 @@ fn strip_redundant_style(content: &[Inline], props: &RunProps) -> Vec<Inline> {
         .collect()
 }
 
+/// Wraps text in the emphasis markers a run's formatting calls for.
+///
+/// The order is fixed — strike inside italic inside bold — so that two
+/// serialisations of the same formatting are byte-identical.
+///
+/// Content whose edges are whitespace gets no markers. CommonMark requires a
+/// delimiter run to be *flanking* — `* a*` and `*a *` are literal asterisks,
+/// not emphasis — so markers there would be four characters of text rather
+/// than formatting. Nothing visible is lost, since emphasis on a space shows
+/// nothing either way, and [`crate::normalize`] drops the same flags so both
+/// sides agree.
+fn wrap_emphasis(text: String, font: &FontProps) -> String {
+    let mut text = text;
+    if text.trim() != text || text.is_empty() {
+        return text;
+    }
+    if font.strike == Some(true) {
+        text = format!("~~{text}~~");
+    }
+    if font.italic == Some(true) {
+        text = format!("*{text}*");
+    }
+    if font.bold == Some(true) {
+        text = format!("**{text}**");
+    }
+    text
+}
+
+/// Joins neighbours that are really one thing: adjacent text, and adjacent
+/// runs carrying identical formatting.
+///
+/// Two reasons, both about the output rather than the model. Escaping must not
+/// depend on where a text run happens to end — `&` needs a backslash only when
+/// a letter follows. And two adjacent bold runs would write `**a****b**`,
+/// which CommonMark reads as *one* bold run containing `a****b`: same
+/// formatting, so they are one run, and writing them as one is the only way to
+/// read them back.
+///
+/// Shared with [`crate::normalize`], which needs the same view of a run's
+/// neighbours.
+pub(crate) fn merge_adjacent_text(inlines: &[Inline]) -> Vec<Inline> {
+    let mut out: Vec<Inline> = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        // A run of empty text writes nothing, and leaving it in would make it
+        // look as though the run ended in nothing at all.
+        if matches!(inline, Inline::Text(text) if text.is_empty()) {
+            continue;
+        }
+        // A run with nothing to say writes exactly its content, so it is not
+        // really there: flatten it, or the text either side of it would not
+        // meet and would be escaped as though it were at a run boundary.
+        if let Inline::Styled { content, props } = inline {
+            // A run with no content writes nothing at all, markers included,
+            // so it must not stand between two runs of text either.
+            if merge_adjacent_text(content).is_empty() {
+                continue;
+            }
+            if props.is_empty() {
+                for spliced in merge_adjacent_text(content) {
+                    match (out.last_mut(), &spliced) {
+                        (Some(Inline::Text(previous)), Inline::Text(next)) => {
+                            previous.push_str(next)
+                        }
+                        _ => out.push(spliced),
+                    }
+                }
+                continue;
+            }
+        }
+        match (out.last_mut(), inline) {
+            (Some(Inline::Text(previous)), Inline::Text(next)) => previous.push_str(next),
+            (
+                Some(Inline::Styled {
+                    content: previous,
+                    props: previous_props,
+                }),
+                Inline::Styled { content, props },
+            ) if previous_props == props => {
+                previous.extend(content.iter().cloned());
+                let merged = merge_adjacent_text(previous);
+                *previous = merged;
+            }
+            _ => out.push(inline.clone()),
+        }
+    }
+    out
+}
+
 fn offset(x: Length, y: Length) -> String {
     format!("{},{}", len(x), len(y))
 }
@@ -840,6 +1141,38 @@ fn offset(x: Length, y: Length) -> String {
 fn push_len(attrs: &mut Attrs, key: &str, value: Option<Length>) {
     if let Some(value) = value {
         attrs.set(key, len(value));
+    }
+}
+
+/// Reports the formatting DocMark 1.0 has no way to switch off.
+///
+/// Spec §3.2 provides `bold=false` and `italic=false` and nothing else, so a
+/// run that turns off strike-through, underline, capitalisation or a
+/// sub/superscript over a style loses that instruction. Rule 3 of `AGENTS.md`:
+/// it is reported, never dropped in silence. Lifting it means DocMark 1.1.
+fn report_unswitchable_props(report: &mut ConversionReport, props: &RunProps) {
+    let font = &props.direct;
+    let mut off: Vec<&str> = Vec::new();
+    if font.strike == Some(false) {
+        off.push("strike");
+    }
+    if font.underline == Some(Underline::None) {
+        off.push("underline");
+    }
+    if font.small_caps == Some(false) {
+        off.push("small-caps");
+    }
+    if font.caps == Some(false) {
+        off.push("caps");
+    }
+    if font.vert_align == Some(VertAlign::Baseline) {
+        off.push("vertical-align");
+    }
+    if !off.is_empty() {
+        report.warn(Warning::Degraded {
+            what: format!("{} switched off over a style", off.join(", ")),
+            why: "DocMark 1.0 can only write bold=false and italic=false (spec §3.2)".into(),
+        });
     }
 }
 

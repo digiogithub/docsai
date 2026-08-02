@@ -10,7 +10,7 @@ mod pipeline;
 
 pub use assets::DirAssetStore;
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions};
-pub use pipeline::{convert_file, read_document, ConvertOptions, Outcome};
+pub use pipeline::{convert_file, read_docmark, read_document, ConvertOptions, Outcome};
 
 use docsai_model::Format;
 
@@ -53,7 +53,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Docx,
         read: true,
         write: false,
-        note: "writing arrives in Fase 2",
+        note: "writing arrives later in Fase 2",
     },
     FormatSupport {
         format: Format::Doc,
@@ -87,9 +87,9 @@ pub const SUPPORT: &[FormatSupport] = &[
     },
     FormatSupport {
         format: Format::DocMark,
-        read: false,
+        read: true,
         write: true,
-        note: "reading arrives in Fase 2",
+        note: "both directions",
     },
 ];
 
@@ -120,8 +120,9 @@ mod tests {
             );
         }
         assert!(can_read(Format::Docx));
-        assert!(!can_write(Format::Docx), "docx writing is Fase 2");
+        assert!(!can_write(Format::Docx), "the docx writer is still to come");
         assert!(can_write(Format::DocMark));
+        assert!(can_read(Format::DocMark), "the parser landed in Fase 2");
     }
 
     #[test]

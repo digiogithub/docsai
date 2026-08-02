@@ -175,3 +175,38 @@ Aunque el endurecimiento es la Fase 8, tres cosas eran demasiado baratas como pa
 - **Límite de profundidad XML**: 256 niveles.
 - **Saneado de nombres de miembro**: un `word/media/../../evil.png` nunca llega a ser una parte
   ni un asset. Hay un test dedicado.
+
+## 15. Parser DocMark propio, sin comrak
+
+**Decisión**: la lectura DocMark → IR se escribe a mano, como el serializador.
+
+**Motivo** (spike R2, medido sobre la salida real, no supuesto): al pasarle un
+documento con los cinco constructos que el serializador emite, comrak deja el
+`:::` de apertura como párrafo de texto y **absorbe el de cierre como una fila
+más de la tabla**; devuelve los atributos como texto suelto en tres formas
+distintas según dónde aparezcan; y no convierte `[texto]{.clase}` en ningún
+nodo. La estructura de bloques y todo el formato inline eran nuestros de todas
+formas.
+
+**Y comrak gana con el cambio**: sigue siendo el verificador *independiente* del
+modo `plain`. Si fuera también el parser, ese test comprobaría que el parser se
+entiende consigo mismo.
+
+**Coste asumido**: el parser entiende el subconjunto normativo de la spec.
+CommonMark que un humano podría escribir y que el serializador nunca emite
+—encabezados setext, viñetas con `+`, bloques de código indentados— no se
+interpreta; viaja como texto, y lo que no encaja emite `Warning::Degraded`.
+
+## 16. La forma normal existe porque serializar no es inyectivo
+
+**Decisión**: `docsai_docmark::normalize` describe qué aplanamientos hace el
+serializador, y el round-trip se enuncia sobre ella:
+`parse(serialize(x)) == normalize(x)`.
+
+**Motivo**: la regla de economía, los marcadores de énfasis y el número de `#`
+colapsan varios IR sobre los mismos bytes. Sin nombrar ese colapso, «IR → md →
+IR es la identidad» es simplemente falso y el test no se puede escribir.
+
+**Coste, y es alto**: `normalize` es una segunda implementación a mano de las
+decisiones del writer, y mantenerlas sincronizadas es lo que ha ido fallando.
+Cómo quitarla está en [`kb/05-fase-2-estado.md`](05-fase-2-estado.md).

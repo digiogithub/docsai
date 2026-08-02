@@ -11,3 +11,7 @@ authors.workspace = true
 [dependencies]
 docsai-model = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }

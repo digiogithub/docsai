@@ -265,6 +265,8 @@ name = "docsai-docmark"
 version = "0.1.0"
 dependencies = [
  "docsai-model",
+ "proptest",
+ "serde_json",
  "thiserror",
 ]
 

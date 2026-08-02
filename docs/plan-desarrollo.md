@@ -125,6 +125,14 @@ Tareas:
 6. Validación externa: los docx generados abren sin diálogo de reparación en Word y LibreOffice
    (checklist manual documentada por release; automatizable después vía LibreOffice headless en CI Linux).
 
+**Estado (en curso)**: tareas 1, 4 y 5 hechas; 2, 3 y 6 pendientes. El parser DocMark → IR está
+completo y `serialize(parse(md)) == md` pasa byte a byte sobre los 14 goldens. El spike R2
+(`docs/spikes/R2-parser-docmark.md`) descartó comrak como base del parser, con medidas. El
+property testing destapó y dejó corregidos dieciséis defectos —entre ellos un pánico con UTF-8 y
+varias pérdidas silenciosas— y conserva un residuo conocido, marcado `#[ignore]` y explicado en
+`kb/05-fase-2-estado.md`. El writer `.docx` no está empezado, y con él quedan el comando
+`roundtrip` y la validación externa.
+
 Criterios de aceptación:
 - [ ] Round-trip idempotente (2ª pasada == 1ª pasada) en todo el corpus.
 - [ ] Métrica de fidelidad ≥ 95 % en texto/estilos/tablas/listas del corpus.

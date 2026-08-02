@@ -2,3 +2,7 @@
 **/*.rs.bk
 *.pdb
 __pycache__/
+
+# proptest writes these next to the tests; the corpus and the goldens are the
+# regression suite, so they are noise here.
+*.proptest-regressions
