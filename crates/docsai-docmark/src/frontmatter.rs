@@ -2,7 +2,7 @@
 //!
 //! Written by hand rather than through a YAML library: the spec demands byte
 //! determinism, and the schema is small and fully known. Doing it here also
-//! keeps a YAML serialiser out of the dependency tree.
+//! keeps a YAML serializer out of the dependency tree.
 
 use docsai_model::list::{ListCatalog, NumFormat};
 use docsai_model::sheet::Workbook;

@@ -31,7 +31,7 @@ pub enum Warning {
     },
     /// Something was mapped, but imperfectly.
     Degraded { what: String, why: String },
-    /// Image geometry could not be mapped in full (arquitectura §3.1).
+    /// Image geometry could not be mapped in full (architecture §3.1).
     ImageGeometryDegraded { what: String, why: String },
     /// A media part could not be stored or read.
     AssetIssue { asset: String, why: String },

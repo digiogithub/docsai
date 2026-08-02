@@ -1,7 +1,7 @@
-//! The `.docx` reader (Fase 1).
+//! The `.docx` reader (Phase 1).
 //!
 //! Built directly on `zip` + `quick-xml` after the R1 spike
-//! (`docs/spikes/R1-estrategia-docx.md`): one pass over `document.xml` that
+//! (`docs/spikes/R1-docx-strategy.md`): one pass over `document.xml` that
 //! produces the IR and preserves everything it does not recognise.
 
 mod body;
@@ -52,7 +52,7 @@ pub(crate) fn read_package(
     let mut report = ConversionReport::new();
 
     if package.part_names().any(|n| n.ends_with("vbaProject.bin")) {
-        // Macros are ignored always and by design (AGENTS.md §7, plan Fase 8).
+        // Macros are ignored always and by design (AGENTS.md §7, plan Phase 8).
         report.warn(Warning::MacrosIgnored {
             part: "word/vbaProject.bin".into(),
         });

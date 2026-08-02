@@ -1,331 +1,331 @@
-# Plan de desarrollo
+# Development plan
 
-Plan por fases para implementar `docsai`. Cada fase tiene objetivo, tareas, entregables,
-criterios de aceptación y una estimación orientativa (en semanas-persona de un desarrollador
-Rust senior; ajustar según equipo). Las fases 1–3 son el corazón del producto; a partir de la
-Fase 6 hay margen para paralelizar.
+Phased plan to implement `docsai`. Each phase has an objective, tasks, deliverables,
+acceptance criteria, and an indicative estimate (in person-weeks for a senior Rust
+developer; adjust for team size). Phases 1–3 are the heart of the product; from
+Phase 6 there is room to parallelize.
 
-**Regla de gestión**: no se abre una fase sin cerrar los criterios de aceptación de la anterior
-(excepto las marcadas como paralelizables). Cada fase termina con un tag `v0.x.0`.
+**Management rule**: a phase is not opened until the previous phase's acceptance criteria
+are closed (except those marked parallelizable). Each phase ends with a `v0.x.0` tag.
 
 ---
 
-## Fase 0 — Fundamentos (2–3 semanas)
+## Phase 0 — Foundations (2–3 weeks)
 
-**Objetivo**: workspace compilando, IR diseñado, especificación DocMark congelada, corpus inicial
-y CI multiplataforma en verde. Es la fase que des-riesga todo lo demás.
+**Objective**: compiling workspace, designed IR, frozen DocMark specification, initial corpus,
+and green multiplatform CI. This is the phase that de-risks everything else.
 
-Tareas:
-1. Crear workspace Cargo con los 7 crates de `arquitectura.md` §2 (aunque casi vacíos).
-2. Implementar `docsai-model` v1: tipos del IR (§3 de arquitectura), `StyleCatalog` con
-   herencia, `ConversionReport`, newtypes de unidades (`Length` con EMU/twips/pt/cm).
-   Incluye el **modelo normalizado de imágenes** `ImageRef`/`ImageGeometry`/`Anchor`
-   (arquitectura §3.1) con su validador de invariantes (anclajes de hoja solo en `Workbook`),
-   y el trait `AssetStore` (arquitectura §3.2). Todo `serde`-serializable, con tests
-   unitarios de las conversiones de unidades (EMU⇄pt⇄cm⇄px a 96 dpi).
-3. **Spike de riesgo R1** (timebox 1 semana): leer con `docx-rs` + `quick-xml` tres documentos
-   docx reales con estilos custom y verificar que la cascada de 4 niveles es resoluble con la
-   información expuesta. Resultado escrito en `docs/spikes/` con decisión: crate + complemento
-   propio, o parser OOXML propio completo.
-4. Congelar `especificacion-docmark.md` v1.0 (revisión del equipo, resolver los TODO del anexo A
-   de tablas complejas).
-5. Corpus inicial en `corpus/`: ~15 documentos mínimos hechos a mano (uno por rasgo):
+Tasks:
+1. Create the Cargo workspace with the 7 crates from `architecture.md` §2 (even if nearly empty).
+2. Implement `docsai-model` v1: IR types (architecture §3), `StyleCatalog` with
+   inheritance, `ConversionReport`, unit newtypes (`Length` with EMU/twips/pt/cm).
+   Includes the **normalized image model** `ImageRef`/`ImageGeometry`/`Anchor`
+   (architecture §3.1) with its invariant validator (sheet anchors only in `Workbook`),
+   and the `AssetStore` trait (architecture §3.2). Everything `serde`-serializable, with unit
+   tests for unit conversions (EMU⇄pt⇄cm⇄px at 96 dpi).
+3. **Risk spike R1** (1-week timebox): read three real docx documents with custom styles
+   using `docx-rs` + `quick-xml` and verify that the 4-level cascade is resolvable with the
+   information exposed. Result written under `docs/spikes/` with a decision: crate + custom
+   complement, or full custom OOXML parser.
+4. Freeze `docmark-specification.md` v1.0 (team review, resolve the TODOs in annex A
+   on complex tables).
+5. Initial corpus in `corpus/`: ~15 minimal hand-made documents (one trait per file):
    `docx/basic-text`, `basic-styles`, `nested-lists`, `table-simple`, `table-merged`,
-   `images-inline`, `images-floating` (wrap + posición relativa a página/margen),
-   `images-transformed` (recorte, rotación, volteo, escala ≠ 100 %), `images-duplicated`
-   (mismo bitmap N veces con geometrías distintas), `headers-footers`, `footnotes`,
+   `images-inline`, `images-floating` (wrap + position relative to page/margin),
+   `images-transformed` (crop, rotation, flip, scale ≠ 100 %), `images-duplicated`
+   (same bitmap N times with different geometries), `headers-footers`, `footnotes`,
    `custom-styles`; `xlsx/values-types`, `formulas-basic`, `formulas-shared`,
-   `number-formats`, `merged-cells`, `images-anchored` (los tres anclajes: two-cell,
+   `number-formats`, `merged-cells`, `images-anchored` (all three anchors: two-cell,
    one-cell, absolute).
-   Guion de cómo se creó cada uno en `corpus/README.md`.
-6. CI GitHub Actions: build+test+clippy+fmt en matriz de 3 SO; caché de cargo; badge en README.
-7. Esqueleto CLI (`docsai formats`, `--version`) y plantilla de `insta` para golden tests.
+   Script of how each was created in `corpus/README.md`.
+6. GitHub Actions CI: build+test+clippy+fmt on a 3-OS matrix; cargo cache; badge in README.
+7. CLI skeleton (`docsai formats`, `--version`) and `insta` template for golden tests.
 
-Entregables: workspace verde en CI, `docsai-model` v1, spec congelada, corpus v1, informe del spike.
+Deliverables: green workspace in CI, `docsai-model` v1, frozen spec, corpus v1, spike report.
 
-Criterios de aceptación:
-- [x] `cargo test --workspace` verde en las 3 plataformas.
-- [x] IR serializa/deserializa a JSON con round-trip idéntico (proptest básico).
-- [x] Spike documentado con decisión firmada sobre la estrategia docx.
-- [x] DocMark v1.0 sin TODOs abiertos.
+Acceptance criteria:
+- [x] `cargo test --workspace` green on all 3 platforms.
+- [x] IR serializes/deserializes to JSON with identical round-trip (basic proptest).
+- [x] Spike documented with a signed decision on the docx strategy.
+- [x] DocMark v1.0 with no open TODOs.
 
-**Estado**: cerrada. Notas de ejecución:
-- El spike R1 (`docs/spikes/R1-estrategia-docx.md`) descartó `docx-rs`: pierde el modelo de
-  imagen casi entero, las notas al pie y los campos simples, y provoca *panic* en el 23 % de las
-  entradas corruptas. La lectura docx se hace con parser propio sobre `zip` + `quick-xml`.
-- El corpus se **genera** con `corpus/generate.py` en vez de dibujarse a mano: el XML queda
-  revisable en el diff y los paquetes son reproducibles byte a byte (ver `corpus/README.md`).
-- Los golden files son `.expected.dmk.md` junto al corpus, como prescribe `AGENTS.md` §6, en
-  lugar de snapshots de `insta`; `insta` sale del árbol de dependencias.
-
----
-
-## Fase 1 — Lectura DOCX → DocMark (4–6 semanas)
-
-**Objetivo**: `docsai convert x.docx -o x.dmk.md` con estilos, imágenes, tablas, listas,
-cabeceras/pies y propiedades. Es la fase más larga: fija los patrones que reutilizan todas las demás.
-
-Tareas:
-1. Reader docx (`docsai-office`): apertura ZIP, `document.xml`, resolución de relaciones.
-2. Estilos: parseo completo de `styles.xml` → `StyleCatalog`; resolución referencia+delta
-   (nunca aplanar); defaults del documento (`docDefaults`).
-3. Párrafos y runs: todo el formato inline de la tabla §3.2 de la spec; hipervínculos; breaks.
-4. Listas: reconstrucción del árbol desde `numbering.xml` + pares `(numId, ilvl)` → `ListCatalog`.
-5. Tablas: grid, `gridSpan`/`vMerge` → rowspan/colspan del IR, anchos, estilo de tabla.
-6. Imágenes (spec §3.5, arquitectura §3.1): DrawingML `wp:inline` y `wp:anchor` → `ImageRef` +
-   extracción a `AssetStore` con deduplicación por hash. Mapeo completo de geometría: tamaño
-   mostrado vs nativo, posición relativa (page/margin/paragraph/character) con offsets o
-   alineación simbólica, wrap y lado, z-order/behind-text, rotación, volteos, recorte
-   (`a:srcRect`), borde simple, alt/título/nombre, hipervínculo sobre imagen, imágenes
-   enlazadas (`r:link`, sin descarga). Lectura también de **VML legado** (`w:pict`) limitada
-   al modelo normalizado. Efectos DrawingML sin modelo → raw-block asociado (`effects_raw`).
-   WMF/EMF extraídos tal cual con geometría completa y advertencia.
-7. Cabeceras/pies/secciones (`sectPr`), notas al pie/al final, campos simples (PAGE, TOC como
-   raw/field), propiedades de documento (core+app+custom).
-8. Serializador DocMark (`docsai-docmark`): IR → Markdown según spec §8 (determinista); gestión
-   de assets y front matter; modos `--fidelity`.
-9. Todo elemento OOXML no reconocido → raw-block + advertencia tipada (cobertura medible).
-10. Golden tests de todo el corpus docx; añadir 5+ documentos "del mundo real" anonimizados.
-
-Criterios de aceptación:
-- [x] Los golden docx del corpus pasan (incluidos los tres de imágenes: flotantes,
-      transformadas y duplicadas — con geometría completa en los atributos DocMark).
-- [x] Cero pánicos con corpus corrupto sintético (ZIP truncado, XML malformado): siempre `Err`.
-- [x] Un docx real de 50+ páginas convierte en < 1 s con < 10 raw-blocks.
-- [x] La salida en `--fidelity plain` es CommonMark limpio verificado con comrak.
-
-**Estado**: cerrada salvo la tarea 10 (documentos reales anonimizados), que depende de disponer
-de documentos reales y no bloquea la Fase 2. Notas de ejecución:
-- Los cuadros de texto DrawingML (`wps:txbx`) se conservan como raw-block, no como
-  `::: {.textbox}`: el tipo existe en el IR y en la spec, pero emitirlo se pospone a la Fase 2,
-  donde el writer tendrá que reconstruirlos.
-- Tres defectos que el corpus destapó y que quedan corregidos: el formato de longitudes era
-  lisiado por redondeo (un margen de 1417 twips se escribía `2.499cm`), los párrafos vacíos
-  desaparecían en silencio, y el estilo de carácter de un hipervínculo se emitía dos veces.
+**Status**: closed. Execution notes:
+- Spike R1 (`docs/spikes/R1-docx-strategy.md`) discarded `docx-rs`: it loses almost the entire
+  image model, footnotes and simple fields, and panics on 23 % of corrupt
+  inputs. docx reading is done with a custom parser over `zip` + `quick-xml`.
+- The corpus is **generated** with `corpus/generate.py` instead of drawn by hand: the XML is
+  reviewable in the diff and packages are byte-for-byte reproducible (see `corpus/README.md`).
+- Golden files are `.expected.dmk.md` next to the corpus, as prescribed by `AGENTS.md` §6, instead
+  of `insta` snapshots; `insta` leaves the dependency tree.
 
 ---
 
-## Fase 2 — Escritura DocMark → DOCX + round-trip (3–5 semanas)
+## Phase 1 — DOCX reading → DocMark (4–6 weeks)
 
-**Objetivo**: cerrar el ciclo bidireccional de texto y montar la infraestructura de fidelidad.
+**Objective**: `docsai convert x.docx -o x.dmk.md` with styles, images, tables, lists,
+headers/footers and properties. This is the longest phase: it sets the patterns reused by all others.
 
-Tareas:
-1. Parser DocMark (`docsai-docmark`): comrak + capa propia de atributos `{...}` y fenced divs
-   `:::` → IR. Validación de front matter con errores de línea/columna útiles.
-2. Writer docx: IR → `document.xml` + `styles.xml` + `numbering.xml` + media + props
-   (con `docx-rs` donde llegue; XML directo donde no). Re-inyección de raw-blocks `format=ooxml`.
-   Imágenes: re-empaquetado de `word/media/*` desde el `AssetStore` (sin recomprimir bitmaps) y
-   emisión de DrawingML completo desde `ImageGeometry` — inline y flotante con posición, wrap,
-   z-order, rotación, recorte y alt/título; siempre DrawingML aunque la fuente fuese VML.
-3. Comando `roundtrip`: docx→md→docx→md; diff estructural de IR normalizado; métrica de
-   fidelidad por categoría (texto, estilos, tablas, imágenes, listas) y salida `--json`.
-4. Test de **idempotencia del serializador** en CI: `serialize(parse(md)) == md` byte a byte
-   sobre todos los goldens.
-5. Property testing (proptest): generar IRs aleatorios válidos y verificar IR→md→IR == identidad.
-6. Validación externa: los docx generados abren sin diálogo de reparación en Word y LibreOffice
-   (checklist manual documentada por release; automatizable después vía LibreOffice headless en CI Linux).
+Tasks:
+1. docx reader (`docsai-office`): ZIP open, `document.xml`, relationship resolution.
+2. Styles: full parse of `styles.xml` → `StyleCatalog`; reference+delta resolution
+   (never flatten); document defaults (`docDefaults`).
+3. Paragraphs and runs: all inline formatting from spec table §3.2; hyperlinks; breaks.
+4. Lists: tree reconstruction from `numbering.xml` + `(numId, ilvl)` pairs → `ListCatalog`.
+5. Tables: grid, `gridSpan`/`vMerge` → IR rowspan/colspan, widths, table style.
+6. Images (spec §3.5, architecture §3.1): DrawingML `wp:inline` and `wp:anchor` → `ImageRef` +
+   extraction to `AssetStore` with hash deduplication. Full geometry mapping: displayed vs native
+   size, relative position (page/margin/paragraph/character) with offsets or
+   symbolic alignment, wrap and side, z-order/behind-text, rotation, flips, crop
+   (`a:srcRect`), simple border, alt/title/name, hyperlink on image, linked
+   images (`r:link`, no download). Also read **legacy VML** (`w:pict`) limited
+   to the normalized model. DrawingML effects without a model → associated raw-block (`effects_raw`).
+   WMF/EMF extracted as-is with full geometry and a warning.
+7. Headers/footers/sections (`sectPr`), footnotes/endnotes, simple fields (PAGE, TOC as
+   raw/field), document properties (core+app+custom).
+8. DocMark serializer (`docsai-docmark`): IR → Markdown per spec §8 (deterministic); asset
+   management and front matter; `--fidelity` modes.
+9. Every unrecognized OOXML element → raw-block + typed warning (measurable coverage).
+10. Golden tests for the whole docx corpus; add 5+ anonymized "real-world" documents.
 
-Criterios de aceptación:
-- [ ] Round-trip idempotente (2ª pasada == 1ª pasada) en todo el corpus.
-- [ ] Métrica de fidelidad ≥ 95 % en texto/estilos/tablas/listas del corpus.
-- [ ] Imágenes en round-trip: bytes del bitmap idénticos (sin recompresión), sin duplicados en
-      media, y geometría (tamaño, posición, anclaje, wrap, rotación, recorte) preservada — las
-      imágenes aparecen en el mismo sitio y tamaño al abrir el docx regenerado en Word/LibreOffice.
-- [ ] docx generados abren limpios en Word y LibreOffice (checklist).
-- [ ] Editar un `.dmk.md` a mano (añadir párrafo con estilo existente) y regenerar docx funciona.
+Acceptance criteria:
+- [x] Corpus docx goldens pass (including the three image ones: floating,
+      transformed and duplicated — with full geometry in DocMark attributes).
+- [x] Zero panics on synthetic corrupt corpus (truncated ZIP, malformed XML): always `Err`.
+- [x] A real 50+ page docx converts in < 1 s with < 10 raw-blocks.
+- [x] Output in `--fidelity plain` is clean CommonMark verified with comrak.
 
----
-
-## Fase 3 — Hojas de cálculo: XLSX/XLS ⇄ DocMark (4–5 semanas)
-
-**Objetivo**: `xlsx` bidireccional con valores, fórmulas y formatos; `xls` lectura.
-
-Tareas:
-1. **Spike (3 días)**: decidir writer xlsx — `umya-spreadsheet` (lee y escribe estilos) vs
-   `rust_xlsxwriter` (mejor API de escritura pura). Criterio: cuál regenera con mayor fidelidad
-   estilos+numFmt desde el IR. Documentar en `docs/spikes/`.
-2. Reader xlsx: `calamine` para valores y fórmulas; lectura complementaria propia de
-   `xl/styles.xml` (numFmt, fuentes, rellenos, bordes por índice) y de dimensiones/merges/panes
-   con `quick-xml`. Fórmulas compartidas y de matriz expandidas con metadato.
-3. Tipado de celdas: detección fecha/hora vía numFmt (serial→ISO-8601 y vuelta); booleanos,
-   errores (`#DIV/0!`…).
-4. Serialización de hojas a DocMark según spec §4 (tabla de valores + `cell-meta` con rangos
-   compactados) y parser inverso.
-5. Writer xlsx desde IR (crate elegido en el spike): valores, fórmulas (recálculo delegado a
-   Excel/LibreOffice al abrir: escribir fórmula sin valor cacheado o con el valor conservado),
-   numFmt, estilos, merges, anchos, defined names.
-6. **Imágenes de hoja** (spec §4.1): lectura propia de `xl/drawings/drawing*.xml` con
-   `quick-xml` (calamine/umya no las cubren con geometría completa) → `ImageRef` con anclajes
-   `SheetTwoCell`/`SheetOneCell`/`SheetAbsolute`, offsets dentro de celda,
-   `move-with-cells`/`size-with-cells`, y el resto del modelo común (rotación, recorte, alt,
-   hipervínculo). Escritura de `drawing*.xml` + relaciones desde el IR. Charts nativos →
-   raw-block con advertencia.
-7. Reader xls (calamine) → mismo pipeline (solo lectura; documentar en `formats`).
-8. Corpus: añadir libros con fechas, porcentajes, monedas, fórmulas entre hojas, nombres
-   definidos, imágenes con los tres tipos de anclaje, 100k celdas (rendimiento).
-
-Criterios de aceptación:
-- [ ] Round-trip xlsx: valores, fórmulas y numFmt intactos en el corpus (fidelidad ≥ 95 %).
-- [ ] Round-trip de imágenes de hoja: los tres anclajes conservados simbólicamente (two-cell
-      sigue estirándose con la rejilla tras la vuelta), bitmaps sin recompresión.
-- [ ] Un xlsx con fechas sobrevive al round-trip sin corromper serials (test dedicado).
-- [ ] xlsx de 100k celdas: < 3 s, < 500 MB RAM.
-- [ ] Excel y LibreOffice recalculan sin errores los ficheros generados (checklist).
+**Status**: closed except task 10 (anonymized real documents), which depends on having
+real documents available and does not block Phase 2. Execution notes:
+- DrawingML text boxes (`wps:txbx`) are preserved as raw-block, not as
+  `::: {.textbox}`: the type exists in the IR and the spec, but emitting it is deferred to Phase 2,
+  where the writer will need to reconstruct them.
+- Three defects the corpus uncovered and that are now fixed: length formatting was
+  crippled by rounding (a 1417-twip margin was written as `2.499cm`), empty paragraphs
+  silently disappeared, and a hyperlink's character style was emitted twice.
 
 ---
 
-## Fase 4 — ODF: ODT y ODS ⇄ DocMark (3–4 semanas) — *paralelizable con Fase 5*
+## Phase 2 — DocMark → DOCX writing + round-trip (3–5 weeks)
 
-**Objetivo**: paridad de LibreOffice con los formatos OOXML ya soportados.
+**Objective**: close the bidirectional text cycle and stand up the fidelity infrastructure.
 
-Tareas:
-1. Reader/writer ODT propio (`docsai-odf`, `zip`+`quick-xml`): content/styles/meta;
-   **des-automatización** de estilos automáticos al leer (→ deltas) y re-generación al escribir.
-2. Imágenes ODT: `<draw:frame>/<draw:image>` + `Pictures/*` → mismo modelo `ImageGeometry`
-   (anclajes `as-char/char/paragraph/page` → `Inline`/`Floating`; `svg:x/y/width/height`,
-   `style:wrap`, rotación y `fo:clip`); escritura inversa con estilos gráficos ODF.
-3. Reader ODS con `calamine` (valores/fórmulas) + estilos propios; writer ODS con
-   `spreadsheet-ods` (evaluar en mini-spike; si no da la talla, writer propio). Imágenes de
-   hoja ODS (`draw:frame` anclado a celda/hoja) mapeadas a los mismos anclajes de hoja del IR.
-4. Fórmulas OpenFormula: conservar dialecto (`formula-dialect=openformula`); NO traducir aún.
-5. Corpus ODF espejo del OOXML (los mismos rasgos, incluidos los documentos de imágenes),
-   generado con LibreOffice.
-6. Nota de alcance: la conversión cruzada docx⇄odt "funciona" vía IR, pero los raw-blocks de un
-   dialecto se descartan con advertencia en el otro. Documentar en README.
+Tasks:
+1. DocMark parser (`docsai-docmark`): comrak + custom layer for `{...}` attributes and fenced divs
+   `:::` → IR. Front-matter validation with useful line/column errors.
+2. docx writer: IR → `document.xml` + `styles.xml` + `numbering.xml` + media + props
+   (with `docx-rs` where it reaches; direct XML where it does not). Re-injection of `format=ooxml` raw-blocks.
+   Images: re-packaging of `word/media/*` from the `AssetStore` (without recompressing bitmaps) and
+   emission of full DrawingML from `ImageGeometry` — inline and floating with position, wrap,
+   z-order, rotation, crop and alt/title; always DrawingML even if the source was VML.
+3. `roundtrip` command: docx→md→docx→md; structural diff of normalized IR; fidelity metric
+   per category (text, styles, tables, images, lists) and `--json` output.
+4. **Serializer idempotence** test in CI: `serialize(parse(md)) == md` byte for byte
+   over all goldens.
+5. Property testing (proptest): generate valid random IRs and verify IR→md→IR == identity.
+6. External validation: generated docx open without a repair dialog in Word and LibreOffice
+   (manual checklist documented per release; later automatable via headless LibreOffice on Linux CI).
 
-Criterios de aceptación:
-- [ ] Round-trip odt y ods sobre corpus ODF con fidelidad ≥ 90 % (incluida la geometría de
-      imágenes: tamaño, posición, anclaje y wrap).
-- [ ] docx→DocMark→odt produce documento correcto para el corpus básico (rasgos comunes).
-
----
-
-## Fase 5 — DOC legado (2–3 semanas) — *paralelizable con Fase 4*
-
-**Objetivo**: lectura de `.doc` con la estrategia de dos niveles del análisis (§1.3).
-
-Tareas:
-1. Detección de LibreOffice en runtime por SO (rutas estándar + PATH); flag
-   `--use-loffice auto|never|require`; conversión `soffice --headless --convert-to docx` en
-   directorio temporal sandbox y reentrada por el pipeline docx de Fase 1.
-2. Extractor nativo degradado: `cfb` + FIB + piece table → texto con párrafos y propiedades
-   básicas; extracción de imágenes embebidas (BLIPs del stream Escher/OfficeArt) al
-   `AssetStore` — sin geometría fina: se emiten con `anchor=inline` y tamaño nativo, con
-   advertencia `ImageGeometryDegraded`. Marcar salida como degradada en el `ConversionReport`.
-3. Mensajería clara: si no hay LibreOffice, el usuario sabe exactamente qué está perdiendo y cómo
-   mejorar el resultado.
-4. Tests: corpus `.doc` generado guardando el corpus docx como .doc con Word/LibreOffice.
-
-Criterios de aceptación:
-- [ ] Con LibreOffice instalado: fidelidad equivalente a la ruta docx.
-- [ ] Sin LibreOffice: texto completo y estructura de párrafos correcta, sin pánicos.
-- [ ] `.doc` cifrados/protegidos rechazados con error claro.
+Acceptance criteria:
+- [ ] Idempotent round-trip (2nd pass == 1st pass) on the whole corpus.
+- [ ] Fidelity metric ≥ 95 % on text/styles/tables/lists of the corpus.
+- [ ] Images in round-trip: identical bitmap bytes (no recompression), no duplicates in
+      media, and geometry (size, position, anchor, wrap, rotation, crop) preserved — images
+      appear in the same place and size when opening the regenerated docx in Word/LibreOffice.
+- [ ] Generated docx open cleanly in Word and LibreOffice (checklist).
+- [ ] Hand-editing a `.dmk.md` (add a paragraph with an existing style) and regenerating docx works.
 
 ---
 
-## Fase 6 — CLI completa y distribución (2–3 semanas)
+## Phase 3 — Spreadsheets: XLSX/XLS ⇄ DocMark (4–5 weeks)
 
-**Objetivo**: experiencia de producto: la CLI definitiva y binarios instalables en 3 SO.
+**Objective**: bidirectional `xlsx` with values, formulas and formats; `xls` reading.
 
-Tareas:
-1. CLI final según `arquitectura.md` §5: `convert`, `inspect`, `roundtrip`, `formats`;
-   `--json`, `--strict`, stdin/stdout, códigos de salida; `--style-map` (modo mammoth, spec §5).
-2. Mensajes de error y advertencias pulidos (con `miette` o similar para diagnósticos bonitos);
+Tasks:
+1. **Spike (3 days)**: decide xlsx writer — `umya-spreadsheet` (reads and writes styles) vs
+   `rust_xlsxwriter` (better pure-write API). Criterion: which regenerates with higher fidelity
+   styles+numFmt from the IR. Document in `docs/spikes/`.
+2. xlsx reader: `calamine` for values and formulas; complementary custom reading of
+   `xl/styles.xml` (numFmt, fonts, fills, borders by index) and of dimensions/merges/panes
+   with `quick-xml`. Shared and array formulas expanded with metadata.
+3. Cell typing: date/time detection via numFmt (serial→ISO-8601 and back); booleans,
+   errors (`#DIV/0!`…).
+4. Sheet serialization to DocMark per spec §4 (value table + `cell-meta` with compacted
+   ranges) and reverse parser.
+5. xlsx writer from IR (crate chosen in the spike): values, formulas (recalc delegated to
+   Excel/LibreOffice on open: write formula without cached value or with the preserved value),
+   numFmt, styles, merges, widths, defined names.
+6. **Sheet images** (spec §4.1): custom reading of `xl/drawings/drawing*.xml` with
+   `quick-xml` (calamine/umya do not cover them with full geometry) → `ImageRef` with anchors
+   `SheetTwoCell`/`SheetOneCell`/`SheetAbsolute`, in-cell offsets,
+   `move-with-cells`/`size-with-cells`, and the rest of the common model (rotation, crop, alt,
+   hyperlink). Writing of `drawing*.xml` + relationships from the IR. Native charts →
+   raw-block with warning.
+7. xls reader (calamine) → same pipeline (read-only; document in `formats`).
+8. Corpus: add workbooks with dates, percentages, currencies, cross-sheet formulas, defined
+   names, images with all three anchor types, 100k cells (performance).
+
+Acceptance criteria:
+- [ ] xlsx round-trip: values, formulas and numFmt intact on the corpus (fidelity ≥ 95 %).
+- [ ] Sheet image round-trip: all three anchors preserved symbolically (two-cell
+      still stretches with the grid after the round trip), bitmaps without recompression.
+- [ ] An xlsx with dates survives round-trip without corrupting serials (dedicated test).
+- [ ] 100k-cell xlsx: < 3 s, < 500 MB RAM.
+- [ ] Excel and LibreOffice recalculate generated files without errors (checklist).
+
+---
+
+## Phase 4 — ODF: ODT and ODS ⇄ DocMark (3–4 weeks) — *parallelizable with Phase 5*
+
+**Objective**: LibreOffice parity with the already-supported OOXML formats.
+
+Tasks:
+1. Custom ODT reader/writer (`docsai-odf`, `zip`+`quick-xml`): content/styles/meta;
+   **de-automatization** of automatic styles on read (→ deltas) and regeneration on write.
+2. ODT images: `<draw:frame>/<draw:image>` + `Pictures/*` → same `ImageGeometry` model
+   (`as-char/char/paragraph/page` anchors → `Inline`/`Floating`; `svg:x/y/width/height`,
+   `style:wrap`, rotation and `fo:clip`); reverse write with ODF graphic styles.
+3. ODS reader with `calamine` (values/formulas) + custom styles; ODS writer with
+   `spreadsheet-ods` (evaluate in a mini-spike; if it falls short, custom writer). ODS sheet
+   images (`draw:frame` anchored to cell/sheet) mapped to the same IR sheet anchors.
+4. OpenFormula formulas: keep dialect (`formula-dialect=openformula`); do NOT translate yet.
+5. ODF corpus mirroring OOXML (same traits, including image documents),
+   generated with LibreOffice.
+6. Scope note: cross conversion docx⇄odt "works" via the IR, but raw-blocks of one
+   dialect are dropped with a warning in the other. Document in README.
+
+Acceptance criteria:
+- [ ] odt and ods round-trip on ODF corpus with fidelity ≥ 90 % (including image
+      geometry: size, position, anchor and wrap).
+- [ ] docx→DocMark→odt produces a correct document for the basic corpus (common traits).
+
+---
+
+## Phase 5 — Legacy DOC (2–3 weeks) — *parallelizable with Phase 4*
+
+**Objective**: `.doc` reading with the two-level strategy from the analysis (§1.3).
+
+Tasks:
+1. Runtime LibreOffice detection per OS (standard paths + PATH); flag
+   `--use-loffice auto|never|require`; conversion `soffice --headless --convert-to docx` in a
+   sandboxed temporary directory and re-entry through the Phase 1 docx pipeline.
+2. Degraded native extractor: `cfb` + FIB + piece table → text with paragraphs and basic
+   properties; extraction of embedded images (BLIPs from the Escher/OfficeArt stream) to the
+   `AssetStore` — without fine geometry: emitted with `anchor=inline` and native size, with
+   `ImageGeometryDegraded` warning. Mark output as degraded in the `ConversionReport`.
+3. Clear messaging: if LibreOffice is missing, the user knows exactly what is being lost and how
+   to improve the result.
+4. Tests: `.doc` corpus generated by saving the docx corpus as .doc with Word/LibreOffice.
+
+Acceptance criteria:
+- [ ] With LibreOffice installed: fidelity equivalent to the docx path.
+- [ ] Without LibreOffice: full text and correct paragraph structure, no panics.
+- [ ] Encrypted/protected `.doc` rejected with a clear error.
+
+---
+
+## Phase 6 — Full CLI and distribution (2–3 weeks)
+
+**Objective**: product experience: the definitive CLI and installable binaries on 3 OSes.
+
+Tasks:
+1. Final CLI per `architecture.md` §5: `convert`, `inspect`, `roundtrip`, `formats`;
+   `--json`, `--strict`, stdin/stdout, exit codes; `--style-map` (mammoth mode, spec §5).
+2. Polished error messages and warnings (with `miette` or similar for nice diagnostics);
    `--verbose`/`RUST_LOG`.
-3. Procesado por lotes: `docsai convert *.docx --out-dir md/` con paralelismo (`rayon`) y
-   resumen agregado.
-4. `cargo-dist`: releases automáticas por tag con binarios firmados para los 5 targets;
-   instaladores shell/powershell; fórmulas Homebrew/Scoop; publicación en crates.io.
-5. Documentación de usuario: README definitivo con ejemplos reales, página `--help` cuidada,
+3. Batch processing: `docsai convert *.docx --out-dir md/` with parallelism (`rayon`) and
+   aggregated summary.
+4. `cargo-dist`: automatic releases per tag with signed binaries for the 5 targets;
+   shell/powershell installers; Homebrew/Scoop formulas; crates.io publication.
+5. User documentation: definitive README with real examples, carefully written `--help`,
    CHANGELOG (keep-a-changelog).
 
-Criterios de aceptación:
-- [ ] Instalación en máquina limpia de cada SO con un comando y conversión de prueba OK.
-- [ ] `docsai convert` sobre carpeta con 100 documentos mezclados termina con resumen correcto.
-- [ ] Todos los errores de usuario previsibles tienen mensaje accionable (revisión de UX escrita).
+Acceptance criteria:
+- [ ] Installation on a clean machine of each OS with one command and a successful test conversion.
+- [ ] `docsai convert` over a folder with 100 mixed documents finishes with a correct summary.
+- [ ] All foreseeable user errors have an actionable message (written UX review).
 
 ---
 
-## Fase 7 — Servidor MCP (2 semanas)
+## Phase 7 — MCP server (2 weeks)
 
-**Objetivo**: `docsai mcp` operativo con clientes reales.
+**Objective**: `docsai mcp` operational with real clients.
 
-Tareas:
-1. Implementar `docsai-mcp` con `rmcp` (stdio): las 4 tools de `arquitectura.md` §6 con schemas
-   JSON documentados y validación de entrada.
-2. Modo path y modo base64; límites de tamaño; timeouts; assets inline vs ficheros.
-3. Garantía stdout-limpio: test automático de que ninguna ruta de código escribe en stdout fuera
-   del protocolo (logs → stderr).
-4. Pruebas de integración con MCP Inspector y con Claude Desktop/Claude Code reales; recetas de
-   configuración en README.
-5. Considerar (backlog, no bloqueo): tool `apply_edits` para edición guiada de documentos vía
-   DocMark en el futuro.
+Tasks:
+1. Implement `docsai-mcp` with `rmcp` (stdio): the 4 tools from `architecture.md` §6 with documented
+   JSON schemas and input validation.
+2. Path mode and base64 mode; size limits; timeouts; inline assets vs files.
+3. Clean-stdout guarantee: automatic test that no code path writes to stdout outside
+   the protocol (logs → stderr).
+4. Integration tests with MCP Inspector and real Claude Desktop/Claude Code; configuration
+   recipes in README.
+5. Consider (backlog, non-blocking): `apply_edits` tool for guided document editing via
+   DocMark in the future.
 
-Criterios de aceptación:
-- [ ] Un cliente MCP real convierte docx→markdown y markdown→docx de extremo a extremo.
-- [ ] Entradas malformadas devuelven errores MCP correctos, nunca cuelgan el servidor.
-- [ ] Sesión de 100 conversiones seguidas sin fugas de memoria ni ficheros temporales huérfanos.
-
----
-
-## Fase 8 — Endurecimiento y calidad (2–3 semanas, parcialmente continua)
-
-**Objetivo**: robustez de producción.
-
-Tareas:
-1. Fuzzing con `cargo-fuzz` de los 4 parsers de entrada (docx, xlsx, odf, docmark); corpus de
-   fuzzing sembrado con el corpus de tests; ejecutar en CI programada (cron semanal).
-2. Suite de documentos adversarios: ZIP bombs (límites de descompresión), XML entity expansion
-   (verificar que quick-xml no expande entidades externas), rutas de assets maliciosas
-   (path traversal en nombres de media), tamaños extremos.
-3. Benchmarks `criterion` + presupuesto de rendimiento en CI (regresión > 20 % bloquea).
-4. `cargo audit`/`cargo deny` en CI (licencias + vulnerabilidades); `cargo bloat` informativo.
-5. Ampliar corpus con documentos reales variados (informes, plantillas corporativas, hojas
-   financieras) y publicar la **matriz de fidelidad** por rasgo en la documentación.
-6. Revisión de seguridad: el servidor MCP nunca escribe fuera de los directorios indicados;
-   normalización de rutas; sin ejecución de contenido del documento (macros ignoradas SIEMPRE —
-   los `.docm/.xlsm` se leen como sus equivalentes sin macros, con advertencia).
-
-Criterios de aceptación:
-- [ ] 72 h de fuzzing acumulado sin crashes en los 4 parsers.
-- [ ] Suite adversaria completa en verde.
-- [ ] Matriz de fidelidad publicada y ≥ objetivos por fase.
+Acceptance criteria:
+- [ ] A real MCP client converts docx→markdown and markdown→docx end to end.
+- [ ] Malformed inputs return correct MCP errors, never hang the server.
+- [ ] Session of 100 consecutive conversions with no memory leaks or orphan temporary files.
 
 ---
 
-## Fase 9 — v1.0 y backlog post-1.0 (1 semana + continuo)
+## Phase 8 — Hardening and quality (2–3 weeks, partially continuous)
 
-**Cierre v1.0**: congelar CLI y formato DocMark 1.0 estable, release notes, anuncio.
+**Objective**: production robustness.
 
-Backlog priorizado post-1.0 (no comprometido):
-- Traducción de dialectos de fórmula OOXML ⇄ OpenFormula (riesgo R5).
-- PowerPoint (`.pptx`/`.odp`) → DocMark de solo lectura.
-- Conversión WMF/EMF → PNG/SVG (crate `emf`/librería propia o fallback).
-- Comentarios y control de cambios (`w:ins`/`w:del`) como extensiones DocMark (sintaxis CriticMarkup).
-- Tool MCP de edición incremental (`apply_edits`).
-- Modo biblioteca: publicar `docsai-convert` como crate estable para terceros + bindings WASM.
-- Escritura `.doc`/`.xls` vía LibreOffice fallback si hay demanda.
+Tasks:
+1. Fuzzing with `cargo-fuzz` of the 4 input parsers (docx, xlsx, odf, docmark); fuzzing
+   corpus seeded with the test corpus; run on scheduled CI (weekly cron).
+2. Adversarial document suite: ZIP bombs (decompression limits), XML entity expansion
+   (verify quick-xml does not expand external entities), malicious asset paths
+   (path traversal in media names), extreme sizes.
+3. `criterion` benchmarks + performance budget in CI (regression > 20 % blocks).
+4. `cargo audit`/`cargo deny` in CI (licenses + vulnerabilities); informative `cargo bloat`.
+5. Expand corpus with varied real documents (reports, corporate templates, financial
+   sheets) and publish the **fidelity matrix** by trait in the documentation.
+6. Security review: the MCP server never writes outside the indicated directories;
+   path normalization; no execution of document content (macros ALWAYS ignored —
+   `.docm/.xlsm` are read as their macro-free equivalents, with a warning).
+
+Acceptance criteria:
+- [ ] 72 h of accumulated fuzzing without crashes on the 4 parsers.
+- [ ] Full adversarial suite green.
+- [ ] Fidelity matrix published and ≥ per-phase targets.
 
 ---
 
-## Resumen de calendario (orientativo, 1 desarrollador senior)
+## Phase 9 — v1.0 and post-1.0 backlog (1 week + continuous)
 
-| Fase | Duración | Acumulado |
+**v1.0 close**: freeze stable CLI and DocMark 1.0 format, release notes, announcement.
+
+Prioritized post-1.0 backlog (not committed):
+- OOXML ⇄ OpenFormula formula dialect translation (risk R5).
+- PowerPoint (`.pptx`/`.odp`) → read-only DocMark.
+- WMF/EMF → PNG/SVG conversion (`emf` crate / custom library or fallback).
+- Comments and track changes (`w:ins`/`w:del`) as DocMark extensions (CriticMarkup syntax).
+- Incremental MCP edit tool (`apply_edits`).
+- Library mode: publish `docsai-convert` as a stable crate for third parties + WASM bindings.
+- `.doc`/`.xls` writing via LibreOffice fallback if demand warrants it.
+
+---
+
+## Schedule summary (indicative, 1 senior developer)
+
+| Phase | Duration | Cumulative |
 |---|---|---|
-| 0 Fundamentos | 2–3 sem | 3 |
-| 1 DOCX lectura | 4–6 sem | 9 |
-| 2 DOCX escritura + round-trip | 3–5 sem | 14 |
-| 3 XLSX/XLS | 4–5 sem | 19 |
-| 4 ODF | 3–4 sem | 22* |
-| 5 DOC | 2–3 sem | 22* (*paralelas 4‖5 con 2 devs) |
-| 6 CLI + distribución | 2–3 sem | 25 |
-| 7 MCP | 2 sem | 27 |
-| 8 Endurecimiento | 2–3 sem | 30 |
-| 9 v1.0 | 1 sem | ~31 sem (~7 meses; ~5–5,5 con 2 devs desde Fase 3) |
+| 0 Foundations | 2–3 wk | 3 |
+| 1 DOCX reading | 4–6 wk | 9 |
+| 2 DOCX writing + round-trip | 3–5 wk | 14 |
+| 3 XLSX/XLS | 4–5 wk | 19 |
+| 4 ODF | 3–4 wk | 22* |
+| 5 DOC | 2–3 wk | 22* (*parallel 4‖5 with 2 devs) |
+| 6 CLI + distribution | 2–3 wk | 25 |
+| 7 MCP | 2 wk | 27 |
+| 8 Hardening | 2–3 wk | 30 |
+| 9 v1.0 | 1 wk | ~31 wk (~7 months; ~5–5.5 with 2 devs from Phase 3) |
 
-## Métricas de seguimiento del proyecto
+## Project tracking metrics
 
-- **Fidelidad por categoría** (comando `roundtrip` sobre corpus): objetivo ≥ 95 % OOXML, ≥ 90 % ODF.
-- **Raw-blocks por documento del corpus real**: tendencia descendente por fase.
-- **Cobertura de tests** de los crates de biblioteca ≥ 80 %.
-- **Rendimiento**: presupuestos de `arquitectura.md` §8 en CI.
+- **Fidelity per category** (`roundtrip` command on corpus): target ≥ 95 % OOXML, ≥ 90 % ODF.
+- **Raw-blocks per real corpus document**: downward trend per phase.
+- **Test coverage** of library crates ≥ 80 %.
+- **Performance**: budgets from `architecture.md` §8 in CI.

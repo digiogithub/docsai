@@ -1,4 +1,4 @@
-//! Media storage abstraction (arquitectura §3.2).
+//! Media storage abstraction (architecture §3.2).
 //!
 //! The IR never holds image bytes: an [`ImageRef`](crate::image::ImageRef)
 //! points at an [`AssetId`] resolved by an [`AssetStore`]. `docsai-convert`

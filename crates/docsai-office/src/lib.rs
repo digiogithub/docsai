@@ -1,7 +1,7 @@
 //! Office readers and writers for docsai.
 //!
-//! Fase 1 lands the `.docx` reader; `.xlsx`/`.xls` arrive in Fase 3 and `.doc`
-//! in Fase 5. The crate depends on `docsai-model` and on nothing else in the
+//! Phase 1 lands the `.docx` reader; `.xlsx`/`.xls` arrive in Phase 3 and `.doc`
+//! in Phase 5. The crate depends on `docsai-model` and on nothing else in the
 //! workspace (`AGENTS.md` §3).
 //!
 //! ```no_run

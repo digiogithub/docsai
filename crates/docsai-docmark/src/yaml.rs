@@ -1,6 +1,6 @@
 //! Small YAML subset used by DocMark front matter.
 //!
-//! Only the shapes the serialiser emits are accepted: scalars, flow maps,
+//! Only the shapes the serializer emits are accepted: scalars, flow maps,
 //! nested block maps and simple sequences of flow maps.
 
 use std::collections::BTreeMap;
@@ -83,9 +83,30 @@ impl Value {
     pub fn string_or_empty(&self) -> String {
         match self {
             Value::String(s) => s.clone(),
-            Value::Number(n) => crate::units::trim_display(*n),
+            Value::Number(n) => {
+                let mut s = format!("{n}");
+                if s.contains('.') {
+                    while s.ends_with('0') {
+                        s.pop();
+                    }
+                    if s.ends_with('.') {
+                        s.pop();
+                    }
+                }
+                s
+            }
             Value::Bool(b) => b.to_string(),
             _ => String::new(),
+        }
+    }
+
+    /// Renders a scalar the way DocMark lengths and tokens expect it.
+    pub fn as_token(&self) -> Option<String> {
+        match self {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(self.string_or_empty()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
         }
     }
 }
@@ -242,7 +263,7 @@ fn split_key(content: &str) -> Option<(String, &str)> {
     if key.is_empty() {
         return None;
     }
-    // Bare keys cannot contain spaces in our serialiser except when quoted.
+    // Bare keys cannot contain spaces in our serializer except when quoted.
     Some((key.to_string(), content[colon + 1..].trim_start()))
 }
 

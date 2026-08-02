@@ -1,258 +1,256 @@
-# Análisis técnico
+# Technical analysis
 
-Documento de análisis previo al desarrollo de `docsai`. Cubre: (1) los formatos de entrada/salida
-y su complejidad real, (2) el estado del arte en proyectos open source comparables, (3) las
-variantes de Markdown extendido candidatas como formato pivote, (4) la evaluación de librerías
-Rust disponibles y (5) las decisiones tomadas con sus riesgos.
+Pre-development analysis document for `docsai`. Covers: (1) input/output formats and their real
+complexity, (2) the state of the art in comparable open-source projects, (3) candidate extended
+Markdown variants as pivot format, (4) evaluation of available Rust libraries, and (5) decisions
+taken with their risks.
 
-Fecha del análisis: agosto de 2026.
+Analysis date: August 2026.
 
 ---
 
-## 1. Los formatos de entrada/salida
+## 1. Input/output formats
 
-### 1.1 OOXML: `.docx` y `.xlsx` (ECMA-376 / ISO 29500)
+### 1.1 OOXML: `.docx` and `.xlsx` (ECMA-376 / ISO 29500)
 
-Ambos son contenedores ZIP con XML dentro. Son los formatos con mejor documentación pública y
-mejor soporte de librerías, y por eso anclan las fases 1–3 del plan.
+Both are ZIP containers with XML inside. They are the formats with the best public documentation
+and library support, and therefore anchor phases 1–3 of the plan.
 
-**`.docx` (WordprocessingML)** — partes relevantes dentro del ZIP:
+**`.docx` (WordprocessingML)** — relevant parts inside the ZIP:
 
-| Parte | Contenido | Relevancia para docsai |
+| Part | Content | Relevance for docsai |
 |---|---|---|
-| `word/document.xml` | Cuerpo: párrafos (`w:p`), runs (`w:r`), tablas (`w:tbl`) | Núcleo de la conversión |
-| `word/styles.xml` | Catálogo de estilos (párrafo, carácter, tabla) + herencia `basedOn` | Debe volcarse al front matter DocMark |
-| `word/numbering.xml` | Definiciones de listas (numeración, viñetas, niveles) | Crítico: las listas en OOXML no son anidadas sintácticamente, se reconstruyen desde `numId`/`ilvl` |
-| `word/media/*` | Imágenes embebidas (png, jpeg, gif, **wmf/emf**) | Extraer a `assets/` |
-| `word/_rels/*.rels` | Relaciones (imágenes, hipervínculos) | Resolución de referencias |
-| `word/header*.xml`, `word/footer*.xml` | Cabeceras y pies | Contenedores DocMark dedicados |
-| `docProps/core.xml`, `docProps/app.xml` | Propiedades (título, autor, fechas…) | Front matter |
-| `word/settings.xml`, secciones `w:sectPr` | Tamaño página, márgenes, columnas | Metadatos de sección |
+| `word/document.xml` | Body: paragraphs (`w:p`), runs (`w:r`), tables (`w:tbl`) | Core of the conversion |
+| `word/styles.xml` | Style catalog (paragraph, character, table) + `basedOn` inheritance | Must be dumped into DocMark front matter |
+| `word/numbering.xml` | List definitions (numbering, bullets, levels) | Critical: lists in OOXML are not syntactically nested; they are rebuilt from `numId`/`ilvl` |
+| `word/media/*` | Embedded images (png, jpeg, gif, **wmf/emf**) | Extract to `assets/` |
+| `word/_rels/*.rels` | Relationships (images, hyperlinks) | Reference resolution |
+| `word/header*.xml`, `word/footer*.xml` | Headers and footers | Dedicated DocMark containers |
+| `docProps/core.xml`, `docProps/app.xml` | Properties (title, author, dates…) | Front matter |
+| `word/settings.xml`, `w:sectPr` sections | Page size, margins, columns | Section metadata |
 
-Puntos duros conocidos de `.docx`:
-- **Herencia de formato en 4 niveles**: defaults del documento → estilo de párrafo → estilo de
-  carácter → formato directo (`rPr`/`pPr`). Para una conversión fiel hay que *resolver* la cascada
-  pero *almacenar* solo la referencia al estilo + los deltas directos (si se aplana todo, la
-  conversión inversa produce documentos monstruosos sin estilos reutilizables).
-- **Listas**: reconstrucción del árbol a partir de pares `(numId, ilvl)` planos.
-- **Campos** (`w:fldSimple`, `w:instrText`): TOC, referencias cruzadas, números de página. Se
-  conservan como raw-blocks en v1.
-- **Imágenes WMF/EMF**: formatos vectoriales legados de Windows sin soporte de renderizado
-  multiplataforma sencillo. Estrategia: extraer tal cual + advertencia; conversión opcional en fases tardías.
-- **Revisiones/comentarios** (`w:ins`, `w:del`, `w:comment*`): fuera del alcance v1; se aceptan
-  documentos con revisiones tomando la versión "aceptada" y emitiendo advertencia.
+Known hard points of `.docx`:
+- **4-level formatting inheritance**: document defaults → paragraph style → character style →
+  direct formatting (`rPr`/`pPr`). For a faithful conversion you must *resolve* the cascade but
+  *store* only the style reference + direct deltas (if everything is flattened, the inverse
+  conversion produces monstrous documents with no reusable styles).
+- **Lists**: rebuild the tree from flat `(numId, ilvl)` pairs.
+- **Fields** (`w:fldSimple`, `w:instrText`): TOC, cross-references, page numbers. Preserved as
+  raw-blocks in v1.
+- **WMF/EMF images**: legacy Windows vector formats without simple multiplatform rendering
+  support. Strategy: extract as-is + warning; optional conversion in later phases.
+- **Revisions/comments** (`w:ins`, `w:del`, `w:comment*`): out of scope for v1; documents with
+  revisions are accepted by taking the "accepted" version and emitting a warning.
 
-**`.xlsx` (SpreadsheetML)** — partes relevantes: `xl/workbook.xml`, `xl/worksheets/sheet*.xml`,
-`xl/sharedStrings.xml`, `xl/styles.xml` (formatos de número, fuentes, rellenos, bordes — todo por
-índices cruzados), `xl/calcChain.xml`.
+**`.xlsx` (SpreadsheetML)** — relevant parts: `xl/workbook.xml`, `xl/worksheets/sheet*.xml`,
+`xl/sharedStrings.xml`, `xl/styles.xml` (number formats, fonts, fills, borders — all via cross
+indexes), `xl/calcChain.xml`.
 
-Puntos duros de `.xlsx`:
-- **Las celdas guardan valor cacheado + fórmula** (`<c><f>SUM(A1:A3)</f><v>42</v></c>`). DocMark
-  debe conservar ambos: la fórmula para la bidireccionalidad, el valor para la legibilidad.
-- **Fórmulas compartidas** (`t="shared"`) y de matriz (`t="array"`): hay que expandirlas o
-  conservar su metadato de rango.
-- **Formatos de número** (`numFmt`): son la diferencia entre `45123` y `15/07/2023` — las fechas
-  en Excel son números de serie + formato. Conservar `numFmtId`/código de formato por celda es
-  obligatorio para no corromper datos en el round-trip.
-- Celdas combinadas (`mergeCells`), anchos de columna/altos de fila, paneles congelados,
-  validaciones, formato condicional (los tres últimos: metadatos en v1, sin semántica).
+Hard points of `.xlsx`:
+- **Cells store cached value + formula** (`<c><f>SUM(A1:A3)</f><v>42</v></c>`). DocMark must keep
+  both: the formula for bidirectionality, the value for readability.
+- **Shared formulas** (`t="shared"`) and array formulas (`t="array"`): expand them or preserve
+  their range metadata.
+- **Number formats** (`numFmt`): the difference between `45123` and `15/07/2023` — Excel dates
+  are serial numbers + format. Keeping `numFmtId`/format code per cell is mandatory to avoid
+  corrupting data on round-trip.
+- Merged cells (`mergeCells`), column widths/row heights, frozen panes, validations, conditional
+  formatting (the last three: metadata in v1, no semantics).
 
-### 1.2 ODF: `.odt` y `.ods` (ISO 26300, OASIS OpenDocument)
+### 1.2 ODF: `.odt` and `.ods` (ISO 26300, OASIS OpenDocument)
 
-También ZIP+XML (`content.xml`, `styles.xml`, `meta.xml`, `settings.xml`, `Pictures/`). Modelo
-conceptual muy parecido a OOXML pero con diferencias importantes:
+Also ZIP+XML (`content.xml`, `styles.xml`, `meta.xml`, `settings.xml`, `Pictures/`). Conceptual
+model very similar to OOXML but with important differences:
 
-- Los **estilos automáticos** (`office:automatic-styles`) representan el formato directo: cada
-  fragmento con formato manual genera un estilo anónimo. Hay que "des-automatizar" al leer
-  (mapear estilos automáticos a deltas de formato directo en el IR).
-- Las fórmulas de `.ods` usan **OpenFormula** con prefijo de espacio de nombres
-  (`of:=SUM([.A1:.A3])`) y sintaxis de referencia distinta (`[.A1]` vs `A1`). Para la
-  bidireccionalidad OOXML⇄ODF haría falta traducir sintaxis de fórmulas; en v1 se conserva la
-  fórmula en su dialecto original anotando `formula-dialect` en la celda.
-- ODF está mejor especificado y es más regular que OOXML; el esfuerzo de un parser propio con
-  `quick-xml` es asumible y de hecho es el plan para `.odt` (ver §4.3).
+- **Automatic styles** (`office:automatic-styles`) represent direct formatting: every fragment
+  with manual formatting generates an anonymous style. They must be "de-automated" on read
+  (map automatic styles to direct-formatting deltas in the IR).
+- `.ods` formulas use **OpenFormula** with a namespace prefix (`of:=SUM([.A1:.A3])`) and a
+  different reference syntax (`[.A1]` vs `A1`). For OOXML⇄ODF bidirectionality, formula syntax
+  would need translating; in v1 the formula is kept in its original dialect, annotating
+  `formula-dialect` on the cell.
+- ODF is better specified and more regular than OOXML; the effort of a custom parser with
+  `quick-xml` is manageable and is in fact the plan for `.odt` (see §4.3).
 
-### 1.3 Formatos binarios legados: `.doc` (MS-DOC) y `.xls` (BIFF8)
+### 1.3 Legacy binary formats: `.doc` (MS-DOC) and `.xls` (BIFF8)
 
-- **`.xls`**: resuelto — `calamine` lo lee de forma nativa (valores y fórmulas). Solo lectura.
-- **`.doc`**: es el mayor riesgo técnico del proyecto. Es un formato binario sobre contenedor
-  OLE2/CFB con estructuras internas complejas (piece table, FIB, FKPs…). **No existe ningún
-  crate Rust maduro que lo lea con estilos e imágenes.** Opciones evaluadas:
+- **`.xls`**: solved — `calamine` reads it natively (values and formulas). Read-only.
+- **`.doc`**: the project's largest technical risk. It is a binary format on an OLE2/CFB
+  container with complex internal structures (piece table, FIB, FKPs…). **No mature Rust crate
+  reads it with styles and images.** Options evaluated:
 
-| Opción | Esfuerzo | Fidelidad | Dependencias |
+| Option | Effort | Fidelity | Dependencies |
 |---|---|---|---|
-| Parser propio sobre crate `cfb` (spec MS-DOC) | Muy alto (meses) | Alta | Ninguna externa |
-| Fallback a LibreOffice headless (`soffice --headless --convert-to docx`) y reusar pipeline docx | Bajo | Muy alta | LibreOffice instalado (opcional, detectado en runtime) |
-| `antiword`/`wvWare` como proceso externo | Bajo | Baja (pierde estilos) | Binario externo |
-| Extracción de texto plano propia (piece table only) | Medio | Solo texto | Ninguna |
+| Custom parser on the `cfb` crate (MS-DOC spec) | Very high (months) | High | No external deps |
+| Fallback to LibreOffice headless (`soffice --headless --convert-to docx`) and reuse the docx pipeline | Low | Very high | LibreOffice installed (optional, detected at runtime) |
+| `antiword`/`wvWare` as external process | Low | Low (loses styles) | External binary |
+| Custom plain-text extraction (piece table only) | Medium | Text only | None |
 
-  **Decisión**: estrategia en dos niveles. (a) Fallback LibreOffice headless si está instalado —
-  fidelidad máxima con esfuerzo mínimo; (b) extractor nativo de texto+estructura básica sobre
-  `cfb` como modo degradado sin dependencias. El parser MS-DOC completo no se aborda salvo que
-  la demanda real lo justifique. Esto mantiene el principio "binario único sin runtime externo
-  obligatorio": LibreOffice mejora `.doc` pero nunca es requisito.
+  **Decision**: two-level strategy. (a) LibreOffice headless fallback if installed — maximum
+  fidelity with minimum effort; (b) native text+basic-structure extractor on `cfb` as a degraded
+  mode without dependencies. A full MS-DOC parser is not pursued unless real demand justifies it.
+  This keeps the principle "single binary with no mandatory external runtime": LibreOffice
+  improves `.doc` but is never a requirement.
 
-### 1.4 Imágenes y objetos gráficos: análisis transversal
+### 1.4 Images and graphic objects: cross-cutting analysis
 
-Las imágenes son un requisito de primera clase del proyecto: **todos** los formatos de entrada
-las llevan, con modelos de geometría distintos, y la conversión debe extraerlas y conservar
-tamaño, posición, anclaje y demás propiedades para el round-trip. Modelo por formato:
+Images are a first-class project requirement: **all** input formats carry them, with different
+geometry models, and conversion must extract them and preserve size, position, anchor, and other
+properties for round-trip. Model by format:
 
-| Formato | Dónde viven | Modelo de geometría/anclaje |
+| Format | Where they live | Geometry/anchor model |
 |---|---|---|
-| `.docx` | `word/media/*` + `<w:drawing>` (DrawingML) o `<w:pict>` (VML legado) | `wp:inline` (en línea, solo `wp:extent`) o `wp:anchor` (flotante: posición relativa a página/margen/párrafo/carácter, offsets EMU, wrap `square/tight/through/topAndBottom/none`, z-order, `behindDoc`) |
-| `.xlsx` | `xl/media/*` + `xl/drawings/drawing*.xml` (SpreadsheetDrawingML) | Tres anclajes: `xdr:twoCellAnchor` (de celda a celda + offsets, se estira con la rejilla), `xdr:oneCellAnchor` (celda origen + tamaño fijo), `xdr:absoluteAnchor` (posición absoluta en EMU) |
-| `.odt` | `Pictures/*` + `<draw:frame><draw:image>` | `text:anchor-type` = `as-char/char/paragraph/page/frame`; `svg:width/height/x/y`; wrap vía estilo gráfico (`style:wrap`) |
-| `.ods` | `Pictures/*` + `<draw:frame>` dentro de `<table:shapes>` o anclado a celda | Anclaje a celda (`table:end-cell-address` + offsets) o a hoja |
-| `.doc` | Stream `Data`/Escher (OfficeArt) | Binario Escher; en la ruta LibreOffice-fallback se convierte gratis; en la ruta nativa degradada se extraen los BLIPs (imágenes) sin geometría fina |
+| `.docx` | `word/media/*` + `<w:drawing>` (DrawingML) or `<w:pict>` (legacy VML) | `wp:inline` (inline, only `wp:extent`) or `wp:anchor` (floating: position relative to page/margin/paragraph/character, EMU offsets, wrap `square/tight/through/topAndBottom/none`, z-order, `behindDoc`) |
+| `.xlsx` | `xl/media/*` + `xl/drawings/drawing*.xml` (SpreadsheetDrawingML) | Three anchors: `xdr:twoCellAnchor` (cell to cell + offsets, stretches with the grid), `xdr:oneCellAnchor` (origin cell + fixed size), `xdr:absoluteAnchor` (absolute position in EMU) |
+| `.odt` | `Pictures/*` + `<draw:frame><draw:image>` | `text:anchor-type` = `as-char/char/paragraph/page/frame`; `svg:width/height/x/y`; wrap via graphic style (`style:wrap`) |
+| `.ods` | `Pictures/*` + `<draw:frame>` inside `<table:shapes>` or cell-anchored | Cell anchor (`table:end-cell-address` + offsets) or sheet anchor |
+| `.doc` | `Data`/Escher stream (OfficeArt) | Binary Escher; on the LibreOffice-fallback path conversion is free; on the degraded native path BLIPs (images) are extracted without fine geometry |
 
-Propiedades a conservar en todos los casos (definen el modelo normalizado del IR, ver
-`arquitectura.md` §3.1): dimensiones mostradas vs dimensiones nativas del bitmap (y por tanto el
-factor de escala), DPI, recorte (`srcRect` en OOXML, `fo:clip` en ODF), rotación y volteos,
-anclaje y posición con sus offsets, modo de ajuste de texto (wrap), orden Z, texto alternativo y
-título (accesibilidad, `descr`/`svg:desc`), nombre interno del objeto e hipervínculo sobre la
-imagen.
+Properties to preserve in all cases (they define the IR's normalized model; see
+`architecture.md` §3.1): displayed dimensions vs native bitmap dimensions (and thus the scale
+factor), DPI, crop (`srcRect` in OOXML, `fo:clip` in ODF), rotation and flips, anchor and
+position with their offsets, text wrap mode, Z-order, alternative text and title (accessibility,
+`descr`/`svg:desc`), internal object name and hyperlink on the image.
 
-Puntos duros específicos:
-- **Coordenadas heterogéneas**: EMU en OOXML (914 400/pulgada), cm/in en ODF, twips en `.doc`.
-  El IR normaliza todo a EMU con newtypes; DocMark expone `px`/`pt`/`cm` legibles.
-- **VML legado en docx**: documentos antiguos (o convertidos desde `.doc`) usan `<w:pict>` con
-  VML en lugar de DrawingML. Hay que soportar lectura de ambos; la escritura emite siempre
-  DrawingML.
-- **Anclajes twoCell en xlsx**: el tamaño real depende de anchos de columna/altos de fila; para
-  conservar la geometría hay que guardar el anclaje simbólico (celdas + offsets), no el tamaño
-  resuelto — y a la inversa al escribir.
-- **WMF/EMF**: se extraen tal cual (round-trip perfecto) pero no son visualizables en visores
-  Markdown; conversión a PNG/SVG queda en backlog post-1.0. La imagen se referencia igualmente
-  con su geometría completa.
-- **Duplicados**: el mismo bitmap puede aparecer N veces con geometrías distintas; el
-  `AssetStore` deduplica por hash de contenido y cada aparición conserva su geometría propia.
-- **Imágenes enlazadas (no embebidas)**: OOXML/ODF permiten `r:link`/`xlink:href` externo; se
-  conserva la URL con advertencia (no se descarga contenido remoto — implicación de seguridad).
+Specific hard points:
+- **Heterogeneous coordinates**: EMU in OOXML (914,400/inch), cm/in in ODF, twips in `.doc`.
+  The IR normalizes everything to EMU with newtypes; DocMark exposes readable `px`/`pt`/`cm`.
+- **Legacy VML in docx**: old documents (or converted from `.doc`) use `<w:pict>` with VML
+  instead of DrawingML. Both must be readable; writing always emits DrawingML.
+- **twoCell anchors in xlsx**: real size depends on column widths/row heights; to preserve
+  geometry the symbolic anchor (cells + offsets) must be stored, not the resolved size — and the
+  inverse on write.
+- **WMF/EMF**: extracted as-is (perfect round-trip) but not viewable in Markdown viewers;
+  conversion to PNG/SVG stays in the post-1.0 backlog. The image is still referenced with its
+  full geometry.
+- **Duplicates**: the same bitmap may appear N times with different geometries; the
+  `AssetStore` deduplicates by content hash and each appearance keeps its own geometry.
+- **Linked (non-embedded) images**: OOXML/ODF allow external `r:link`/`xlink:href`; the URL is
+  preserved with a warning (remote content is not downloaded — security implication).
 
 ---
 
-## 2. Estado del arte open source (qué aprender y qué reutilizar)
+## 2. Open-source state of the art (what to learn and reuse)
 
-| Proyecto | Lenguaje | Qué hace | Lecciones para docsai |
+| Project | Language | What it does | Lessons for docsai |
 |---|---|---|---|
-| **Pandoc** | Haskell | Conversión universal vía AST pivote; su Markdown extendido (atributos `{...}`, divs `:::`, front matter) es el más expresivo del mercado | El patrón arquitectónico completo: readers → AST → writers. Su sintaxis de atributos es la base de DocMark. Limitación conocida: fidelidad media-baja en docx complejos (estilos custom, cajas de texto) y soporte xlsx inexistente |
-| **MarkItDown** (Microsoft) | Python | Office/PDF/HTML → Markdown "LLM-ready", unidireccional | Valida la demanda del caso de uso MCP/LLM; su pérdida total de estilos es exactamente el hueco que docsai cubre |
-| **Docling** (IBM) | Python | Documentos → Markdown/JSON con modelo propio `DoclingDocument` | Confirma la necesidad de un modelo de documento rico como pivote y de exportar a la vez MD legible + metadatos estructurados |
-| **mammoth** (.js/Python) | JS/Python | docx → HTML semántico mediante **mapa de estilos configurable** (`Heading1 ⇒ h1`) | El concepto de style-map configurable por el usuario se adopta en docsai (`--style-map`) |
-| **html2md / turndown, marker, unoconv/unoserver** | varios | Conversores parciales | unoserver documenta el patrón de fallback LibreOffice headless |
-| **rdocx** | Rust | docx read/write + render a PDF/HTML/MD (crate reciente, 2026) | A vigilar como alternativa; demasiado joven para anclar el proyecto hoy |
+| **Pandoc** | Haskell | Universal conversion via pivot AST; its extended Markdown (attributes `{...}`, divs `:::`, front matter) is the most expressive on the market | The full architectural pattern: readers → AST → writers. Its attribute syntax is the base of DocMark. Known limitation: medium-low fidelity on complex docx (custom styles, text boxes) and no xlsx support |
+| **MarkItDown** (Microsoft) | Python | Office/PDF/HTML → "LLM-ready" Markdown, unidirectional | Validates demand for the MCP/LLM use case; its total loss of styles is exactly the gap docsai fills |
+| **Docling** (IBM) | Python | Documents → Markdown/JSON with its own `DoclingDocument` model | Confirms the need for a rich document model as pivot and for exporting both readable MD + structured metadata |
+| **mammoth** (.js/Python) | JS/Python | docx → semantic HTML via a **configurable style map** (`Heading1 ⇒ h1`) | The user-configurable style-map concept is adopted in docsai (`--style-map`) |
+| **html2md / turndown, marker, unoconv/unoserver** | various | Partial converters | unoserver documents the LibreOffice headless fallback pattern |
+| **rdocx** | Rust | docx read/write + render to PDF/HTML/MD (recent crate, 2026) | Watch as an alternative; too young to anchor the project today |
 
-**Conclusión del estado del arte**: nadie combina hoy (1) binario nativo sin runtime,
-(2) bidireccionalidad con estilos, (3) hojas de cálculo con fórmulas y (4) servidor MCP.
-Pandoc es el techo de referencia en texto; MarkItDown/Docling en integración LLM. docsai se
-posiciona en la intersección vacía.
+**State-of-the-art conclusion**: nobody today combines (1) native binary with no runtime,
+(2) bidirectionality with styles, (3) spreadsheets with formulas, and (4) an MCP server.
+Pandoc is the reference ceiling for text; MarkItDown/Docling for LLM integration. docsai
+positions itself in the empty intersection.
 
 ---
 
-## 3. El formato pivote: variantes de Markdown extendido evaluadas
+## 3. The pivot format: evaluated extended Markdown variants
 
-Requisitos: legible por humanos y visores estándar, atributos arbitrarios en inline y bloque,
-metadatos de documento, extensible sin romper parsers, y con ecosistema.
+Requirements: readable by humans and standard viewers, arbitrary attributes on inline and block,
+document metadata, extensible without breaking parsers, and with an ecosystem.
 
-| Candidato | Atributos | Ecosistema | Veredicto |
+| Candidate | Attributes | Ecosystem | Verdict |
 |---|---|---|---|
-| **CommonMark + GFM puro** | ❌ No tiene | Enorme | Insuficiente: sin atributos no hay estilos |
-| **Pandoc Markdown** (atributos + fenced divs + spans + YAML) | ✅ Completo | Grande (pandoc lo consume) | **Base elegida.** Sintaxis probada durante una década para exactamente este problema |
-| **MyST Markdown** | ✅ (directivas/roles) | Científico/Sphinx | Directivas más verbosas; orientado a publicación, no a round-trip |
-| **Djot** (Jyrki/MacFarlane) | ✅ nativo | Pequeño | Técnicamente superior pero rompe la compatibilidad "se ve bien en GitHub" |
-| **MDX** | JSX | Web/React | Descartado: no es Markdown legible para no programadores |
+| **Pure CommonMark + GFM** | ❌ None | Huge | Insufficient: without attributes there are no styles |
+| **Pandoc Markdown** (attributes + fenced divs + spans + YAML) | ✅ Complete | Large (pandoc consumes it) | **Chosen base.** Syntax proven for a decade for exactly this problem |
+| **MyST Markdown** | ✅ (directives/roles) | Scientific/Sphinx | More verbose directives; oriented to publishing, not round-trip |
+| **Djot** (Jyrki/MacFarlane) | ✅ native | Small | Technically superior but breaks "looks fine on GitHub" compatibility |
+| **MDX** | JSX | Web/React | Discarded: not readable Markdown for non-programmers |
 
-**Decisión**: **DocMark = CommonMark + GFM (tablas, tachado, task lists) + subconjunto de
-extensiones Pandoc** (atributos `{...}` en encabezados/imágenes/spans/código, fenced divs
-`:::`, front matter YAML) **+ extensiones propias para hojas de cálculo** (metadatos de celda)
-documentadas en `especificacion-docmark.md`. Beneficio adicional: un fichero DocMark es
-procesable por Pandoc directamente con degradación aceptable, lo que da interoperabilidad
-gratuita con todo el ecosistema Pandoc (PDF vía LaTeX, HTML, EPUB…).
+**Decision**: **DocMark = CommonMark + GFM (tables, strikethrough, task lists) + a subset of
+Pandoc extensions** (attributes `{...}` on headings/images/spans/code, fenced divs `:::`, YAML
+front matter) **+ custom extensions for spreadsheets** (cell metadata) documented in
+`docmark-specification.md`. Additional benefit: a DocMark file is processable by Pandoc
+directly with acceptable degradation, giving free interoperability with the whole Pandoc
+ecosystem (PDF via LaTeX, HTML, EPUB…).
 
 ---
 
-## 4. Evaluación de librerías Rust
+## 4. Rust library evaluation
 
-### 4.1 Lectura/escritura de documentos
+### 4.1 Document read/write
 
-| Crate | Rol propuesto | Estado (2026) | Notas de la evaluación |
+| Crate | Proposed role | Status (2026) | Evaluation notes |
 |---|---|---|---|
-| **`calamine`** | Lectura `.xls`, `.xlsx`, `.xlsb`, `.ods` (valores **y fórmulas**) | Maduro, mantenido, muy usado | Lectura perezosa y rápida; lee fórmulas vía `worksheet_formula()`. **No lee estilos/formatos de número con detalle suficiente** → se complementa con lectura propia de `xl/styles.xml` |
-| **`umya-spreadsheet`** | Lectura+escritura `.xlsx` con estilos | Mantenido | Único crate que lee Y escribe xlsx con estilos; parsea todo el workbook en memoria (coste en ficheros grandes; existe `lazy_read`). Candidato principal para la **escritura** xlsx |
-| **`rust_xlsxwriter`** | Escritura `.xlsx` (alternativa) | Muy mantenido (port de XlsxWriter) | Excelente API de escritura con fórmulas y formatos, pero solo escritura y no permite "editar" — válido porque docsai regenera desde IR. Decidir vs umya en spike de Fase 3 |
-| **`docx-rs` (bokuweb)** | ~~Lectura~~ + posible escritura `.docx` | El más usado (1M+ descargas) | **Descartado para la lectura** tras el spike R1 (`docs/spikes/R1-estrategia-docx.md`, agosto 2026): resuelve bien estilos y numeración, pero pierde casi todo el modelo de imagen (wrap, `behindDoc`, recorte, volteo, rotación, alt, título, hipervínculo), las notas al pie y el `w:instr` de los campos simples, no conserva elementos desconocidos para raw-blocks, y entra en *panic* en el 23 % de 903 entradas corruptas medidas. La lectura docx usa parser propio sobre `zip` + `quick-xml`. Sigue siendo candidato para el **writer** de la Fase 2, decisión independiente |
-| **`docx-rust`** | Alternativa lectura `.docx` | Menor actividad | Mapeo XML más directo; mantener como referencia |
-| **`spreadsheet-ods`** | Lectura+escritura `.ods` | Mantenido | Cubre estilos y fórmulas ODS; evita escribir un writer ODF-spreadsheet propio |
-| **(ninguno)** | `.odt` | — | No hay crate maduro para ODT con estilos: **parser/writer propio** sobre `zip` + `quick-xml` (ODF es regular; esfuerzo acotado) |
-| **`cfb`** | Contenedor OLE2 para `.doc`/`.xls` legados | Estable | Base del extractor degradado de `.doc` |
+| **`calamine`** | Read `.xls`, `.xlsx`, `.xlsb`, `.ods` (values **and formulas**) | Mature, maintained, widely used | Lazy and fast reading; reads formulas via `worksheet_formula()`. **Does not read styles/number formats in enough detail** → complemented with custom reading of `xl/styles.xml` |
+| **`umya-spreadsheet`** | Read+write `.xlsx` with styles | Maintained | Only crate that both reads AND writes xlsx with styles; parses the whole workbook in memory (cost on large files; `lazy_read` exists). Main candidate for xlsx **writing** |
+| **`rust_xlsxwriter`** | Write `.xlsx` (alternative) | Very maintained (port of XlsxWriter) | Excellent write API with formulas and formats, but write-only and does not allow "edit" — fine because docsai regenerates from IR. Decide vs umya in a Phase 3 spike |
+| **`docx-rs` (bokuweb)** | ~~Read~~ + possible write `.docx` | Most used (1M+ downloads) | **Discarded for reading** after spike R1 (`docs/spikes/R1-docx-strategy.md`, August 2026): handles styles and numbering well, but loses almost the entire image model (wrap, `behindDoc`, crop, flip, rotation, alt, title, hyperlink), footnotes and `w:instr` on simple fields, does not preserve unknown elements for raw-blocks, and *panics* on 23% of 903 measured corrupt inputs. docx reading uses a custom parser on `zip` + `quick-xml`. Still a candidate for the Phase 2 **writer**, an independent decision |
+| **`docx-rust`** | Alternative `.docx` reading | Less activity | More direct XML mapping; keep as reference |
+| **`spreadsheet-ods`** | Read+write `.ods` | Maintained | Covers ODS styles and formulas; avoids writing a custom ODF-spreadsheet writer |
+| **(none)** | `.odt` | — | No mature crate for ODT with styles: **custom parser/writer** on `zip` + `quick-xml` (ODF is regular; bounded effort) |
+| **`cfb`** | OLE2 container for legacy `.doc`/`.xls` | Stable | Base of the degraded `.doc` extractor |
 
-### 4.2 Markdown (ruta inversa)
+### 4.2 Markdown (inverse path)
 
-| Crate | Rol | Notas |
+| Crate | Role | Notes |
 |---|---|---|
-| **`comrak`** | Parser Markdown del pipeline DocMark→IR | CommonMark+GFM completo, mantiene posiciones, soporta front matter, tiene extensión de atributos limitada; los atributos `{...}` completos y los fenced divs `:::` se procesan en una pasada propia sobre su AST (o pre-lexer) |
-| `markdown-rs` / `pulldown-cmark` | Alternativas | pulldown-cmark es más rápido pero orientado a eventos (incómodo para transformación); markdown-rs tiene AST mdast agradable pero menos extensiones nativas |
+| **`comrak`** | Markdown parser for the DocMark→IR pipeline | Full CommonMark+GFM, keeps positions, supports front matter, has limited attribute extension; full `{...}` attributes and fenced divs `:::` are processed in a custom pass over its AST (or pre-lexer) |
+| `markdown-rs` / `pulldown-cmark` | Alternatives | pulldown-cmark is faster but event-oriented (awkward for transformation); markdown-rs has a pleasant mdast AST but fewer native extensions |
 
-**Decisión**: `comrak` + capa propia de atributos/divs. El **serializador** DocMark (IR→MD) se
-escribe a mano (no se delega en comrak) para controlar byte a byte la salida y garantizar la
-idempotencia del round-trip.
+**Decision**: `comrak` + custom attributes/divs layer. The DocMark **serializer** (IR→MD) is
+hand-written (not delegated to comrak) to control output byte-by-byte and guarantee round-trip
+idempotence.
 
-### 4.3 Infraestructura
+### 4.3 Infrastructure
 
-| Crate | Rol |
+| Crate | Role |
 |---|---|
-| `zip` | Contenedores OOXML/ODF |
-| `quick-xml` (+ `serde`) | Parsing XML de alto rendimiento donde los crates de formato no llegan |
+| `zip` | OOXML/ODF containers |
+| `quick-xml` (+ `serde`) | High-performance XML parsing where format crates fall short |
 | `serde` / `serde_yaml` / `serde_json` | Front matter, `inspect --json`, config |
 | `clap` (derive) | CLI |
-| `rmcp` (SDK oficial de MCP, transporte stdio) | Servidor MCP; macros `#[tool]`; implementa spec 2026-07-28 con compatibilidad hacia atrás |
-| ~~`image`~~ | **No se usa en la Fase 1.** docsai nunca recodifica un mapa de bits, solo necesita nombrarlo y medirlo, y eso se resuelve leyendo la cabecera del formato (PNG, JPEG, GIF, BMP, TIFF, WebP, EMF, WMF) en `docsai-model::assets`, sin dependencia pesada. Se reevaluará si alguna fase necesita recodificar de verdad |
-| ~~`serde_yaml`~~ | **No se usa.** El front matter tiene un esquema pequeño y conocido y la spec exige determinismo byte a byte, así que se escribe a mano; además el crate está sin mantenimiento activo |
-| `thiserror` / `anyhow` | Errores |
-| `tracing` + `tracing-subscriber` | Logs (siempre a stderr) |
-| `tokio` | Solo en `docsai-mcp` (rmcp lo requiere); el núcleo de conversión es síncrono |
-| ~~`insta`~~ | **No se usa.** Los golden files son `.expected.dmk.md` junto al corpus, como prescribe `AGENTS.md` §6: se revisan como texto normal en el diff y no dependen de un formato de snapshot |
-| `cargo-fuzz` | Fuzzing de parsers (Fase 8) |
-| `cargo-dist` | Empaquetado de releases multiplataforma |
+| `rmcp` (official MCP SDK, stdio transport) | MCP server; `#[tool]` macros; implements the 2026-07-28 spec with backward compatibility |
+| ~~`image`~~ | **Not used in Phase 1.** docsai never re-encodes a bitmap; it only needs to name and measure it, which is done by reading the format header (PNG, JPEG, GIF, BMP, TIFF, WebP, EMF, WMF) in `docsai-model::assets`, without a heavy dependency. Will be re-evaluated if some phase truly needs re-encoding |
+| ~~`serde_yaml`~~ | **Not used.** Front matter has a small known schema and the spec requires byte-for-byte determinism, so it is written by hand; the crate is also without active maintenance |
+| `thiserror` / `anyhow` | Errors |
+| `tracing` + `tracing-subscriber` | Logs (always to stderr) |
+| `tokio` | Only in `docsai-mcp` (rmcp requires it); the conversion core is synchronous |
+| ~~`insta`~~ | **Not used.** Golden files are `.expected.dmk.md` beside the corpus, as prescribed by `AGENTS.md` §6: they are reviewed as normal text in the diff and do not depend on a snapshot format |
+| `cargo-fuzz` | Parser fuzzing (Phase 8) |
+| `cargo-dist` | Multiplatform release packaging |
 
 ---
 
-## 5. Decisiones de arquitectura derivadas (resumen)
+## 5. Derived architecture decisions (summary)
 
-1. **IR pivote obligatorio** (`docsai-model`): árbol de documento con dos raíces posibles
-   (`TextDocument`, `Workbook`) — detalle en `arquitectura.md`. N formatos → 2N conversores en
-   lugar de N².
-2. **Estilos por referencia + delta**: el IR guarda `style_id` + propiedades directas, y el
-   catálogo de estilos viaja completo en el front matter. Así el round-trip reconstruye
-   `styles.xml` real y el Markdown sigue limpio.
-3. **Assets externos con manifiesto**: imágenes a `assets/` con nombre determinista
-   (hash de contenido) para que el round-trip no duplique medios.
-4. **`ConversionReport` estructurado**: toda conversión devuelve documento + lista de
-   advertencias tipadas (elemento no soportado, degradación, raw-block emitido). La CLI lo
-   muestra; el MCP lo devuelve en la respuesta de la tool.
-5. **Fallbacks externos opcionales**: LibreOffice headless solo para `.doc`, detectado en
-   runtime (`--use-loffice=auto|never|require`).
+1. **Mandatory pivot IR** (`docsai-model`): document tree with two possible roots
+   (`TextDocument`, `Workbook`) — detail in `architecture.md`. N formats → 2N converters
+   instead of N².
+2. **Styles by reference + delta**: the IR stores `style_id` + direct properties, and the full
+   style catalog travels in the front matter. Round-trip thus rebuilds a real `styles.xml` and
+   Markdown stays clean.
+3. **External assets with manifest**: images to `assets/` with deterministic names
+   (content hash) so round-trip does not duplicate media.
+4. **Structured `ConversionReport`**: every conversion returns document + list of typed
+   warnings (unsupported element, degradation, raw-block emitted). The CLI shows it; MCP returns
+   it in the tool response.
+5. **Optional external fallbacks**: LibreOffice headless only for `.doc`, detected at runtime
+   (`--use-loffice=auto|never|require`).
 
-## 6. Riesgos principales y mitigaciones
+## 6. Main risks and mitigations
 
-| # | Riesgo | Prob. | Impacto | Mitigación |
+| # | Risk | Prob. | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | La cascada de estilos OOXML resulta más costosa de lo previsto y retrasa Fase 1 | Alta | Alto | Spike de 1 semana en Fase 0 con documentos reales; limitar v1 a la resolución de 4 niveles sin `tblStyle` condicional |
-| R2 | Ningún crate xlsx cubre lectura de estilos con suficiente detalle | Media | Medio | Ya asumido: lectura complementaria propia de `xl/styles.xml` con quick-xml (esfuerzo acotado, formato documentado) |
-| R3 | Round-trip no idempotente por ambigüedades de Markdown (escapes, espacios) | Media | Alto | Serializador propio con reglas deterministas + test de idempotencia en CI desde Fase 2 |
-| R4 | `.doc` sin LibreOffice decepciona a usuarios | Media | Bajo | Mensajes claros de modo degradado; documentar en README |
-| R5 | Divergencia de dialectos de fórmula OOXML/OpenFormula | Alta | Medio | v1 conserva dialecto original + campo `formula-dialect`; traducción automática pospuesta (Fase 9/backlog) |
-| R6 | Crates de terceros abandonados a mitad de proyecto | Baja | Medio | Los cuatro crates críticos son de los más usados del ecosistema; el diseño por IR permite sustituir un reader sin tocar el resto |
-| R7 | Tamaño del binario crece descontrolado | Baja | Bajo | `cargo bloat` en CI, features opcionales, LTO en release |
-| R8 | Diversidad de modelos de imagen (DrawingML vs VML vs Escher vs draw:frame) fragmenta el esfuerzo | Media | Medio | Modelo `ImageGeometry` normalizado en el IR definido en Fase 0 (arquitectura §3.1); lectura VML limitada a los atributos del modelo; Escher solo BLIPs en la ruta nativa `.doc` |
+| R1 | OOXML style cascade turns out more expensive than expected and delays Phase 1 | High | High | 1-week spike in Phase 0 with real documents; limit v1 to 4-level resolution without conditional `tblStyle` |
+| R2 | No xlsx crate covers style reading in enough detail | Medium | Medium | Already assumed: complementary custom reading of `xl/styles.xml` with quick-xml (bounded effort, documented format) |
+| R3 | Non-idempotent round-trip due to Markdown ambiguities (escapes, spaces) | Medium | High | Custom serializer with deterministic rules + idempotence test in CI from Phase 2 |
+| R4 | `.doc` without LibreOffice disappoints users | Medium | Low | Clear degraded-mode messages; document in README |
+| R5 | OOXML/OpenFormula formula dialect divergence | High | Medium | v1 keeps original dialect + `formula-dialect` field; automatic translation postponed (Phase 9/backlog) |
+| R6 | Third-party crates abandoned mid-project | Low | Medium | The four critical crates are among the most used in the ecosystem; IR design lets a reader be replaced without touching the rest |
+| R7 | Binary size grows out of control | Low | Low | `cargo bloat` in CI, optional features, LTO in release |
+| R8 | Diversity of image models (DrawingML vs VML vs Escher vs draw:frame) fragments effort | Medium | Medium | Normalized `ImageGeometry` model in the IR defined in Phase 0 (architecture §3.1); VML reading limited to model attributes; Escher only BLIPs on the native `.doc` path |
 
-## 7. Fuentes consultadas
+## 7. Sources consulted
 
-- [Pandoc User's Guide](https://pandoc.org/MANUAL.html) — sintaxis de atributos, divs y front matter
-- [calamine (GitHub)](https://github.com/tafia/calamine) y [docs.rs/calamine](https://docs.rs/calamine)
-- [umya-spreadsheet (GitHub)](https://github.com/mathnya/umya-spreadsheet) y comparativa [calamine vs umya-spreadsheet](https://umaranis.com/2026/05/04/reading-excel-files-in-rust-calamine-vs-umya-spreadsheet/)
+- [Pandoc User's Guide](https://pandoc.org/MANUAL.html) — attribute, div, and front-matter syntax
+- [calamine (GitHub)](https://github.com/tafia/calamine) and [docs.rs/calamine](https://docs.rs/calamine)
+- [umya-spreadsheet (GitHub)](https://github.com/mathnya/umya-spreadsheet) and comparison [calamine vs umya-spreadsheet](https://umaranis.com/2026/05/04/reading-excel-files-in-rust-calamine-vs-umya-spreadsheet/)
 - [docx-rs (crates.io)](https://crates.io/crates/docx-rs) · [docx-rust (crates.io)](https://crates.io/crates/docx-rust) · [rdocx (lib.rs)](https://lib.rs/crates/rdocx)
-- [SDK oficial Rust de MCP — rmcp](https://github.com/modelcontextprotocol/rust-sdk) y [docs.rs/rmcp](https://docs.rs/rmcp)
-- Comparativas de conversores: [MarkItDown vs Pandoc](https://www.file2markdown.ai/blog/markitdown-vs-pandoc), [Docling vs MarkItDown](https://www.file2markdown.ai/blog/docling-vs-markitdown), [Real Python sobre MarkItDown](https://realpython.com/python-markitdown/)
-- ECMA-376 (OOXML), ISO/IEC 26300 (ODF), especificaciones [MS-DOC]/[MS-XLS] de Microsoft Open Specifications
+- [Official Rust MCP SDK — rmcp](https://github.com/modelcontextprotocol/rust-sdk) and [docs.rs/rmcp](https://docs.rs/rmcp)
+- Converter comparisons: [MarkItDown vs Pandoc](https://www.file2markdown.ai/blog/markitdown-vs-pandoc), [Docling vs MarkItDown](https://www.file2markdown.ai/blog/docling-vs-markitdown), [Real Python on MarkItDown](https://realpython.com/python-markitdown/)
+- ECMA-376 (OOXML), ISO/IEC 26300 (ODF), [MS-DOC]/[MS-XLS] Microsoft Open Specifications

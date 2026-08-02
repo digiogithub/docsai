@@ -1,8 +1,8 @@
 //! IR → DocMark (spec §3, §7, §8).
 //!
-//! The serialiser is written by hand rather than delegated to a Markdown
+//! The serializer is written by hand rather than delegated to a Markdown
 //! library so that every byte of the output is under our control: the
-//! idempotence test of Fase 2 (`serialize(parse(md)) == md`) has no room for a
+//! idempotence test of Phase 2 (`serialize(parse(md)) == md`) has no room for a
 //! library's own formatting opinions.
 
 use docsai_model::assets::AssetStore;

@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use docsai_convert::{ConvertOptions, Fidelity, SUPPORT};
 use docsai_model::Format;
 
-/// Exit codes (arquitectura §5).
+/// Exit codes (architecture §5).
 const EXIT_OK: u8 = 0;
 const EXIT_WARNINGS: u8 = 1;
 const EXIT_INPUT: u8 = 2;

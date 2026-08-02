@@ -1,157 +1,156 @@
-# Spike R1 — Estrategia de lectura DOCX
+# Spike R1 — DOCX reading strategy
 
-**Riesgo mitigado**: R1 del análisis técnico §6 — *«La cascada de estilos OOXML resulta más
-costosa de lo previsto y retrasa Fase 1»*.
+**Risk mitigated**: R1 from technical analysis §6 — *“The OOXML style cascade turns out more
+costly than expected and delays Phase 1”*.
 
-**Pregunta**: ¿basta `docx-rs` (+ complemento propio con `quick-xml` donde falte) para la
-Fase 1, o hace falta un parser OOXML propio completo?
+**Question**: is `docx-rs` (+ own `quick-xml` complement where missing) enough for
+Phase 1, or is a full custom OOXML parser needed?
 
-**Fecha**: agosto 2026 · **Versión evaluada**: `docx-rs` 0.4.22 · **Toolchain**: rustc 1.94.1
+**Date**: August 2026 · **Evaluated version**: `docx-rs` 0.4.22 · **Toolchain**: rustc 1.94.1
 
-**Decisión**: **parser propio sobre `zip` + `quick-xml`.** `docx-rs` no se usa en el camino de
-lectura. Se mantiene como referencia de mapeo XML y como posible base del *writer* de Fase 2
-(decisión independiente, a revisar en su momento).
+**Decision**: **own parser over `zip` + `quick-xml`.** `docx-rs` is not used on the
+read path. It is kept as an XML mapping reference and as a possible base for the Phase 2
+*writer* (independent decision, to be reviewed in due time).
 
 ---
 
-## 1. Método
+## 1. Method
 
-Se generó el corpus de la Fase 0 (`corpus/generate.py`) y se leyó con `docx_rs::read_docx`,
-serializando el resultado a JSON para inspeccionar qué información sobrevive. Se comprobó
-rasgo a rasgo contra lo que exige la especificación DocMark y el IR de `arquitectura.md` §3.
+The Phase 0 corpus was generated (`corpus/generate.py`) and read with `docx_rs::read_docx`,
+serializing the result to JSON to inspect what information survives. Trait-by-trait checks
+were run against what the DocMark specification and the IR of `architecture.md` §3 require.
 
-Adicionalmente se sometió al lector a 903 entradas corruptas sintéticas (truncados cada 7 bytes
-y volteos de un byte cada 13 bytes sobre `images-floating.docx`) capturando *panics*.
+Additionally the reader was subjected to 903 synthetic corrupt inputs (truncations every 7 bytes
+and single-byte flips every 13 bytes over `images-floating.docx`) capturing *panics*.
 
-Documentos usados: `basic-styles`, `custom-styles`, `nested-lists`, `footnotes`, `fields-raw`,
+Documents used: `basic-styles`, `custom-styles`, `nested-lists`, `footnotes`, `fields-raw`,
 `headers-footers`, `images-inline`, `images-floating`, `images-transformed`, `images-vml`.
 
-## 2. Resultados
+## 2. Results
 
-### 2.1 Lo que `docx-rs` sí resuelve
+### 2.1 What `docx-rs` does solve
 
-| Rasgo | Estado | Nota |
+| Trait | Status | Note |
 |---|---|---|
-| `styles.xml` con `docDefaults` | ✅ | `runPropertyDefault` y `paragraphPropertyDefault` expuestos |
-| `basedOn`, `styleType`, `name` | ✅ | Suficiente para reconstruir la herencia |
-| Formato de párrafo/run como **delta** | ✅ | El modelo separa `property.style` del formato directo, que es exactamente el principio «referencia + delta» |
-| `numbering.xml` | ✅ | `abstractNums` + `numberings` + niveles con `format`, `lvlText`, indentación |
-| Cabeceras y pies | ✅ | Resueltos y adjuntos a `sectionProperty` (`header`, `firstHeader`, `footer`) |
-| `sectPr` (tamaño, márgenes, `titlePg`) | ✅ | `columns` se expone pero no el resto de `w:cols` |
-| Campos complejos (`fldChar`/`instrText`) | ✅ | `instrTextString` conservado |
-| Tablas con `gridSpan`/`vMerge` | ✅ | Presentes en `tableCellProperty` |
+| `styles.xml` with `docDefaults` | ✅ | `runPropertyDefault` and `paragraphPropertyDefault` exposed |
+| `basedOn`, `styleType`, `name` | ✅ | Enough to rebuild inheritance |
+| Paragraph/run format as **delta** | ✅ | The model separates `property.style` from direct format, which is exactly the “reference + delta” principle |
+| `numbering.xml` | ✅ | `abstractNums` + `numberings` + levels with `format`, `lvlText`, indentation |
+| Headers and footers | ✅ | Resolved and attached to `sectionProperty` (`header`, `firstHeader`, `footer`) |
+| `sectPr` (size, margins, `titlePg`) | ✅ | `columns` is exposed but not the rest of `w:cols` |
+| Complex fields (`fldChar`/`instrText`) | ✅ | `instrTextString` preserved |
+| Tables with `gridSpan`/`vMerge` | ✅ | Present in `tableCellProperty` |
 
-La cascada de 4 niveles **es resoluble** con lo que expone: el riesgo R1, tal como estaba
-formulado (los *estilos*), no se materializa. Es el resto lo que falla.
+The 4-level cascade **is resolvable** with what it exposes: risk R1, as originally
+formulated (the *styles*), does not materialize. It is the rest that fails.
 
-### 2.2 Lo que `docx-rs` pierde
+### 2.2 What `docx-rs` loses
 
-Medido sobre el corpus, no inferido de la documentación.
+Measured on the corpus, not inferred from documentation.
 
-**Imágenes** — el modelo `Pic` expone `size`, `positionType`, `positionH/V`, `relativeFromH/V`,
-`distT/B/L/R`, `relativeHeight` y `rot`. No expone:
+**Images** — the `Pic` model exposes `size`, `positionType`, `positionH/V`, `relativeFromH/V`,
+`distT/B/L/R`, `relativeHeight` and `rot`. It does not expose:
 
-| Atributo DocMark §3.5 | Origen OOXML | En `docx-rs` |
+| DocMark §3.5 attribute | OOXML source | In `docx-rs` |
 |---|---|---|
-| `wrap`, `wrap-side` | `wp:wrapSquare/Tight/Through/TopAndBottom` | ❌ ausente |
-| `anchor=behind` | `wp:anchor @behindDoc` | ❌ ausente |
-| `crop` | `a:srcRect` | ❌ ausente |
-| `flip` | `a:xfrm @flipH/@flipV` | ❌ ausente |
-| `rotation` | `a:xfrm @rot` | ⚠️ campo `rot: u16` presente pero devuelve `0` para `rot="2700000"` (45°); además `u16` no puede representar 60000ᵃᵛᵒˢ de grado ni valores negativos |
-| alt (`![…]`) | `wp:docPr @descr` | ❌ ausente |
-| `title`, `name` | `wp:docPr @title/@name` | ❌ ausente |
-| `link` | `a:hlinkClick` | ❌ ausente |
-| `external-src` | `r:link` | ❌ ausente |
-| `border` | `pic:spPr/a:ln` | ❌ ausente |
-| bytes del medio | `word/media/*` | ❌ no se cargan al leer (`image` es «for writer only») |
+| `wrap`, `wrap-side` | `wp:wrapSquare/Tight/Through/TopAndBottom` | ❌ absent |
+| `anchor=behind` | `wp:anchor @behindDoc` | ❌ absent |
+| `crop` | `a:srcRect` | ❌ absent |
+| `flip` | `a:xfrm @flipH/@flipV` | ❌ absent |
+| `rotation` | `a:xfrm @rot` | ⚠️ field `rot: u16` present but returns `0` for `rot="2700000"` (45°); also `u16` cannot represent 60000ths of a degree or negative values |
+| alt (`![…]`) | `wp:docPr @descr` | ❌ absent |
+| `title`, `name` | `wp:docPr @title/@name` | ❌ absent |
+| `link` | `a:hlinkClick` | ❌ absent |
+| `external-src` | `r:link` | ❌ absent |
+| `border` | `pic:spPr/a:ln` | ❌ absent |
+| media bytes | `word/media/*` | ❌ not loaded on read (`image` is “for writer only”) |
 
-**VML legado** (`w:pict`, `images-vml.docx`): se colapsa a un nodo `shape` genérico de 813 bytes
-de JSON total; se pierden el `r:id` de `v:imagedata`, el `style` (posición y tamaño), el `alt`
-y el `w10:wrap`. Pérdida total del objeto.
+**Legacy VML** (`w:pict`, `images-vml.docx`): collapses to a generic `shape` node of 813 bytes
+of total JSON; the `r:id` of `v:imagedata`, the `style` (position and size), the `alt`
+and `w10:wrap` are lost. Total loss of the object.
 
-**Notas al pie** (`footnotes.docx`): `w:footnoteReference` se descarta — el run queda con
-`children: []`. `word/footnotes.xml` no se expone en la API.
+**Footnotes** (`footnotes.docx`): `w:footnoteReference` is discarded — the run is left with
+`children: []`. `word/footnotes.xml` is not exposed in the API.
 
-**Campos simples** (`fields-raw.docx`): `w:fldSimple` pierde el atributo `w:instr`; solo queda
-el texto cacheado. «Fecha: 01/01/2026» deja de ser un campo `DATE`.
+**Simple fields** (`fields-raw.docx`): `w:fldSimple` loses the `w:instr` attribute; only the
+cached text remains. “Date: 01/01/2026” stops being a `DATE` field.
 
-**Escotilla de fidelidad**: `w:sdt` se representa como `structuredDataTag` con `alias: null` y
-sin el XML original. No hay ningún mecanismo genérico que conserve los bytes de un elemento
-desconocido, que es justo lo que necesita el `raw-block` de la spec §7 y el criterio de
-cobertura medible de la Fase 1 (tarea 9).
+**Fidelity hatch**: `w:sdt` is represented as `structuredDataTag` with `alias: null` and
+without the original XML. There is no generic mechanism that preserves the bytes of an
+unknown element, which is exactly what the `raw-block` of spec §7 and the measurable
+coverage criterion of Phase 1 (task 9) need.
 
-**Ruido en el modelo**: cada estilo leído sale con un `tableProperty` con bordes inventados
-(`single/2/000000`) aunque el estilo sea de párrafo — habría que filtrarlo para no contaminar
-el catálogo del front matter.
+**Noise in the model**: every read style comes out with a `tableProperty` with invented borders
+(`single/2/000000`) even if the style is paragraph — it would have to be filtered so as not to
+contaminate the front-matter catalog.
 
-### 2.3 Robustez frente a entrada corrupta
+### 2.3 Robustness against corrupt input
 
 ```
-903 entradas corruptas (truncados + volteos de byte)
+903 corrupt inputs (truncations + byte flips)
   → Ok: 88   Err: 611   PANIC: 204
 ```
 
-Un 23 % de las entradas corruptas provoca *panic*. El criterio de aceptación de la Fase 1 es
-explícito: *«Cero pánicos con corpus corrupto sintético (ZIP truncado, XML malformado): siempre
-`Err`»*. Envolver todo el reader en `catch_unwind` no es una mitigación aceptable (no funciona
-con `panic=abort`, y `AGENTS.md` §6 exige que los parsers devuelvan `Err`, no que se recuperen).
+23% of corrupt inputs cause a *panic*. Phase 1 acceptance criterion is
+explicit: *“Zero panics on synthetic corrupt corpus (truncated ZIP, malformed XML): always
+`Err`”*. Wrapping the whole reader in `catch_unwind` is not an acceptable mitigation (it does not
+work with `panic=abort`, and `AGENTS.md` §6 requires parsers to return `Err`, not recover).
 
-## 3. Análisis
+## 3. Analysis
 
-El complemento propio que haría falta para cerrar los huecos incluye: todo `w:drawing`
-(DrawingML completo), todo `w:pict` (VML), `word/footnotes.xml`, `w:fldSimple`, la captura de
-elementos desconocidos para raw-blocks y la carga de `word/media/*`. Es decir: **el grueso de
-`document.xml`**. Lo que quedaría delegado en `docx-rs` es `styles.xml`, `numbering.xml` y el
-árbol de párrafos/tablas — la parte más mecánica y mejor documentada del formato.
+The own complement needed to close the gaps includes: all of `w:drawing`
+(full DrawingML), all of `w:pict` (VML), `word/footnotes.xml`, `w:fldSimple`, capture of
+unknown elements for raw-blocks and loading of `word/media/*`. That is: **most of
+`document.xml`**. What would remain delegated to `docx-rs` is `styles.xml`, `numbering.xml` and the
+paragraph/table tree — the most mechanical and best documented part of the format.
 
-Mantener las dos rutas implica además:
+Keeping both paths also implies:
 
-- Dos parsers XML en el binario (`xml-rs` dentro de `docx-rs`, `quick-xml` en el nuestro).
-- Reconciliar dos árboles distintos del mismo `document.xml` (el de `docx-rs` y el nuestro para
-  drawings/campos), con el riesgo de desincronización de posiciones.
-- Una dependencia de la que dependemos para lo fácil y no para lo difícil, con un riesgo de
-  *panic* que hay que asumir o parchear aguas arriba.
+- Two XML parsers in the binary (`xml-rs` inside `docx-rs`, `quick-xml` in ours).
+- Reconciling two different trees of the same `document.xml` (`docx-rs`'s and ours for
+  drawings/fields), with the risk of position desynchronization.
+- A dependency we rely on for the easy parts and not the hard ones, with a *panic*
+  risk that must be accepted or patched upstream.
 
-## 4. Decisión
+## 4. Decision
 
-**Parser propio sobre `zip` + `quick-xml`** en `docsai-office`, con estas consecuencias:
+**Own parser over `zip` + `quick-xml`** in `docsai-office`, with these consequences:
 
-1. **Sin `docx-rs` en `docsai-office`.** Se anota en `analisis-tecnico.md` §4.1 conforme a la
-   regla de `AGENTS.md` §2 (no se sustituye una dependencia clave sin dejar constancia).
-2. **Un solo recorrido** de `document.xml` con `quick-xml` en modo evento, que produce el IR
-   directamente y captura como raw-block cualquier elemento no reconocido, con su parte y su
-   ruta. Esto hace la cobertura medible desde el primer día.
-3. **Sin `unwrap`/`expect`/índices sin comprobar** en el camino de lectura: todo error es un
-   `ReadError` tipado. El criterio «cero pánicos» se verifica con un test de corrupción
-   sintética equivalente al de este spike, ejecutado en CI desde la Fase 1.
-4. **`quick-xml` con entidades externas deshabilitadas** (comportamiento por defecto: no expande
-   entidades externas), lo que adelanta parte de la Fase 8.
-5. El coste estimado del parser propio (≈2 semanas de las 4–6 de la Fase 1) es comparable al del
-   complemento que habría que escribir de todos modos, y elimina la reconciliación de árboles.
+1. **No `docx-rs` in `docsai-office`.** Noted in `technical-analysis.md` §4.1 per the
+   `AGENTS.md` §2 rule (a key dependency is not replaced without written record).
+2. **A single pass** over `document.xml` with `quick-xml` in event mode, producing the IR
+   directly and capturing any unrecognized element as raw-block, with its part and
+   path. This makes coverage measurable from day one.
+3. **No `unwrap`/`expect`/unchecked indices** on the read path: every error is a
+   typed `ReadError`. The “zero panics” criterion is verified with a synthetic corruption
+   test equivalent to this spike's, run in CI from Phase 1.
+4. **`quick-xml` with external entities disabled** (default behavior: does not expand
+   external entities), which advances part of Phase 8.
+5. The estimated cost of the own parser (≈2 weeks of the 4–6 of Phase 1) is comparable to the
+   complement that would have to be written anyway, and eliminates tree reconciliation.
 
-### Riesgos que introduce esta decisión
+### Risks this decision introduces
 
-| Riesgo | Mitigación |
+| Risk | Mitigation |
 |---|---|
-| Más superficie propia que mantener | Corpus + golden tests desde la Fase 0; el parser cubre solo lo que el IR modela, el resto va a raw-block |
-| Rasgos OOXML olvidados por desconocimiento | La captura genérica de elementos desconocidos los hace **visibles** (advertencia + raw-block) en vez de silenciosos |
-| El writer de Fase 2 podría necesitar `docx-rs` | Decisión independiente y posterior; escribir es mucho más simple que leer (controlamos el XML de salida) y probablemente también se haga a mano |
+| More own surface to maintain | Corpus + golden tests from Phase 0; the parser covers only what the IR models, the rest goes to raw-block |
+| OOXML traits forgotten through ignorance | Generic capture of unknown elements makes them **visible** (warning + raw-block) instead of silent |
+| Phase 2 writer might need `docx-rs` | Independent later decision; writing is much simpler than reading (we control the output XML) and will probably also be done by hand |
 
-## 5. Estado del riesgo R1
+## 5. Status of risk R1
 
-**Cerrado.** La cascada de estilos no es el cuello de botella; el modelo de imágenes sí lo era, y
-la decisión de parser propio lo neutraliza. R8 (diversidad de modelos de imagen) queda cubierto
-por la misma decisión: DrawingML y VML se leen en el mismo recorrido hacia `ImageGeometry`.
+**Closed.** The style cascade is not the bottleneck; the image model was, and
+the own-parser decision neutralizes it. R8 (diversity of image models) is covered
+by the same decision: DrawingML and VML are read in the same pass toward `ImageGeometry`.
 
-## 6. Reproducir este spike
+## 6. Reproducing this spike
 
-El programa de sondeo vivió fuera del árbol (no se versiona una dependencia que hemos
-descartado). Para reproducirlo:
+The probe program lived outside the tree (a rejected dependency is not versioned). To reproduce:
 
 ```bash
 python3 corpus/generate.py
 cargo new /tmp/spike-docx && cd /tmp/spike-docx
 cargo add docx-rs@0.4.22 serde_json
-# leer los documentos de corpus/docx con read_docx() y serializar `docx.document` a JSON;
-# para la prueba de robustez, truncar y voltear bytes del .docx y contar catch_unwind(Err)
+# read corpus/docx documents with read_docx() and serialize `docx.document` to JSON;
+# for the robustness test, truncate and flip bytes of the .docx and count catch_unwind(Err)
 ```

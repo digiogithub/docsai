@@ -109,7 +109,7 @@ fn serialisation_is_deterministic() {
         assert_eq!(
             first,
             second,
-            "{} serialises differently on a second run",
+            "{} serializes differently on a second run",
             document.display()
         );
     }
@@ -137,8 +137,8 @@ fn every_document_uses_unix_line_endings_and_no_bom() {
     }
 }
 
-/// Fase 1 acceptance criterion: *«La salida en `--fidelity plain` es CommonMark
-/// limpio verificado con comrak»*.
+/// Phase 1 acceptance criterion: *"`--fidelity plain` output is clean CommonMark
+/// verified with comrak"*.
 #[test]
 fn plain_fidelity_is_clean_commonmark() {
     let mut options = comrak::Options::default();
@@ -204,8 +204,8 @@ fn standard_fidelity_drops_raw_blocks_and_says_so() {
     assert_eq!(dropped as u32, full_report.raw_blocks_emitted);
 }
 
-/// Fase 1 acceptance criterion: *«Un docx real de 50+ páginas convierte en
-/// < 1 s con < 10 raw-blocks»*.
+/// Phase 1 acceptance criterion: *"A real 50+ page docx converts in
+/// < 1 s with < 10 raw-blocks"*.
 #[test]
 fn a_fifty_page_document_converts_quickly_with_few_raw_blocks() {
     let path = std::env::temp_dir().join(format!("docsai-perf-{}.docx", std::process::id()));
@@ -230,7 +230,7 @@ fn a_fifty_page_document_converts_quickly_with_few_raw_blocks() {
         report.raw_blocks_emitted
     );
 
-    // The budget of arquitectura §8 is for an optimised build; a debug build
+    // The budget of architecture §8 is for an optimised build; a debug build
     // runs roughly an order of magnitude slower, so it gets a looser bound
     // rather than no bound at all.
     let budget = if cfg!(debug_assertions) {

@@ -1,5 +1,5 @@
 //! DrawingML (`w:drawing`) and legacy VML (`w:pict`) → the normalised image
-//! model of arquitectura §3.1.
+//! model of architecture §3.1.
 //!
 //! This is where the spike (docs/spikes/R1) concluded the existing crates fall
 //! short, so it is deliberately exhaustive: wrap mode and side, `behindDoc`,
@@ -294,7 +294,7 @@ fn resolve_media(
 
     if let Some(link) = blip.attr_qualified("r:link") {
         // Linked images are never fetched: doing so would turn a document into
-        // an outbound network request (arquitectura §3.2).
+        // an outbound network request (architecture §3.2).
         let url = ctx
             .rels
             .get(link)
@@ -331,7 +331,7 @@ fn warn_if_unrenderable(image: &ImageRef, assets: &dyn AssetStore, report: &mut 
 
 /// Reads a legacy VML picture (`w:pict`), typical of documents that once were
 /// `.doc`. Only what the normalised model covers is mapped; the rest is
-/// reported as degraded (análisis §1.4).
+/// reported as degraded (analysis §1.4).
 pub fn read_vml_picture(
     pict: &Element,
     ctx: &DrawingContext<'_>,

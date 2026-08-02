@@ -1,5 +1,5 @@
-//! Fase 1 acceptance criterion: *«Cero pánicos con corpus corrupto sintético
-//! (ZIP truncado, XML malformado): siempre `Err`»*.
+//! Phase 1 acceptance criterion: *"Zero panics on synthetic corrupt corpus
+//! (truncated ZIP, malformed XML): always `Err`"*.
 //!
 //! The R1 spike measured 204 panics out of 903 corrupt inputs for `docx-rs`;
 //! this test is the standing guarantee that the own parser does better.

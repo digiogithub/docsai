@@ -2,7 +2,7 @@
 //!
 //! The canonical order of spec §8 is enforced here, in one place: id first,
 //! then classes alphabetically, then keys alphabetically. That ordering is
-//! what makes the serialiser deterministic and the golden diffs stable.
+//! what makes the serializer deterministic and the golden diffs stable.
 
 use std::collections::BTreeMap;
 

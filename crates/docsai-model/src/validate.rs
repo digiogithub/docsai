@@ -1,7 +1,7 @@
 //! IR invariant checking.
 //!
 //! The invariants a reader can violate but the writers rely on. Chief among
-//! them (arquitectura §3.1): sheet anchors are only legal inside a
+//! them (architecture §3.1): sheet anchors are only legal inside a
 //! [`crate::sheet::Workbook`], and document anchors only inside a
 //! [`crate::text::TextDocument`]. Cross-anchoring does not
 //! exist, and the validator is what makes that a checked rule instead of a

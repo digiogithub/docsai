@@ -1,4 +1,4 @@
-//! [`AssetStore`] implementations (arquitectura §3.2).
+//! [`AssetStore`] implementations (architecture §3.2).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

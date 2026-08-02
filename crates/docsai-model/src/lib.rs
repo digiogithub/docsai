@@ -1,7 +1,7 @@
 //! The docsai intermediate document model (IR).
 //!
 //! Every converter reads *into* this model and writes *from* it; no converter
-//! ever talks to another converter (arquitectura §1). The crate is
+//! ever talks to another converter (architecture §1). The crate is
 //! deliberately free of I/O and of heavy dependencies: it knows nothing about
 //! ZIP, XML or the filesystem, and media live behind the
 //! [`AssetStore`] trait.

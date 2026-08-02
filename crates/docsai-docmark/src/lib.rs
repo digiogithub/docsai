@@ -1,28 +1,36 @@
 //! DocMark: the extended-Markdown pivot format.
 //!
-//! Fase 1 lands the **serialiser** (IR → DocMark). The parser (DocMark → IR)
-//! is Fase 2 and deliberately absent here.
-//!
-//! The output is normative and deterministic (spec §8): two serialisations of
-//! the same IR are byte-identical, line endings are always `\n`, and the
-//! encoding is UTF-8 without BOM.
+//! Serialiser (IR → DocMark) and parser (DocMark → IR). The output is normative
+//! and deterministic (spec §8): two serialisations of the same IR are
+//! byte-identical, line endings are always `\n`, and the encoding is UTF-8
+//! without BOM.
 //!
 //! ```
-//! use docsai_docmark::{serialize, Options};
+//! use docsai_docmark::{serialize, parse, Options};
 //! use docsai_model::{Document, MemoryAssetStore, text::TextDocument};
 //!
 //! let doc = Document::Text(TextDocument::default());
 //! let (markdown, _report) = serialize(&doc, &MemoryAssetStore::new(), &Options::default());
 //! assert!(markdown.starts_with("---\ndocmark: \"1.0\"\n"));
+//! let mut assets = MemoryAssetStore::new();
+//! let (parsed, _) = parse(&markdown, &mut assets).unwrap();
+//! assert!(parsed.is_text());
 //! ```
 
 #![forbid(unsafe_code)]
 
 pub mod attrs;
 pub mod escape;
+mod error;
 mod frontmatter;
+mod frontmatter_parse;
+mod parser;
 pub mod units;
 mod writer;
+mod yaml;
+
+pub use error::ParseError;
+pub use parser::{parse, parse_with_base};
 
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format};
@@ -103,12 +111,12 @@ pub fn serialize(
             (out, report)
         }
         Document::Workbook(_) => {
-            // Spreadsheet serialisation is Fase 3; emitting a half-formed sheet
+            // Spreadsheet serialisation is Phase 3; emitting a half-formed sheet
             // would be worse than saying so.
             let mut report = ConversionReport::new();
             report.warn(docsai_model::Warning::Degraded {
                 what: "workbook".into(),
-                why: "spreadsheet serialisation arrives in Fase 3".into(),
+                why: "spreadsheet serialisation arrives in Phase 3".into(),
             });
             (out, report)
         }

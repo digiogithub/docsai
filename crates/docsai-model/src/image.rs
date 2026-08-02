@@ -1,4 +1,4 @@
-//! Normalised image model (arquitectura §3.1).
+//! Normalised image model (architecture §3.1).
 //!
 //! Every source format has its own graphics model — DrawingML, VML, Escher,
 //! SpreadsheetDrawingML, ODF `draw:frame`. Readers translate *into* this model
@@ -48,7 +48,7 @@ pub struct ImageRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
     /// Set when the image was *linked* rather than embedded. The referenced
-    /// content is never fetched (arquitectura §3.2, security).
+    /// content is never fetched (architecture §3.2, security).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_src: Option<String>,
     /// Effects with no DocMark representation, kept as an associated raw-block.

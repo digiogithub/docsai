@@ -1,59 +1,58 @@
-# Especificación DocMark v1.0
+# DocMark Specification v1.0
 
-**DocMark** es el perfil de Markdown extendido usado por `docsai` como formato pivote textual.
-Objetivo: representar documentos de texto (docx/odt/doc) y hojas de cálculo (xlsx/xls/ods) de
-forma **legible, editable a mano y con información suficiente para regenerar el documento
-original con pérdida mínima**.
+**DocMark** is the extended Markdown profile used by `docsai` as the textual pivot format.
+Goal: represent text documents (docx/odt/doc) and spreadsheets (xlsx/xls/ods) in a way that is
+**readable, hand-editable, and with enough information to regenerate the original document
+with minimal loss**.
 
-Estado: **congelada (v1.0)** al cierre de la Fase 0. Todo cambio posterior incrementa la versión
-declarada en el front matter y exige documentar la migración (`AGENTS.md` §2).
+Status: **frozen (v1.0)** at the close of Phase 0. Any later change increments the version
+declared in the front matter and requires documenting the migration (`AGENTS.md` §2).
 
-El anexo A (tablas complejas) queda resuelto en §3.4. Los TODO del borrador están cerrados; las
-adiciones que la implementación de la Fase 1 hizo explícitas están marcadas en el texto y
-recogidas en §10.
+Annex A (complex tables) is resolved in §3.4. Draft TODOs are closed; additions that Phase 1
+implementation made explicit are marked in the text and collected in §10.
 
-## 0. Principios
+## 0. Principles
 
-1. **Compatibilidad descendente**: un fichero DocMark es CommonMark+GFM válido. Un visor que
-   ignore atributos y contenedores muestra un documento útil.
-2. **Sintaxis de atributos Pandoc**: `{#id .clase clave="valor"}` — no se inventa sintaxis nueva
-   donde Pandoc ya la tiene.
-3. **Todo lo no representable se conserva**, nunca se descarta: mecanismo `raw-block` (§7).
-4. **Determinismo**: dos serializaciones del mismo IR producen bytes idénticos (necesario para
-   golden tests e idempotencia del round-trip). Final de línea siempre `\n`, UTF-8 sin BOM.
+1. **Downward compatibility**: a DocMark file is valid CommonMark+GFM. A viewer that
+   ignores attributes and containers still shows a useful document.
+2. **Pandoc attribute syntax**: `{#id .class key="value"}` — no new syntax is invented
+   where Pandoc already has it.
+3. **Everything unrepresentable is preserved**, never discarded: `raw-block` mechanism (§7).
+4. **Determinism**: two serializations of the same IR produce identical bytes (required for
+   golden tests and round-trip idempotence). Line endings always `\n`, UTF-8 without BOM.
 
-## 1. Convenciones de fichero
+## 1. File conventions
 
-- Extensión recomendada: `.dmk.md` (doble extensión: los editores lo tratan como Markdown).
-- Un documento de texto ⇒ un fichero. Un libro de cálculo ⇒ un fichero con una sección H1 por hoja.
-- Los medios se extraen a un directorio hermano `assets/` (configurable con `--assets-dir`).
+- Recommended extension: `.dmk.md` (double extension: editors treat it as Markdown).
+- One text document ⇒ one file. One spreadsheet workbook ⇒ one file with one H1 section per sheet.
+- Media is extracted to a sibling `assets/` directory (configurable with `--assets-dir`).
 
 ## 2. Front matter (YAML)
 
-Bloque YAML inicial delimitado por `---`. Campos definidos:
+Initial YAML block delimited by `---`. Defined fields:
 
 ```yaml
 ---
-docmark: "1.0"                  # versión de esta especificación (obligatorio)
-source-format: docx             # docx | doc | odt | xlsx | xls | ods (obligatorio al convertir)
-title: "Informe Anual"          # docProps / meta.xml
-author: "Ana Pérez"
+docmark: "1.0"                  # version of this specification (required)
+source-format: docx             # docx | doc | odt | xlsx | xls | ods (required when converting)
+title: "Annual Report"          # docProps / meta.xml
+author: "Ana Perez"
 created: 2026-03-01T10:00:00Z
 modified: 2026-07-15T09:30:00Z
-language: es-ES
-custom-properties:              # propiedades personalizadas del documento, tal cual
-  Departamento: "Ventas"
+language: en-US
+custom-properties:              # custom document properties, as-is
+  Department: "Sales"
 
-page:                           # geometría de página / sección por defecto (documentos de texto)
-  size: A4                      # o width/height explícitos
+page:                           # default page / section geometry (text documents)
+  size: A4                      # or explicit width/height
   margins: { top: 2.5cm, bottom: 2.5cm, left: 3cm, right: 3cm }
   orientation: portrait
 
-style-defaults:                 # `w:docDefaults` de OOXML: el fondo de la cascada
+style-defaults:                 # OOXML `w:docDefaults`: the base of the cascade
   font: { name: "Calibri", size: 11pt }
   paragraph: { space-after: 8pt }
 
-styles:                         # catálogo de estilos del documento original (§3)
+styles:                         # style catalog from the original document (§3)
   Heading1:
     type: paragraph
     based-on: Normal
@@ -63,7 +62,7 @@ styles:                         # catálogo de estilos del documento original (�
     type: character
     font: { italic: true, color: "#C00000" }
 
-list-definitions:               # numbering.xml / estilos de lista ODF normalizados
+list-definitions:               # numbering.xml / normalized ODF list styles
   L1:
     levels:
       - { format: decimal, text: "%1.", indent: 0.63cm }
@@ -71,219 +70,219 @@ list-definitions:               # numbering.xml / estilos de lista ODF normaliza
 ---
 ```
 
-Reglas:
-- Claves en kebab-case. Unidades explícitas (`px`, `cm`, `pt`, `emu`, `%`); colores `#RRGGBB`.
-- **Regla de unidades (normativa)**: el serializador elige la **primera unidad que representa la
-  longitud de forma exacta**, en el orden `px` (a 96 dpi) → `cm` → `pt` → `emu`. La legibilidad
-  cede ante la exactitud: un margen de Word de 1417 twips se escribe `70.85pt`, nunca un
-  `2.499cm` aproximado, porque redondear movería el margen en cada ida y vuelta. `emu` es la
-  escotilla final y siempre existe.
-- El bloque `styles` es un **catálogo**: el cuerpo referencia estilos por nombre mediante clases
-  (`{.Heading1}`); el writer inverso lo usa para regenerar `styles.xml`/`styles.xml` ODF.
-- Los campos desconocidos se conservan (los parsers no deben rechazarlos): forward-compatible.
+Rules:
+- Keys in kebab-case. Explicit units (`px`, `cm`, `pt`, `emu`, `%`); colors `#RRGGBB`.
+- **Unit rule (normative)**: the serializer chooses the **first unit that represents the
+  length exactly**, in the order `px` (at 96 dpi) → `cm` → `pt` → `emu`. Readability
+  yields to exactness: a Word margin of 1417 twips is written `70.85pt`, never an
+  approximate `2.499cm`, because rounding would move the margin on every round trip. `emu` is the
+  final hatch and always exists.
+- The `styles` block is a **catalog**: the body references styles by name via classes
+  (`{.Heading1}`); the reverse writer uses it to regenerate `styles.xml`/ODF `styles.xml`.
+- Unknown fields are preserved (parsers must not reject them): forward-compatible.
 
-## 3. Bloques de texto
+## 3. Text blocks
 
-### 3.1 Encabezados y párrafos
+### 3.1 Headings and paragraphs
 
 ```markdown
-# Título del capítulo {.Heading1}
+# Chapter title {.Heading1}
 
-Un párrafo normal (estilo por defecto, sin atributos).
+A normal paragraph (default style, no attributes).
 
-Párrafo con estilo y formato directo. {.Quote align=center space-after=12pt}
+Paragraph with style and direct formatting. {.Quote align=center space-after=12pt}
 ```
 
-- El nivel `#` refleja el nivel de esquema (outline level); la clase indica el estilo real.
-- Atributos de párrafo van en `{...}` **al final del bloque**: `align`,
+- The `#` level reflects the outline level; the class indicates the real style.
+- Paragraph attributes go in `{...}` **at the end of the block**: `align`,
   `indent-left`, `indent-right`, `indent-first-line`, `indent-hanging`,
   `space-before`, `space-after`, `line-height`, `background`, `keep-with-next`,
   `page-break-before`, `outline-level`.
-- Un párrafo **vacío** es contenido real (así se espacia un documento) y una línea en blanco no
-  puede representarlo, porque Markdown la absorbe: en modo `full` se escribe `[]{.empty}`. Los
-  modos `standard` y `plain` lo descartan, que es justo lo que prometen (§6).
-- Regla de economía: si el formato coincide exactamente con lo que define el estilo, **no** se
-  emiten atributos redundantes (mantiene el Markdown limpio y el diff estable).
+- An **empty** paragraph is real content (that is how a document is spaced) and a blank line
+  cannot represent it, because Markdown absorbs it: in `full` mode it is written `[]{.empty}`.
+  `standard` and `plain` modes discard it, which is exactly what they promise (§6).
+- Economy rule: if formatting matches exactly what the style defines, redundant attributes
+  are **not** emitted (keeps Markdown clean and diffs stable).
 
-### 3.2 Formato inline
+### 3.2 Inline formatting
 
 | Original | DocMark |
 |---|---|
-| negrita / cursiva / tachado | `**x**`, `*x*`, `~~x~~` (nativo GFM) |
-| subrayado | `[texto]{.underline}` |
-| color, resaltado, fuente, tamaño | `[texto]{color="#FF0000" highlight="yellow" font="Arial" size=14pt}` |
-| estilo de carácter | `[texto]{.Emphatic}` |
-| sub/superíndice | `[x]{.sub}` / `[x]{.sup}` |
-| versalitas / mayúsculas | `[x]{.small-caps}` / `[x]{.caps}` |
-| subrayado no simple | `[x]{.underline underline=double}` (valores: `double`, `thick`, `dotted`, `dashed`, `wave`) |
-| formato desactivado sobre un estilo | `[x]{bold=false}` / `[x]{italic=false}` |
-| salto de línea manual | doble espacio final (hard break) |
-| salto de página o columna | `[]{.break kind=page}` / `[]{.break kind=column}` |
-| hipervínculo | `[texto](https://...)` — con atributos si tiene estilo: `[texto](url){.Hyperlink}` |
-| nota al pie | `[^1]` + definición al final (sintaxis Pandoc/GFM footnotes) |
-| campo dinámico | `[valor]{.field field=PAGE}`, con `instr="…"` en modo `full` |
+| bold / italic / strikethrough | `**x**`, `*x*`, `~~x~~` (native GFM) |
+| underline | `[text]{.underline}` |
+| color, highlight, font, size | `[text]{color="#FF0000" highlight="yellow" font="Arial" size=14pt}` |
+| character style | `[text]{.Emphatic}` |
+| sub/superscript | `[x]{.sub}` / `[x]{.sup}` |
+| small caps / all caps | `[x]{.small-caps}` / `[x]{.caps}` |
+| non-simple underline | `[x]{.underline underline=double}` (values: `double`, `thick`, `dotted`, `dashed`, `wave`) |
+| formatting turned off over a style | `[x]{bold=false}` / `[x]{italic=false}` |
+| manual line break | trailing double space (hard break) |
+| page or column break | `[]{.break kind=page}` / `[]{.break kind=column}` |
+| hyperlink | `[text](https://...)` — with attributes if styled: `[text](url){.Hyperlink}` |
+| footnote | `[^1]` + definition at the end (Pandoc/GFM footnotes syntax) |
+| dynamic field | `[value]{.field field=PAGE}`, with `instr="…"` in `full` mode |
 
-### 3.3 Listas
+### 3.3 Lists
 
-Listas Markdown estándar; la definición tipográfica vive en `list-definitions` y se referencia
-en el primer ítem cuando no es la lista por defecto:
+Standard Markdown lists; typographic definition lives in `list-definitions` and is referenced
+on the first item when it is not the default list:
 
 ```markdown
-1. Primer punto {.ListParagraph list=L1}
-2. Segundo punto {.ListParagraph}
-   1. Sub-punto (el marcador real lo define L1 nivel 2) {.ListParagraph list=L1}
+1. First point {.ListParagraph list=L1}
+2. Second point {.ListParagraph}
+   1. Sub-point (the real marker is defined by L1 level 2) {.ListParagraph list=L1}
 ```
 
-- `list=` viaja **dentro del bloque de atributos del primer ítem**, no en un bloque aparte: un
-  ítem nunca lleva dos `{...}`.
-- Las listas anidadas se escriben *tight* (sin línea en blanco entre el ítem y su sublista) para
-  que un visor CommonMark no envuelva cada ítem en un `<p>`.
-- El marcador ordinal que se escribe es `1.`, `2.`… El marcador real de presentación lo define
-  el nivel correspondiente de `list-definitions`.
+- `list=` travels **inside the first item's attribute block**, not in a separate block: an
+  item never carries two `{...}`.
+- Nested lists are written *tight* (no blank line between the item and its sublist) so that
+  a CommonMark viewer does not wrap each item in a `<p>`.
+- The ordinal marker written is `1.`, `2.`… The real presentation marker is defined by
+  the corresponding level of `list-definitions`.
 
-### 3.4 Tablas (documentos de texto)
+### 3.4 Tables (text documents)
 
-Tablas GFM cuando son regulares. Una tabla con celdas combinadas, anchos fijos o estilo de tabla
-se envuelve en un contenedor que aporta los metadatos:
+GFM tables when they are regular. A table with merged cells, fixed widths or a table style
+is wrapped in a container that supplies the metadata:
 
 ```markdown
 ::: {.table style=TableGrid col-widths="3cm,5cm,5cm"}
-| Concepto | T1 | T2 |
+| Concept | T1 | T2 |
 |---|---|---|
-| Ventas {rowspan=2} | 100 | 200 |
+| Sales {rowspan=2} | 100 | 200 |
 | | 300 | 400 |
 :::
 ```
 
-- `rowspan`/`colspan` en la **primera celda** del área combinada; las celdas absorbidas quedan vacías.
-- El contenedor admite `style`, `col-widths` y `header-row=false`. GFM exige una fila de
-  cabecera: cuando el original no la tenía se emite una fila vacía y `header-row=false` lo
-  registra, de modo que la vuelta no invente una cabecera.
-- Si la estructura excede lo representable en GFM (tablas anidadas, celdas multipárrafo), la tabla
-  completa se emite como contenedor `::: {.table complex=true}` con filas y celdas como
-  sub-bloques:
+- `rowspan`/`colspan` on the **first cell** of the merged area; absorbed cells are left empty.
+- The container accepts `style`, `col-widths` and `header-row=false`. GFM requires a header
+  row: when the original had none, an empty row is emitted and `header-row=false`
+  records it, so the reverse trip does not invent a header.
+- If the structure exceeds what GFM can represent (nested tables, multi-paragraph cells), the full
+  table is emitted as a `::: {.table complex=true}` container with rows and cells as
+  sub-blocks:
 
 ````markdown
 ::: {.table complex=true style=TableGrid}
 ::: {.row}
 ::: {.cell rowspan=2}
-Primer párrafo de la celda.
+First paragraph of the cell.
 
-Segundo párrafo de la misma celda.
+Second paragraph of the same cell.
 :::
 ::: {.cell}
-Otra celda.
+Another cell.
 :::
 :::
 :::
 ````
 
-  Reglas del formato complejo: un `::: {.row}` por fila, un `::: {.cell}` por celda **incluidas
-  las absorbidas** (que van vacías), `colspan`/`rowspan` en la celda que abre el área, y dentro
-  de cada celda cualquier bloque DocMark válido. Esto cierra el anexo A del borrador.
+  Complex format rules: one `::: {.row}` per row, one `::: {.cell}` per cell **including
+  absorbed ones** (which are empty), `colspan`/`rowspan` on the cell that opens the area, and inside
+  each cell any valid DocMark block. This closes draft annex A.
 
-### 3.5 Imágenes y objetos
+### 3.5 Images and objects
 
-Toda imagen se extrae a `assets/` y se referencia con la sintaxis estándar de imagen Markdown
-más un conjunto normalizado de atributos que capturan la geometría completa del original
-(tamaño, posición, anclaje, recorte, rotación…). El mismo modelo de atributos aplica en
-documentos de texto y en hojas de cálculo (§4.1).
+Every image is extracted to `assets/` and referenced with standard Markdown image syntax
+plus a normalized set of attributes that capture the full geometry of the original
+(size, position, anchor, crop, rotation…). The same attribute model applies in
+text documents and spreadsheets (§4.1).
 
 ```markdown
-Imagen en línea (fluye con el texto):
+Inline image (flows with text):
 
-![Diagrama de ventas](assets/img-3f2a91.png){width=450px height=300px title="Figura 1"}
+![Sales diagram](assets/img-3f2a91.png){width=450px height=300px title="Figure 1"}
 
-Imagen flotante con posición y ajuste de texto:
+Floating image with position and text wrapping:
 
 ![Logo](assets/img-9c04b7.png){#img-logo width=3.5cm height=3.5cm
   anchor=floating relative-to=margin x=1.2cm y=0.5cm
   wrap=square wrap-side=right z-index=2
   rotation=0 crop="0,0,10%,0" native-size=800x800 dpi=300
-  name="Logo corporativo" link="https://example.com"}
+  name="Corporate logo" link="https://example.com"}
 ```
 
-**Atributos de imagen normalizados** (los no aplicables se omiten; unidades explícitas):
+**Normalized image attributes** (inapplicable ones are omitted; explicit units):
 
-| Atributo | Significado | Origen típico |
+| Attribute | Meaning | Typical origin |
 |---|---|---|
-| `width`, `height` | Tamaño **mostrado** (obligatorios siempre) | `wp:extent`, `svg:width/height` |
-| `native-size` | Dimensiones en píxeles del bitmap original (`AxB`) | cabecera del fichero |
-| `dpi` | Resolución declarada, si difiere de 96 | metadatos del bitmap |
-| `anchor` | `inline` (defecto) \| `floating` \| `behind` \| `front` | `wp:inline`/`wp:anchor`, `text:anchor-type` |
-| `relative-to` | Referencia de posición horizontal: `page` \| `margin` \| `paragraph` \| `character` \| `line` \| `column` | `wp:positionH @relativeFrom` |
-| `relative-to-v` | Referencia vertical, **solo si difiere** de `relative-to` | `wp:positionV @relativeFrom` |
-| `x`, `y` | Offsets desde la referencia (solo flotantes) | `wp:posOffset`, `svg:x/y` |
-| `align-h`, `align-v` | Alineación simbólica (`left/center/right`, `top/middle/bottom`) cuando el original usa alineación en vez de offset | `wp:align` |
+| `width`, `height` | **Displayed** size (always required) | `wp:extent`, `svg:width/height` |
+| `native-size` | Pixel dimensions of the original bitmap (`AxB`) | file header |
+| `dpi` | Declared resolution, if different from 96 | bitmap metadata |
+| `anchor` | `inline` (default) \| `floating` \| `behind` \| `front` | `wp:inline`/`wp:anchor`, `text:anchor-type` |
+| `relative-to` | Horizontal position reference: `page` \| `margin` \| `paragraph` \| `character` \| `line` \| `column` | `wp:positionH @relativeFrom` |
+| `relative-to-v` | Vertical reference, **only if different** from `relative-to` | `wp:positionV @relativeFrom` |
+| `x`, `y` | Offsets from the reference (floating only) | `wp:posOffset`, `svg:x/y` |
+| `align-h`, `align-v` | Symbolic alignment (`left/center/right`, `top/middle/bottom`) when the original uses alignment instead of offset | `wp:align` |
 | `wrap` | `square` \| `tight` \| `through` \| `top-bottom` \| `none` | `wp:wrapSquare…`, `style:wrap` |
 | `wrap-side` | `both` \| `left` \| `right` \| `largest` | `@wrapText` |
-| `z-index` | Orden de apilamiento entre objetos flotantes | `@relativeHeight` |
-| `rotation` | Grados en sentido horario | `a:xfrm @rot` |
+| `z-index` | Stacking order among floating objects | `@relativeHeight` |
+| `rotation` | Degrees clockwise | `a:xfrm @rot` |
 | `flip` | `h` \| `v` \| `hv` | `a:xfrm @flipH/V` |
-| `crop` | Recorte `"izq,arr,der,abj"`, los cuatro lados con sufijo `%` | `a:srcRect`, `fo:clip` |
-| `border` | Borde simple `"1pt solid #000000"` (bordes complejos → raw) | `pic:spPr` |
-| `name` | Nombre interno del objeto en el documento | `wp:docPr @name` |
-| `title` | Título/leyenda | `wp:docPr @title` |
-| `link` | Hipervínculo sobre la imagen | `a:hlinkClick` |
-| `external-src` | URL original si la imagen estaba **enlazada**, no embebida | `r:link`, `xlink:href` |
-| `render` | `unsupported` para formatos que un visor Markdown no dibuja (WMF/EMF) | sniffing del contenido |
-| `effects-raw` | Id del raw-block con los efectos irrepresentables | `a:effectLst`, `a:scene3d` |
+| `crop` | Crop `"left,top,right,bottom"`, all four sides with `%` suffix | `a:srcRect`, `fo:clip` |
+| `border` | Simple border `"1pt solid #000000"` (complex borders → raw) | `pic:spPr` |
+| `name` | Internal object name in the document | `wp:docPr @name` |
+| `title` | Title/caption | `wp:docPr @title` |
+| `link` | Hyperlink on the image | `a:hlinkClick` |
+| `external-src` | Original URL if the image was **linked**, not embedded | `r:link`, `xlink:href` |
+| `render` | `unsupported` for formats a Markdown viewer does not draw (WMF/EMF) | content sniffing |
+| `effects-raw` | Id of the raw-block with unrepresentable effects | `a:effectLst`, `a:scene3d` |
 
-Reglas:
-- El texto alternativo (accesibilidad, `wp:docPr @descr` / `svg:desc`) va en el campo alt
-  estándar de Markdown `![…]`, no en un atributo — así lo muestran todos los visores.
-- Nombre de fichero: `img-<hash8>.<ext>` (hash del contenido → estable entre conversiones y
-  con deduplicación: N apariciones del mismo bitmap comparten fichero, cada una con sus
-  atributos de geometría propios).
-- `width`/`height` son **siempre** obligatorios en la serialización aunque coincidan con el
-  tamaño nativo: el round-trip no debe depender de releer el bitmap.
-- WMF/EMF se extraen con su extensión original y geometría completa; el serializador añade
-  `render=unsupported` como pista para visores (advertencia en el informe).
-- Efectos de imagen sin representación (sombras, biseles, estilos 3D DrawingML) se conservan
-  como raw-block asociado mediante `effects-raw=<id>` que referencia un `::: {.raw}` contiguo.
-- Objetos no imagen (OLE, SmartArt, gráficos incrustados): se extraen a `assets/` y se
-  referencian con `![...](assets/obj-xxx.bin){.embedded-object content-type="..."}`, más
-  advertencia en el informe.
+Rules:
+- Alternative text (accessibility, `wp:docPr @descr` / `svg:desc`) goes in the standard
+  Markdown alt field `![…]`, not in an attribute — so every viewer shows it.
+- File name: `img-<hash8>.<ext>` (content hash → stable across conversions and
+  with deduplication: N appearances of the same bitmap share a file, each with its
+  own geometry attributes).
+- `width`/`height` are **always** required in serialization even when they match the
+  native size: the round-trip must not depend on rereading the bitmap.
+- WMF/EMF are extracted with their original extension and full geometry; the serializer adds
+  `render=unsupported` as a hint for viewers (warning in the report).
+- Image effects without representation (shadows, bevels, DrawingML 3D styles) are preserved
+  as an associated raw-block via `effects-raw=<id>` referencing a contiguous `::: {.raw}`.
+- Non-image objects (OLE, SmartArt, embedded charts): extracted to `assets/` and
+  referenced with `![...](assets/obj-xxx.bin){.embedded-object content-type="..."}`, plus
+  a warning in the report.
 
-### 3.6 Secciones, cabeceras y pies, cuadros de texto
+### 3.6 Sections, headers and footers, text boxes
 
 ```markdown
 ::: {.header scope=default}
-Texto de cabecera — página [n.º]{.field field=PAGE}
+Header text — page [n.]{.field field=PAGE}
 :::
 
 ::: {.section columns=2 page-size=A4 orientation=landscape}
-… contenido de la sección …
+… section content …
 :::
 
 ::: {.textbox x=5cm y=2cm width=6cm}
-Contenido del cuadro de texto.
+Text box content.
 :::
 ```
 
-Los campos dinámicos (número de página, fecha, TOC) se representan como spans `{.field field=...}`
-con su último valor conocido como texto visible.
+Dynamic fields (page number, date, TOC) are represented as `{.field field=...}` spans
+with their last known value as visible text.
 
-## 4. Hojas de cálculo
+## 4. Spreadsheets
 
-Cada hoja es una sección `#` con contenedor de metadatos; los datos van en tabla GFM.
-**Regla de oro: la celda muestra el valor; la fórmula y el formato viajan en metadatos.**
+Each sheet is a `#` section with a metadata container; data goes in a GFM table.
+**Golden rule: the cell shows the value; formula and format travel in metadata.**
 
 ```markdown
 ---
 docmark: "1.0"
 source-format: xlsx
 workbook:
-  active-sheet: Ventas
+  active-sheet: Sales
   defined-names:
-    TOTAL_ANUAL: "Ventas!$D$10"
+    ANNUAL_TOTAL: "Sales!$D$10"
 ---
 
-# Ventas {.sheet cols="A:D" col-widths="12,9,9,11" frozen="A2"}
+# Sales {.sheet cols="A:D" col-widths="12,9,9,11" frozen="A2"}
 
 | | A | B | C | D |
 |---|---|---|---|---|
-| **1** | Producto | T1 | T2 | Total |
+| **1** | Product | T1 | T2 | Total |
 | **2** | Widgets | 100 | 200 | 300 |
 | **3** | Gadgets | 150 | 250 | 400 |
 
@@ -295,121 +294,121 @@ workbook:
 :::
 ```
 
-Reglas:
-- Primera columna/fila de la tabla = coordenadas (generadas, en negrita); permiten que el bloque
-  `cell-meta` use referencias A1 legibles.
-- `cell-meta` admite rangos (`B2:D3`) para compactar metadatos repetidos; el parser expande.
-- `formula` se guarda **sin** `=` inicial y en el dialecto original; `formula-dialect: openformula`
-  se añade cuando la fuente es ODS.
-- Tipos de celda: `number | text | bool | date | error` (+ `num-fmt` con el código de formato).
-  Las fechas se muestran en la tabla en ISO-8601 y se restauran como serial+formato al escribir.
-- Celdas combinadas: `A5:C5: merge=true` (el valor vive en la celda superior-izquierda).
-- Estilos de celda (fuente, borde, relleno) se catalogan en `styles:` del front matter y se
-  referencian con `style=`.
-- Hojas enormes: por defecto se vuelca el rango usado completo; `--max-cells` permite truncar
-  **solo en modo unidireccional** (nunca al preparar un round-trip; truncar invalida la vuelta).
+Rules:
+- First table column/row = coordinates (generated, bold); they let the
+  `cell-meta` block use readable A1 references.
+- `cell-meta` accepts ranges (`B2:D3`) to compact repeated metadata; the parser expands them.
+- `formula` is stored **without** a leading `=` and in the original dialect; `formula-dialect: openformula`
+  is added when the source is ODS.
+- Cell types: `number | text | bool | date | error` (+ `num-fmt` with the format code).
+  Dates are shown in the table as ISO-8601 and restored as serial+format on write.
+- Merged cells: `A5:C5: merge=true` (the value lives in the top-left cell).
+- Cell styles (font, border, fill) are catalogued in front-matter `styles:` and
+  referenced with `style=`.
+- Huge sheets: by default the full used range is dumped; `--max-cells` allows truncating
+  **only in unidirectional mode** (never when preparing a round-trip; truncating invalidates the reverse trip).
 
-### 4.1 Imágenes en hojas de cálculo
+### 4.1 Images in spreadsheets
 
-Las hojas también llevan imágenes (logos, capturas, diagramas) ancladas a la rejilla. Se
-declaran en un bloque `sheet-images` al final de cada hoja, usando la misma sintaxis y los
-mismos atributos de imagen de §3.5 más los atributos de anclaje propios de hoja de cálculo:
+Sheets also carry images (logos, screenshots, diagrams) anchored to the grid. They are
+declared in a `sheet-images` block at the end of each sheet, using the same syntax and the
+same image attributes from §3.5 plus spreadsheet-specific anchor attributes:
 
 ```markdown
 ::: {.sheet-images}
-![Logo de la empresa](assets/img-9c04b7.png){anchor=two-cell
+![Company logo](assets/img-9c04b7.png){anchor=two-cell
   from="B2" from-offset="12px,3px" to="D8" to-offset="0,0" move-with-cells=true size-with-cells=false}
 
-![Firma](assets/img-11ab42.png){anchor=one-cell from="F20" from-offset="0,0" width=180px height=60px}
+![Signature](assets/img-11ab42.png){anchor=one-cell from="F20" from-offset="0,0" width=180px height=60px}
 
-![Marca de agua](assets/img-77cd01.png){anchor=absolute x=5cm y=8cm width=10cm height=10cm}
+![Watermark](assets/img-77cd01.png){anchor=absolute x=5cm y=8cm width=10cm height=10cm}
 :::
 ```
 
-Reglas:
-- `anchor` en hojas: `two-cell` (de celda a celda; la imagen se mueve/estira con la rejilla,
-  según `move-with-cells`/`size-with-cells`) | `one-cell` (celda origen + tamaño fijo) |
-  `absolute` (posición absoluta). Corresponden a `xdr:twoCellAnchor`/`oneCellAnchor`/
-  `absoluteAnchor` de OOXML y a los anclajes celda/hoja de ODF.
-- En `two-cell` **no se serializan** `width`/`height` (el tamaño lo define la rejilla); en
-  `one-cell` y `absolute` son obligatorios, como en §3.5.
-- `from`/`to` usan referencias A1; los offsets dentro de la celda van en `from-offset`/`to-offset`.
-- El resto de propiedades (rotación, recorte, alt, hipervínculo, `native-size`…) funcionan igual
-  que en §3.5.
-- Gráficos (charts) nativos de la hoja no son imágenes: en v1 se conservan como raw-block con
-  advertencia (backlog: exportarlos también como imagen de cortesía en modo unidireccional).
+Rules:
+- Sheet `anchor`: `two-cell` (cell to cell; the image moves/stretches with the grid,
+  per `move-with-cells`/`size-with-cells`) | `one-cell` (origin cell + fixed size) |
+  `absolute` (absolute position). Correspond to OOXML `xdr:twoCellAnchor`/`oneCellAnchor`/
+  `absoluteAnchor` and ODF cell/sheet anchors.
+- In `two-cell`, `width`/`height` are **not serialized** (size is defined by the grid); in
+  `one-cell` and `absolute` they are required, as in §3.5.
+- `from`/`to` use A1 references; in-cell offsets go in `from-offset`/`to-offset`.
+- Remaining properties (rotation, crop, alt, hyperlink, `native-size`…) work the same
+  as in §3.5.
+- Native sheet charts are not images: in v1 they are preserved as raw-block with a
+  warning (backlog: also export them as a courtesy image in unidirectional mode).
 
-## 5. Mapeo de estilos configurable (modo "publicación")
+## 5. Configurable style mapping ("publication" mode)
 
-Inspirado en mammoth: un fichero opcional `style-map.yaml` permite proyectar estilos propios a
-elementos Markdown puros (`MiTítulo ⇒ h2`, `CódigoFuente ⇒ code-block`) para quien quiera salida
-limpia sin metadatos. Este modo es **unidireccional por definición** y la CLI lo marca así.
+Inspired by mammoth: an optional `style-map.yaml` file lets you project custom styles to
+pure Markdown elements (`MyTitle ⇒ h2`, `SourceCode ⇒ code-block`) for whoever wants clean
+output without metadata. This mode is **unidirectional by definition** and the CLI marks it as such.
 
-## 6. Grados de fidelidad (`--fidelity`)
+## 6. Fidelity levels (`--fidelity`)
 
-| Modo | Contenido | Uso |
+| Mode | Content | Use |
 |---|---|---|
-| `full` (defecto) | Todo: atributos, catálogos, raw-blocks | Round-trip |
-| `standard` | Atributos principales, sin raw-blocks ni catálogo completo | Markdown rico legible |
-| `plain` | CommonMark+GFM puro, sin atributos | Consumo LLM/RAG estilo MarkItDown |
+| `full` (default) | Everything: attributes, catalogs, raw-blocks | Round-trip |
+| `standard` | Main attributes, no raw-blocks or full catalog | Readable rich Markdown |
+| `plain` | Pure CommonMark+GFM, no attributes | LLM/RAG consumption MarkItDown-style |
 
-## 7. Escotilla de fidelidad: raw-blocks
+## 7. Fidelity hatch: raw-blocks
 
-Fragmentos sin representación DocMark (campos complejos, SmartArt, dibujos DrawingML, contenido
-firmado…) se conservan opacos:
+Fragments without a DocMark representation (complex fields, SmartArt, DrawingML drawings, signed
+content…) are preserved opaquely:
 
 ````markdown
 ::: {.raw format=ooxml part="word/document.xml" id=raw-0007}
 ```xml
-<w:sdt>…contenido original…</w:sdt>
+<w:sdt>…original content…</w:sdt>
 ```
 :::
 ````
 
-- El writer inverso re-inyecta el fragmento tal cual si el destino coincide con `format`;
-  si no, lo omite con advertencia.
-- Un editor humano puede borrar un raw-block sabiendo que solo pierde ese elemento.
-- El comando `docsai convert` reporta cuántos raw-blocks emitió (métrica de cobertura: el
-  objetivo de cada fase es reducirlos).
+- The reverse writer re-injects the fragment as-is if the destination matches `format`;
+  otherwise it omits it with a warning.
+- A human editor can delete a raw-block knowing they only lose that element.
+- The `docsai convert` command reports how many raw-blocks it emitted (coverage metric: each
+  phase's goal is to reduce them).
 
-## 8. Reglas de escape y determinismo del serializador
+## 8. Escape rules and serializer determinism
 
-- Se escapan solo los caracteres que cambiarían el significado en CommonMark (`*_#|[]<>` según
-  contexto), con tabla de decisión fija documentada en el código.
-- Atributos: orden canónico (id, clases ordenadas alfabéticamente, claves ordenadas); valores
-  siempre con comillas dobles salvo números/identificadores simples.
-- Tablas GFM: columnas alineadas con padding fijo si la tabla < 120 cols; sin padding si excede.
-- Estas reglas son **normativas**: el test de idempotencia (`parse(serialize(ir)) == ir` y
-  `serialize(parse(md)) == md`) las verifica en CI.
+- Only characters that would change meaning in CommonMark are escaped (`*_#|[]<>` depending on
+  context), with a fixed decision table documented in the code.
+- Attributes: canonical order (id, alphabetically sorted classes, sorted keys); values
+  always with double quotes except numbers/simple identifiers.
+- GFM tables: columns aligned with fixed padding if the table is < 120 cols; no padding if it exceeds.
+- These rules are **normative**: the idempotence test (`parse(serialize(ir)) == ir` and
+  `serialize(parse(md)) == md`) verifies them in CI.
 
-## 9. Compatibilidad con Pandoc
+## 9. Pandoc compatibility
 
-DocMark en modo `full` es parseable por `pandoc -f markdown` con estas salvedades documentadas:
-los bloques `cell-meta` y `raw` aparecen como divs genéricos, y los atributos no estándar se
-conservan como atributos de div/span. Esto es intencional: da salida gratuita a PDF/HTML/EPUB
-vía Pandoc sin que docsai tenga que implementarla.
+DocMark in `full` mode is parseable by `pandoc -f markdown` with these documented caveats:
+`cell-meta` and `raw` blocks appear as generic divs, and non-standard attributes are
+kept as div/span attributes. This is intentional: it gives free PDF/HTML/EPUB output
+via Pandoc without docsai having to implement it.
 
 ---
 
-## 10. Registro de cambios de la v1.0
+## 10. v1.0 change log
 
-Añadidos respecto al borrador, decididos durante la Fase 1 al implementar el serializador. Todos
-son adiciones: ningún documento escrito contra el borrador deja de ser válido.
+Additions relative to the draft, decided during Phase 1 while implementing the serializer. All
+are additions: no document written against the draft ceases to be valid.
 
-| Cambio | Motivo |
+| Change | Reason |
 |---|---|
-| Regla de unidades exactas (§2) con `emu` como escotilla | El borrador dejaba la unidad al gusto del serializador; redondear a `cm` movía márgenes y tamaños en cada ida y vuelta |
-| `style-defaults` en el front matter | `w:docDefaults` es el fondo de la cascada de 4 niveles y no tenía sitio |
-| `indent-left/right/first-line/hanging` en vez de un `indent` único | OOXML y ODF distinguen los cuatro; uno solo perdía información |
-| `[]{.empty}` para párrafos vacíos | Una línea en blanco no sobrevive a Markdown, y los párrafos vacíos son contenido real |
-| `[]{.break kind=page\|column}` | El borrador solo cubría el salto de línea |
-| `.small-caps`, `.caps`, `underline=<estilo>`, `bold=false`, `italic=false` | Formato directo que la tabla §3.2 no cubría |
-| `{.field field=X instr="…"}` | El borrador describía los campos en prosa pero no fijaba la sintaxis |
-| `list=` dentro del bloque de atributos del primer ítem | Evita que un ítem lleve dos `{...}` seguidos |
-| `header-row=false` en el contenedor de tabla | GFM obliga a una fila de cabecera que el original podía no tener |
-| Formato completo de `::: {.table complex=true}` | Cierra el anexo A del borrador |
-| `relative-to-v`, `render=unsupported`, `effects-raw` en imágenes | Ejes con referencias distintas, medios no dibujables y efectos sin modelo |
+| Exact unit rule (§2) with `emu` as hatch | The draft left the unit to the serializer's taste; rounding to `cm` moved margins and sizes on every round trip |
+| `style-defaults` in the front matter | `w:docDefaults` is the base of the 4-level cascade and had no home |
+| `indent-left/right/first-line/hanging` instead of a single `indent` | OOXML and ODF distinguish all four; a single one lost information |
+| `[]{.empty}` for empty paragraphs | A blank line does not survive Markdown, and empty paragraphs are real content |
+| `[]{.break kind=page\|column}` | The draft only covered the line break |
+| `.small-caps`, `.caps`, `underline=<style>`, `bold=false`, `italic=false` | Direct formatting that table §3.2 did not cover |
+| `{.field field=X instr="…"}` | The draft described fields in prose but did not fix the syntax |
+| `list=` inside the first item's attribute block | Avoids an item carrying two consecutive `{...}` |
+| `header-row=false` on the table container | GFM requires a header row the original may not have had |
+| Full `::: {.table complex=true}` format | Closes draft annex A |
+| `relative-to-v`, `render=unsupported`, `effects-raw` on images | Axes with different references, non-drawable media and effects without a model |
 
-**Extensiones no implementadas todavía** (la spec las define, la Fase 1 no las emite): `border` de
-párrafo, `::: {.textbox}` (los cuadros de texto viajan como raw-block), y todo lo de §4 (hojas de
-cálculo), que llega en la Fase 3.
+**Extensions not yet implemented** (the spec defines them, Phase 1 does not emit them): paragraph
+`border`, `::: {.textbox}` (text boxes travel as raw-block), and everything in §4 (spreadsheets),
+which arrives in Phase 3.

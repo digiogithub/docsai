@@ -218,7 +218,7 @@ impl fmt::Display for Length {
 
 /// Formats a float with at most `decimals` digits and no trailing zeros.
 ///
-/// Used by every unit rendered into DocMark, so that the serialiser stays
+/// Used by every unit rendered into DocMark, so that the serializer stays
 /// deterministic (`2.5cm`, never `2.50cm` or `2.4999999cm`).
 pub fn trim_float(value: f64, decimals: usize) -> String {
     let mut s = format!("{value:.decimals$}");

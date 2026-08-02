@@ -8,7 +8,7 @@ use crate::xml::Element;
 
 /// Cap on the total uncompressed size of a package.
 ///
-/// A first line of defence against decompression bombs; Fase 8 hardens this
+/// A first line of defence against decompression bombs; Phase 8 hardens this
 /// further with a dedicated adversarial suite.
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 /// Cap on a single part.
@@ -171,7 +171,7 @@ impl Relationships {
 /// Normalises a ZIP member name, rejecting anything that escapes the package.
 ///
 /// Media file names inside a document are attacker-controlled, so a member
-/// called `../../etc/passwd` must never become a part name (arquitectura §3.2).
+/// called `../../etc/passwd` must never become a part name (architecture §3.2).
 fn normalise_part_name(raw: &str) -> Option<String> {
     let raw = raw.replace('\\', "/");
     if raw.starts_with('/') || raw.contains(':') {

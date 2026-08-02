@@ -1,7 +1,7 @@
 //! Conversion orchestration: format detection, pipelines and asset management.
 //!
 //! This is the only crate that knows about more than one format; the readers
-//! and writers never talk to each other (arquitectura §1).
+//! and writers never talk to each other (architecture §1).
 
 #![forbid(unsafe_code)]
 
@@ -43,7 +43,7 @@ pub struct FormatSupport {
     pub format: Format,
     pub read: bool,
     pub write: bool,
-    /// Phase of `docs/plan-desarrollo.md` that lands the missing direction.
+    /// Phase of `docs/development-plan.md` that lands the missing direction.
     pub note: &'static str,
 }
 
@@ -53,43 +53,43 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Docx,
         read: true,
         write: false,
-        note: "writing arrives in Fase 2",
+        note: "writing arrives in Phase 2",
     },
     FormatSupport {
         format: Format::Doc,
         read: false,
         write: false,
-        note: "reading arrives in Fase 5; writing is out of scope",
+        note: "reading arrives in Phase 5; writing is out of scope",
     },
     FormatSupport {
         format: Format::Xlsx,
         read: false,
         write: false,
-        note: "arrives in Fase 3",
+        note: "arrives in Phase 3",
     },
     FormatSupport {
         format: Format::Xls,
         read: false,
         write: false,
-        note: "reading arrives in Fase 3; writing is out of scope",
+        note: "reading arrives in Phase 3; writing is out of scope",
     },
     FormatSupport {
         format: Format::Odt,
         read: false,
         write: false,
-        note: "arrives in Fase 4",
+        note: "arrives in Phase 4",
     },
     FormatSupport {
         format: Format::Ods,
         read: false,
         write: false,
-        note: "arrives in Fase 4",
+        note: "arrives in Phase 4",
     },
     FormatSupport {
         format: Format::DocMark,
         read: false,
         write: true,
-        note: "reading arrives in Fase 2",
+        note: "reading arrives in Phase 2",
     },
 ];
 
@@ -120,7 +120,7 @@ mod tests {
             );
         }
         assert!(can_read(Format::Docx));
-        assert!(!can_write(Format::Docx), "docx writing is Fase 2");
+        assert!(!can_write(Format::Docx), "docx writing is Phase 2");
         assert!(can_write(Format::DocMark));
     }
 

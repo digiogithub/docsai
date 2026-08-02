@@ -1,4 +1,4 @@
-//! Format detection **by content**, not by extension (arquitectura §4).
+//! Format detection **by content**, not by extension (architecture §4).
 //!
 //! A file called `informe.txt` that is really a `.docx` must still convert,
 //! and a `.docx` extension on a ZIP of holiday photos must not.
@@ -34,7 +34,7 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
 
     if read >= 8 && magic == OLE2_MAGIC {
         // Both legacy formats are the same container; only the name tells them
-        // apart without parsing the directory (Fase 5 does that properly).
+        // apart without parsing the directory (Phase 5 does that properly).
         let format = match extension(hint).as_deref() {
             Some("xls") | Some("xlt") => Format::Xls,
             _ => Format::Doc,
