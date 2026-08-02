@@ -292,6 +292,64 @@ fn xlsx_roundtrip_is_idempotent() {
     }
 }
 
+/// Office → DocMark → Office → DocMark idempotence for the docx corpus
+/// (Phase 2 residual: floating images, footnotes, lists, tables, headers).
+#[test]
+fn docx_roundtrip_is_idempotent() {
+    for document in documents("docx", "docx") {
+        let outcome = docsai_convert::roundtrip_file(
+            &document,
+            None,
+            &docsai_convert::ConvertOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{}: {e}", document.display()));
+        assert!(
+            outcome.identical,
+            "{} second DocMark differs from the first:\n--- first ---\n{}\n--- second ---\n{}",
+            document.display(),
+            outcome.first_markdown,
+            outcome.second_markdown
+        );
+    }
+}
+
+/// Phase 2: `serialize(parse(md)) == md` over every docx golden.
+///
+/// Image goldens reference `assets/img-*.png` that only exist inside the
+/// companion `.docx`; the store is seeded from that package first so asset
+/// ids stay stable without checking loose media into the corpus.
+#[test]
+fn serialize_parse_is_identity_on_docx_goldens() {
+    for document in documents("docx", "docx") {
+        let golden = golden_path(&document);
+        let md = std::fs::read_to_string(&golden)
+            .unwrap_or_else(|e| panic!("{}: {e}", golden.display()));
+        let mut assets = MemoryAssetStore::new();
+        let file = std::fs::File::open(&document)
+            .unwrap_or_else(|e| panic!("{}: {e}", document.display()));
+        let _ = docsai_office::read_docx(file, &mut assets)
+            .unwrap_or_else(|e| panic!("{}: {e}", document.display()));
+        let base = golden.parent();
+        let (doc, _) = docsai_docmark::parse_with_base(&md, base, &mut assets)
+            .unwrap_or_else(|e| panic!("{}: {e}", golden.display()));
+        let (out, _) = docsai_docmark::serialize(
+            &doc,
+            &assets,
+            &Options {
+                fidelity: Fidelity::Full,
+                assets_dir: "assets".into(),
+                source_format: Format::Docx,
+            },
+        );
+        assert_eq!(
+            out,
+            md,
+            "{}: serialize(parse(md)) must equal md",
+            golden.display()
+        );
+    }
+}
+
 /// Writes a synthetic document of roughly 50 pages: paragraphs, headings and
 /// tables, all of them things the reader must handle at speed.
 fn build_large_docx(path: &Path, paragraphs: usize) {

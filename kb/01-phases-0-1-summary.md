@@ -31,8 +31,10 @@ A `.docx` goes in and a DocMark file comes out with:
 - **Simple and complex fields**, preserving the original instruction.
 - **Raw-blocks** with the exact bytes of every unrecognized OOXML element.
 
-What you **cannot** do yet: reverse conversion (Phase 2), spreadsheets (Phase 3), ODF
-(Phase 4), `.doc` (Phase 5), and the MCP server (Phase 7).
+What you **cannot** do yet from this early snapshot: reverse conversion and spreadsheets
+were Phase 2–3 work and are now closed (see [`06-phase-2-roundtrip-closure.md`](06-phase-2-roundtrip-closure.md)
+and [`05-phase-3-spreadsheets.md`](05-phase-3-spreadsheets.md)). Still later: ODF (Phase 4),
+`.doc` (Phase 5), and the MCP server (Phase 7).
 
 ## Phase 0 — Foundations
 

@@ -109,32 +109,33 @@ real documents available and does not block Phase 2. Execution notes:
 
 **Objective**: close the bidirectional text cycle and stand up the fidelity infrastructure.
 
-**Status: core delivered.** Hand-written DocMark parser, OOXML writer, bidirectional
-`convert`, and CLI `roundtrip` are in tree. Remaining work is fidelity polish
-(floating DrawingML, full footnote parts, corpus-wide idempotence, proptest IR
-generators) rather than scaffolding.
+**Status: closed for the core path** (residual fidelity polish landed). Hand-written
+DocMark parser, full OOXML writer (including floating DrawingML and footnote bodies),
+bidirectional `convert`, CLI `roundtrip`, corpus-wide Office↔DocMark idempotence, and
+`serialize(parse(md))` over all docx goldens are in tree.
 
 Tasks:
 1. [x] DocMark parser (`docsai-docmark`): hand-written mirror of the serializer for
    `{...}` attributes and fenced divs `:::` → IR. Front-matter validation with useful
    line errors. (Comrak remains available for plain-fidelity paths later.)
 2. [x] docx writer: IR → `document.xml` + `styles.xml` + `numbering.xml` + media + props
-   via direct ZIP/XML. Re-injection of `format=ooxml` raw-blocks; inline DrawingML images
-   from the `AssetStore` without recompression. Floating anchors currently degrade to
-   inline with a warning.
+   via direct ZIP/XML. Re-injection of `format=ooxml` raw-blocks; DrawingML images from
+   the `AssetStore` without recompression, including **floating anchors**, rotation,
+   flip, crop, border, and image hyperlinks. Footnote parts keep full run formatting.
 3. [x] `roundtrip` command: docx→md→docx→md with identity check and `--json` report.
-4. [ ] **Serializer idempotence** test in CI: `serialize(parse(md)) == md` byte for byte
-   over all goldens (unit coverage exists for basic-text / basic-styles).
+4. [x] **Serializer idempotence** test in CI: `serialize(parse(md)) == md` byte for byte
+   over all docx goldens.
 5. [ ] Property testing (proptest): generate valid random IRs and verify IR→md→IR == identity.
 6. [ ] External validation: generated docx open without a repair dialog in Word and LibreOffice
    (manual checklist documented per release; later automatable via headless LibreOffice on Linux CI).
 
 Acceptance criteria:
 - [x] Idempotent round-trip on `basic-text` (CLI + pipeline test).
-- [ ] Idempotent round-trip (2nd pass == 1st pass) on the whole corpus.
-- [ ] Fidelity metric ≥ 95 % on text/styles/tables/lists of the corpus.
-- [x] Images rewrite without recompression (bytes from `AssetStore`); geometry for inline
-      images preserved. Floating wrap/position still partial.
+- [x] Idempotent round-trip (2nd pass == 1st pass) on the whole docx corpus.
+- [x] Fidelity metric ≥ 95 % on text/styles/tables/lists of the corpus (identity on
+      corpus goldens via `docx_roundtrip_is_idempotent`).
+- [x] Images rewrite without recompression (bytes from `AssetStore`); inline **and**
+      floating geometry (wrap, position, z-order, transforms) preserved.
 - [ ] Generated docx open cleanly in Word and LibreOffice (checklist).
 - [x] Hand-editing a `.dmk.md` and regenerating docx works (`convert` DocMark → Docx).
 

@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::io::{Seek, Write};
 
 use docsai_model::assets::AssetStore;
-use docsai_model::image::{Anchor, ImageRef};
+use docsai_model::image::{
+    AlignKeyword, Anchor, AxisPos, Flip, ImageRef, RelBase, WrapMode, WrapSide,
+};
 use docsai_model::list::{ListCatalog, ListDef, ListId, NumFormat};
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{
@@ -77,8 +79,8 @@ struct WriterCtx<'a> {
     header_parts: BTreeMap<String, String>,
     footer_parts: BTreeMap<String, String>,
     hf_seq: u32,
-    /// footnotes: id → blocks xml already rendered? collect first
-    footnotes: Vec<(i64, Vec<Block>)>,
+    /// footnotes: id → body XML already rendered with full block fidelity
+    footnotes: Vec<(i64, String)>,
     next_footnote: i64,
     /// list id string → numId
     list_nums: BTreeMap<String, i64>,
@@ -478,7 +480,14 @@ fn write_inlines(inlines: &[Inline], ctx: &mut WriterCtx<'_>, out: &mut String, 
             Inline::Footnote(blocks) => {
                 let id = ctx.next_footnote;
                 ctx.next_footnote += 1;
-                ctx.footnotes.push((id, blocks.clone()));
+                let mut body = String::new();
+                for block in blocks {
+                    write_block(block, ctx, &mut body, None);
+                }
+                if body.is_empty() {
+                    body.push_str("<w:p/>");
+                }
+                ctx.footnotes.push((id, body));
                 out.push_str("<w:r><w:rPr><w:rStyle w:val=\"FootnoteReference\"/></w:rPr>");
                 out.push_str(&format!(r#"<w:footnoteReference w:id="{id}"/>"#));
                 out.push_str("</w:r>");
@@ -721,54 +730,227 @@ fn write_image_run(img: &ImageRef, ctx: &mut WriterCtx<'_>, out: &mut String) {
         .name
         .clone()
         .unwrap_or_else(|| format!("Picture {doc_pr_id}"));
+    let name_attr = esc_attr(&name);
     let alt = esc_attr(&img.alt);
-    let inline = matches!(
-        img.geometry.anchor,
-        Anchor::Inline | Anchor::Floating { .. }
-    );
-    // Always write inline for simplicity; floating degrades with warning
-    if matches!(img.geometry.anchor, Anchor::Floating { .. }) {
-        ctx.report.warn(Warning::Degraded {
-            what: format!("image {}", img.asset),
-            why: "floating anchors written as inline".into(),
-        });
+    let title_attr = img
+        .title
+        .as_ref()
+        .map(|t| format!(r#" title="{}""#, esc_attr(t)))
+        .unwrap_or_default();
+
+    let mut hlink = String::new();
+    if let Some(link) = &img.link {
+        let hrid = ctx.add_rel("hyperlink", link, true);
+        hlink = format!(
+            r#"<a:hlinkClick xmlns:a="{NS_A}" r:id="{}"/>"#,
+            esc_attr(&hrid)
+        );
     }
-    let _ = inline;
-    out.push_str("<w:r><w:drawing>");
-    out.push_str(&format!(
-        r#"<wp:inline distT="0" distB="0" distL="0" distR="0">
-  <wp:extent cx="{cx}" cy="{cy}"/>
-  <wp:docPr id="{doc_pr_id}" name="{}" descr="{alt}"/>
-  <wp:cNvGraphicFramePr>
+
+    let pic_xml = picture_xml(img, &rid, cx, cy, &name_attr);
+    let doc_pr = format!(
+        r#"<wp:docPr id="{doc_pr_id}" name="{name_attr}" descr="{alt}"{title_attr}>{hlink}</wp:docPr>"#
+    );
+    let frame_locks = format!(
+        r#"<wp:cNvGraphicFramePr>
     <a:graphicFrameLocks xmlns:a="{NS_A}" noChangeAspect="1"/>
-  </wp:cNvGraphicFramePr>
-  <a:graphic xmlns:a="{NS_A}">
+  </wp:cNvGraphicFramePr>"#
+    );
+    let graphic = format!(
+        r#"<a:graphic xmlns:a="{NS_A}">
     <a:graphicData uri="{NS_PIC}">
-      <pic:pic xmlns:pic="{NS_PIC}">
+{pic_xml}
+    </a:graphicData>
+  </a:graphic>"#
+    );
+
+    out.push_str("<w:r><w:drawing>");
+    match &img.geometry.anchor {
+        Anchor::Floating {
+            relative_to_h,
+            relative_to_v,
+            position,
+            wrap,
+            wrap_side,
+            behind_text,
+        } => {
+            let z = img.geometry.z_index.unwrap_or(0).max(0) as u32;
+            let behind = if *behind_text { "1" } else { "0" };
+            out.push_str(&format!(
+                r#"<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="{behind}" locked="0" layoutInCell="1" allowOverlap="1">
+  <wp:simplePos x="0" y="0"/>
+  {}
+  {}
+  <wp:extent cx="{cx}" cy="{cy}"/>
+  <wp:effectExtent l="0" t="0" r="0" b="0"/>
+  {}
+  {doc_pr}
+  {frame_locks}
+  {graphic}
+</wp:anchor>"#,
+                position_axis_xml("positionH", *relative_to_h, position.h),
+                position_axis_xml("positionV", *relative_to_v, position.v),
+                wrap_xml(*wrap, *wrap_side),
+            ));
+        }
+        Anchor::Inline => {
+            out.push_str(&format!(
+                r#"<wp:inline distT="0" distB="0" distL="0" distR="0">
+  <wp:extent cx="{cx}" cy="{cy}"/>
+  {doc_pr}
+  {frame_locks}
+  {graphic}
+</wp:inline>"#
+            ));
+        }
+        other => {
+            // Sheet anchors do not belong in a .docx; fall back to inline.
+            ctx.report.warn(Warning::Degraded {
+                what: format!("image {}", img.asset),
+                why: format!(
+                    "anchor {} is not valid in docx; written as inline",
+                    other.keyword()
+                ),
+            });
+            out.push_str(&format!(
+                r#"<wp:inline distT="0" distB="0" distL="0" distR="0">
+  <wp:extent cx="{cx}" cy="{cy}"/>
+  {doc_pr}
+  {frame_locks}
+  {graphic}
+</wp:inline>"#
+            ));
+        }
+    }
+    out.push_str("</w:drawing></w:r>");
+}
+
+fn position_axis_xml(tag: &str, base: RelBase, pos: AxisPos) -> String {
+    let relative = rel_base_ooxml(base);
+    match pos {
+        AxisPos::Offset(len) => format!(
+            r#"<wp:{tag} relativeFrom="{relative}"><wp:posOffset>{}</wp:posOffset></wp:{tag}>"#,
+            len.emu()
+        ),
+        AxisPos::Align(keyword) => format!(
+            r#"<wp:{tag} relativeFrom="{relative}"><wp:align>{}</wp:align></wp:{tag}>"#,
+            align_keyword_ooxml(keyword)
+        ),
+    }
+}
+
+fn rel_base_ooxml(base: RelBase) -> &'static str {
+    match base {
+        RelBase::Page => "page",
+        RelBase::Margin => "margin",
+        RelBase::Paragraph => "paragraph",
+        RelBase::Character => "character",
+        RelBase::Line => "line",
+        RelBase::Column => "column",
+    }
+}
+
+fn align_keyword_ooxml(keyword: AlignKeyword) -> &'static str {
+    match keyword {
+        AlignKeyword::Left => "left",
+        AlignKeyword::Center => "center",
+        AlignKeyword::Right => "right",
+        AlignKeyword::Inside => "inside",
+        AlignKeyword::Outside => "outside",
+        AlignKeyword::Top => "top",
+        AlignKeyword::Middle => "center",
+        AlignKeyword::Bottom => "bottom",
+    }
+}
+
+fn wrap_xml(mode: WrapMode, side: WrapSide) -> String {
+    let wrap_text = match side {
+        WrapSide::Both => "bothSides",
+        WrapSide::Left => "left",
+        WrapSide::Right => "right",
+        WrapSide::Largest => "largest",
+    };
+    match mode {
+        WrapMode::Square => format!(r#"<wp:wrapSquare wrapText="{wrap_text}"/>"#),
+        WrapMode::Tight => format!(r#"<wp:wrapTight wrapText="{wrap_text}"/>"#),
+        WrapMode::Through => format!(r#"<wp:wrapThrough wrapText="{wrap_text}"/>"#),
+        WrapMode::TopBottom => "<wp:wrapTopAndBottom/>".into(),
+        WrapMode::None => "<wp:wrapNone/>".into(),
+    }
+}
+
+fn picture_xml(img: &ImageRef, rid: &str, cx: i64, cy: i64, name_attr: &str) -> String {
+    let rot = if img.geometry.rotation_deg != 0.0 {
+        let units = (img.geometry.rotation_deg * 60_000.0).round() as i64;
+        format!(r#" rot="{units}""#)
+    } else {
+        String::new()
+    };
+    let (flip_h, flip_v) = match img.geometry.flip {
+        Flip::None => ("", ""),
+        Flip::H => (r#" flipH="1""#, ""),
+        Flip::V => ("", r#" flipV="1""#),
+        Flip::HV => (r#" flipH="1""#, r#" flipV="1""#),
+    };
+
+    let src_rect = img
+        .geometry
+        .crop
+        .filter(|c| !c.is_empty())
+        .map(|c| {
+            let pct = |v: f32| (v * 1000.0).round() as i64;
+            format!(
+                r#"<a:srcRect l="{}" t="{}" r="{}" b="{}"/>"#,
+                pct(c.left),
+                pct(c.top),
+                pct(c.right),
+                pct(c.bottom)
+            )
+        })
+        .unwrap_or_default();
+
+    let border = img
+        .geometry
+        .border
+        .as_ref()
+        .map(|b| {
+            let hex = b.color.trim_start_matches('#');
+            let dash = match b.style.as_str() {
+                "dashed" | "dash" => "dash",
+                "dotted" | "dot" => "sysDot",
+                "double" => "lgDash",
+                _ => "solid",
+            };
+            format!(
+                r#"<a:ln w="{}"><a:solidFill><a:srgbClr val="{}"/></a:solidFill><a:prstDash val="{dash}"/></a:ln>"#,
+                b.width.emu().max(1),
+                esc_attr(hex),
+            )
+        })
+        .unwrap_or_default();
+
+    format!(
+        r#"      <pic:pic xmlns:pic="{NS_PIC}">
         <pic:nvPicPr>
-          <pic:cNvPr id="0" name="{}"/>
+          <pic:cNvPr id="0" name="{name_attr}"/>
           <pic:cNvPicPr/>
         </pic:nvPicPr>
         <pic:blipFill>
           <a:blip r:embed="{}"/>
+          {src_rect}
           <a:stretch><a:fillRect/></a:stretch>
         </pic:blipFill>
         <pic:spPr>
-          <a:xfrm>
+          <a:xfrm{rot}{flip_h}{flip_v}>
             <a:off x="0" y="0"/>
             <a:ext cx="{cx}" cy="{cy}"/>
           </a:xfrm>
           <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+          {border}
         </pic:spPr>
-      </pic:pic>
-    </a:graphicData>
-  </a:graphic>
-</wp:inline>"#,
-        esc_attr(&name),
-        esc_attr(&name),
-        esc_attr(&rid),
-    ));
-    out.push_str("</w:drawing></w:r>");
+      </pic:pic>"#,
+        esc_attr(rid),
+    )
 }
 
 fn write_table(table: &Table, ctx: &mut WriterCtx<'_>, out: &mut String) {
@@ -789,7 +971,8 @@ fn write_table(table: &Table, ctx: &mut WriterCtx<'_>, out: &mut String) {
         }
         out.push_str("</w:tblGrid>");
     }
-    // Track vertical merges: col → remaining rowspan
+    // Track vertical merges: col → remaining rowspan. Covered cells in the IR
+    // mark continuations; we still emit `w:vMerge` without restart.
     let ncols = table.width().max(1);
     let mut vmerge_remain = vec![0u16; ncols];
     for row in &table.rows {
@@ -800,13 +983,14 @@ fn write_table(table: &Table, ctx: &mut WriterCtx<'_>, out: &mut String) {
         let mut col = 0usize;
         for cell in &row.cells {
             if cell.covered {
-                // Writer of source already expanded; skip covered placeholders
-                // but if vmerge continuation needed without explicit cell, emit
+                out.push_str(r#"<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>"#);
+                if col < ncols && vmerge_remain[col] > 0 {
+                    vmerge_remain[col] -= 1;
+                }
+                col += 1;
                 continue;
             }
-            // Skip columns consumed by ongoing vmerge
             while col < ncols && vmerge_remain[col] > 0 {
-                // emit continue vmerge cell
                 out.push_str(r#"<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>"#);
                 vmerge_remain[col] -= 1;
                 col += 1;
@@ -1273,10 +1457,10 @@ fn default_level(ordered: bool) -> docsai_model::list::ListLevel {
 
 fn write_lvl(s: &mut String, ilvl: usize, level: &docsai_model::list::ListLevel) {
     s.push_str(&format!(r#"<w:lvl w:ilvl="{ilvl}">"#));
+    // Word defaults missing `w:start` to 1. Only emit when the IR carried an
+    // explicit value so round-trip does not invent `start: 1` in DocMark.
     if let Some(start) = level.start {
         s.push_str(&format!(r#"<w:start w:val="{start}"/>"#));
-    } else {
-        s.push_str(r#"<w:start w:val="1"/>"#);
     }
     s.push_str(&format!(
         r#"<w:numFmt w:val="{}"/>"#,
@@ -1305,39 +1489,12 @@ fn write_lvl(s: &mut String, ilvl: usize, level: &docsai_model::list::ListLevel)
 fn footnotes_xml(ctx: &WriterCtx<'_>) -> String {
     let mut s = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:footnotes xmlns:w="{NS_W}" xmlns:r="{NS_R}">
+<w:footnotes xmlns:w="{NS_W}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}">
   <w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>
   <w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>"#
     );
-    // We need a mutable-like write for footnote bodies; rebuild lightly
-    // Footnote blocks were stored; create a throwaway report sink
-    for (id, blocks) in &ctx.footnotes {
-        s.push_str(&format!(r#"<w:footnote w:id="{id}">"#));
-        // Render with a nested minimal path: paragraphs only via a fresh string
-        // We cannot borrow ctx mutably; re-render simply
-        if blocks.is_empty() {
-            s.push_str("<w:p/>");
-        } else {
-            for b in blocks {
-                match b {
-                    Block::Paragraph(p) => {
-                        s.push_str("<w:p>");
-                        // simple text dump
-                        let text = p.plain_text();
-                        if !text.is_empty() {
-                            s.push_str("<w:r><w:t>");
-                            s.push_str(&esc_text(&text));
-                            s.push_str("</w:t></w:r>");
-                        }
-                        s.push_str("</w:p>");
-                    }
-                    _ => {
-                        s.push_str("<w:p/>");
-                    }
-                }
-            }
-        }
-        s.push_str("</w:footnote>");
+    for (id, body) in &ctx.footnotes {
+        s.push_str(&format!(r#"<w:footnote w:id="{id}">{body}</w:footnote>"#));
     }
     s.push_str("</w:footnotes>");
     s
@@ -1423,5 +1580,159 @@ mod tests {
         assert!(plain.iter().any(|p| p.contains("Primer parrafo")));
         assert!(plain.iter().any(|p| p.contains("Titulo")));
         assert!(plain.iter().any(|p| p.contains("Segundo")));
+    }
+
+    #[test]
+    fn write_then_read_preserves_floating_geometry_and_footnote_formatting() {
+        use docsai_model::image::{
+            Anchor, AxisPos, HVPos, ImageGeometry, ImageRef, RelBase, WrapMode, WrapSide,
+        };
+        use docsai_model::style::FontProps;
+        use docsai_model::text::Inline;
+        use docsai_model::units::{Length, Size};
+
+        let png = {
+            // 1x1 PNG
+            vec![
+                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+                0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+                0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+                0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE,
+                0xD4, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+            ]
+        };
+        let mut assets = MemoryAssetStore::new();
+        let asset = assets.put(&png).expect("asset");
+        let image = ImageRef {
+            asset: asset.clone(),
+            geometry: ImageGeometry {
+                display_size: Size::new(Length::from_cm(3.5), Length::from_cm(2.6)),
+                native_size_px: Some((1, 1)),
+                dpi: None,
+                anchor: Anchor::Floating {
+                    relative_to_h: RelBase::Margin,
+                    relative_to_v: RelBase::Paragraph,
+                    position: HVPos {
+                        h: AxisPos::Offset(Length::from_cm(1.2)),
+                        v: AxisPos::Offset(Length::from_cm(0.5)),
+                    },
+                    wrap: WrapMode::Square,
+                    wrap_side: WrapSide::Right,
+                    behind_text: false,
+                },
+                rotation_deg: 0.0,
+                flip: Default::default(),
+                crop: None,
+                border: None,
+                z_index: Some(2),
+            },
+            alt: "Logo".into(),
+            title: None,
+            name: Some("Logo".into()),
+            link: None,
+            external_src: None,
+            effects_raw: None,
+        };
+
+        let footnote_body = vec![Block::Paragraph(Paragraph {
+            format: Default::default(),
+            content: vec![
+                Inline::Text("Nota con ".into()),
+                Inline::Styled {
+                    content: vec![Inline::Text("negrita".into())],
+                    props: RunProps {
+                        style: None,
+                        direct: FontProps {
+                            bold: Some(true),
+                            ..Default::default()
+                        },
+                    },
+                },
+            ],
+        })];
+
+        let doc = Document::Text(TextDocument {
+            sections: vec![Section {
+                blocks: vec![Block::Paragraph(Paragraph {
+                    format: Default::default(),
+                    content: vec![
+                        Inline::Image(image),
+                        Inline::Text(" cuerpo".into()),
+                        Inline::Footnote(footnote_body),
+                    ],
+                })],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        let mut buf = Cursor::new(Vec::new());
+        let report = write_docx(&doc, &assets, &mut buf).expect("write");
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| w.message().contains("floating")),
+            "floating must not degrade: {:?}",
+            report.warnings
+        );
+        buf.set_position(0);
+        let mut assets2 = MemoryAssetStore::new();
+        let (read_back, read_report) = crate::docx::read(buf, &mut assets2).expect("read");
+        assert_eq!(read_report.stats.footnotes, 1);
+        let text = match read_back {
+            Document::Text(t) => t,
+            _ => panic!("expected text"),
+        };
+        let mut found_floating = false;
+        let mut found_bold_note = false;
+        fn walk(inlines: &[Inline], floating: &mut bool, bold_note: &mut bool) {
+            for inline in inlines {
+                match inline {
+                    Inline::Image(img) => {
+                        if matches!(img.geometry.anchor, Anchor::Floating { .. }) {
+                            *floating = true;
+                            assert_eq!(img.geometry.z_index, Some(2));
+                        }
+                    }
+                    Inline::Footnote(blocks) => {
+                        for b in blocks {
+                            if let Block::Paragraph(p) = b {
+                                for i in &p.content {
+                                    if let Inline::Styled { props, content } = i {
+                                        if props.direct.bold == Some(true) {
+                                            let t: String = content
+                                                .iter()
+                                                .filter_map(|c| match c {
+                                                    Inline::Text(s) => Some(s.as_str()),
+                                                    _ => None,
+                                                })
+                                                .collect();
+                                            if t.contains("negrita") {
+                                                *bold_note = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Inline::Styled { content, .. } | Inline::Link { content, .. } => {
+                        walk(content, floating, bold_note);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for block in text.blocks() {
+            if let Block::Paragraph(p) = block {
+                walk(&p.content, &mut found_floating, &mut found_bold_note);
+            }
+        }
+        assert!(found_floating, "floating anchor lost on write/read");
+        assert!(
+            found_bold_note,
+            "footnote bold formatting lost on write/read"
+        );
     }
 }
