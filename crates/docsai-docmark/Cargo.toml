@@ -11,3 +11,6 @@ authors.workspace = true
 [dependencies]
 docsai-model = { workspace = true }
 thiserror = { workspace = true }
+
+[package.metadata.dist]
+dist = false

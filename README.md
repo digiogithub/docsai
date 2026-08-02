@@ -4,17 +4,18 @@
 
 `docsai` is a single cross-platform binary (Windows, Linux, macOS) that converts office documents to an extended Markdown profile — **DocMark** — designed to keep as much information as possible (styles, images, properties, formulas) and to allow the **reverse conversion with minimal format loss**. It can be used as a CLI tool or as an **MCP (Model Context Protocol) server over stdio**, for integration with AI assistants such as Claude.
 
-> **Project status: Phases 0–5 completed for the core path.**
+> **Project status: Phases 0–6 completed for the core path.**
 > `.docx` / `.odt` ⇄ DocMark, `.xlsx` / `.ods` ⇄ DocMark, `.xls` read, and legacy
 > `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
-> `docsai roundtrip` checks DocMark idempotence after a write/read cycle. See
+> Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
+> and `cargo-dist` release packaging. See
 > [`docs/development-plan.md`](docs/development-plan.md).
 
 ```bash
 cargo run -p docsai-cli -- convert report.docx -o report.dmk.md
+cargo run -p docsai-cli -- inspect report.docx
 cargo run -p docsai-cli -- formats
 ```
-
 ---
 
 ## Supported formats (target)
@@ -64,18 +65,35 @@ Text with **bold** and [color]{color="#FF0000"} custom colour.
 ![Sales chart](assets/img-001.png){width=450px height=300px anchor=inline}
 ```
 
-## Usage (CLI)
+## Install
 
-What works today:
+From source:
+
+```bash
+cargo install --path crates/docsai-cli
+```
+
+Release binaries and installers (shell / PowerShell) are produced by
+[`cargo-dist`](https://opensource.axo.dev/cargo-dist/) when a version tag is
+pushed. See [`CHANGELOG.md`](CHANGELOG.md) and the GitHub Releases page.
+
+## Usage (CLI)
 
 ```bash
 docsai convert report.docx -o report.dmk.md      # extracts assets/ next to the .md
-docsai convert report.docx                         # to stdout, without writing media beside it
+docsai convert report.docx                         # DocMark on stdout
+docsai convert report.docx -o -                    # same, explicit stdout
+docsai convert - --to docmark < report.docx        # stdin → stdout pipeline
 docsai convert report.docx --fidelity plain        # clean CommonMark, for LLM/RAG
 docsai convert report.docx -o out.md --json        # conversion report as JSON
+docsai convert *.docx --out-dir md/                # batch (parallel) into a folder
+docsai convert report.docx --style-map map.yaml    # publication mode (spec §5)
+docsai convert sheet.xlsx --max-cells 100000       # refuse oversized workbooks
 docsai convert legacy.doc -o legacy.dmk.md         # .doc: LO if installed, else native text
 docsai convert legacy.doc --use-loffice never      # force native degraded path
 docsai convert legacy.doc --use-loffice require    # fail if LibreOffice is missing
+docsai inspect report.docx                         # metadata, styles, media, stats
+docsai inspect report.docx --json                  # same, machine-readable
 docsai formats                                      # support matrix for this binary
 docsai roundtrip report.docx
 ```
@@ -84,20 +102,22 @@ Fidelity levels (`--fidelity`, spec §6): `full` (default, round-trip grade),
 `standard` (rich Markdown without catalogues or raw-blocks) and `plain` (pure
 CommonMark+GFM).
 
+Style maps (`--style-map`, spec §5) are **unidirectional** publication helpers:
+
+```text
+Heading1: h1
+Title: h1
+SourceCode: code-block
+Comment: ignore
+```
+
 Legacy `.doc` policy (`--use-loffice`): `auto` (default — use LibreOffice when
 found), `never` (native piece-table extractor only), `require` (error if
 LibreOffice is missing). Override the binary with `DOCSAI_LIBREOFFICE`.
 
 Exit codes: `0` success, `1` conversion with losses (`--strict` also treats minor
-warnings as failures), `2` input error, `3` unsupported format.
-
-Planned:
-
-```bash
-docsai inspect report.docx                      # Phase 6
-docsai convert *.docx --out-dir md/             # Phase 6 batch
-```
-
+warnings as failures), `2` input error, `3` unsupported format. Logs always go to
+stderr (`RUST_LOG` / `--verbose`); stdout stays free for DocMark or `--json`.
 ## Intended usage (MCP server, Phase 7)
 
 ```bash
@@ -124,6 +144,7 @@ Planned MCP tools: `convert_to_markdown`, `convert_from_markdown`, `inspect_docu
 | [`docs/docmark-specification.md`](docs/docmark-specification.md) | DocMark format specification (extended Markdown) v1.0-draft |
 | [`docs/architecture.md`](docs/architecture.md) | Software architecture: crate workspace, intermediate document model (IR), CLI, MCP server |
 | [`docs/development-plan.md`](docs/development-plan.md) | Detailed development plan in 9 phases, with deliverables, acceptance criteria, estimates and testing strategy |
+| [`CHANGELOG.md`](CHANGELOG.md) | Keep-a-changelog release notes |
 | [`AGENTS.md`](AGENTS.md) | Operational guide for developers and AI agents working in this repository |
 | [`corpus/README.md`](corpus/README.md) | The test corpus: what each document isolates and how it is regenerated |
 | [`docs/spikes/`](docs/spikes/) | Risk-spike reports, with the decision that closed each one |

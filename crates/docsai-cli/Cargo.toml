@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+publish = true
 
 [[bin]]
 name = "docsai"
@@ -18,5 +19,13 @@ clap = { workspace = true }
 docsai-convert = { workspace = true }
 docsai-model = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[package.metadata.wix]
+upgrade-guid = "A7C4E9B2-1D3F-4A8E-9C6B-2E5F8A1D4C7B"
+path-guid = "B8D5F0C3-2E4A-5B9F-0D7C-3F6A9B2E5D8C"
+
+[package.metadata.dist]
+dist = true

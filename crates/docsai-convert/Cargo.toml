@@ -13,6 +13,8 @@ docsai-docmark = { workspace = true }
 docsai-model = { workspace = true }
 docsai-odf = { workspace = true }
 docsai-office = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tempfile = { workspace = true }
@@ -21,3 +23,6 @@ tempfile = { workspace = true }
 comrak.workspace = true
 zip = { workspace = true }
 cfb = { workspace = true }
+
+[package.metadata.dist]
+dist = false

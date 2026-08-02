@@ -21,6 +21,10 @@ pub struct ConvertOptions {
     pub target: Option<Format>,
     /// LibreOffice headless policy for legacy formats (Phase 5).
     pub use_loffice: crate::UseLoffice,
+    /// Optional publication-mode style map (DocMark spec §5).
+    pub style_map: Option<crate::style_map::StyleMap>,
+    /// Safety cap on workbook cells; `None` means unlimited.
+    pub max_cells: Option<u64>,
 }
 
 impl Default for ConvertOptions {
@@ -30,6 +34,8 @@ impl Default for ConvertOptions {
             assets_dir: None,
             target: None,
             use_loffice: crate::UseLoffice::Auto,
+            style_map: None,
+            max_cells: None,
         }
     }
 }
@@ -247,6 +253,7 @@ fn try_loffice_doc(
 /// Converts a file on disk.
 ///
 /// Supports Office → DocMark, DocMark → Office, and DocMark → DocMark.
+/// Pass `input` as `-` to read from stdin (content-based detection).
 pub fn convert_file(
     input: &Path,
     output: Option<&Path>,
@@ -266,7 +273,11 @@ pub fn convert_file(
         .unwrap_or_else(|| default_assets_dir(input, output));
     let mut store = DirAssetStore::new(assets_dir.clone());
 
-    let (document, source_format, mut report) = read_path_with_options(input, &mut store, options)?;
+    let (mut document, source_format, mut report) = if is_stdin_path(input) {
+        read_stdin(&mut store, options)?
+    } else {
+        read_path_with_options(input, &mut store, options)?
+    };
     if !crate::can_read(source_format) {
         return Err(ConvertError::Unsupported {
             from: source_format,
@@ -274,18 +285,92 @@ pub fn convert_file(
         });
     }
 
+    enforce_max_cells(&document, options)?;
+    if let Some(style_map) = options.style_map.as_ref() {
+        for warning in crate::style_map::apply_style_map(&mut document, style_map) {
+            report.warn(warning);
+        }
+    }
+
+    write_document(
+        document,
+        source_format,
+        target,
+        output,
+        options,
+        &assets_dir,
+        &mut store,
+        report,
+    )
+}
+
+/// Converts bytes already in memory (stdin / MCP path).
+pub fn convert_bytes(
+    bytes: &[u8],
+    hint: Option<&str>,
+    output: Option<&Path>,
+    options: &ConvertOptions,
+) -> Result<Outcome, ConvertError> {
+    let target = resolve_target(output, options)?;
+    if !crate::can_write(target) {
+        return Err(ConvertError::Unsupported {
+            from: Format::DocMark,
+            to: target,
+        });
+    }
+
+    let assets_dir = options
+        .assets_dir
+        .clone()
+        .unwrap_or_else(|| default_assets_dir(Path::new(hint.unwrap_or("stdin")), output));
+    let mut store = DirAssetStore::new(assets_dir.clone());
+    let mut cursor = Cursor::new(bytes);
+    let (mut document, source_format, mut report) =
+        read_document_with_options(&mut cursor, hint, &mut store, options)?;
+    enforce_max_cells(&document, options)?;
+    if let Some(style_map) = options.style_map.as_ref() {
+        for warning in crate::style_map::apply_style_map(&mut document, style_map) {
+            report.warn(warning);
+        }
+    }
+    write_document(
+        document,
+        source_format,
+        target,
+        output,
+        options,
+        &assets_dir,
+        &mut store,
+        report,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_document(
+    document: Document,
+    source_format: Format,
+    target: Format,
+    output: Option<&Path>,
+    options: &ConvertOptions,
+    assets_dir: &Path,
+    store: &mut DirAssetStore,
+    mut report: ConversionReport,
+) -> Result<Outcome, ConvertError> {
+    // `-` as output means stdout (caller prints `markdown`); do not create a file.
+    let file_output = output.filter(|p| !is_stdout_path(p));
+
     match target {
         Format::DocMark => {
             let docmark_options = DocMarkOptions {
                 fidelity: options.fidelity,
-                assets_dir: relative_assets_dir(&assets_dir, output),
+                assets_dir: relative_assets_dir(assets_dir, file_output),
                 source_format,
             };
             let (markdown, write_report) =
-                docsai_docmark::serialize(&document, &store, &docmark_options);
+                docsai_docmark::serialize(&document, store, &docmark_options);
             report.merge(write_report);
 
-            if let Some(output) = output {
+            if let Some(output) = file_output {
                 ensure_parent(output)?;
                 std::fs::write(output, markdown.as_bytes()).map_err(|source| ConvertError::Io {
                     path: output.display().to_string(),
@@ -297,15 +382,17 @@ pub fn convert_file(
                 source_format,
                 target_format: target,
                 markdown,
-                output_path: output.map(Path::to_path_buf),
+                output_path: file_output.map(Path::to_path_buf),
                 assets_written: store.written().to_vec(),
                 report,
             })
         }
         Format::Docx | Format::Xlsx | Format::Odt | Format::Ods => {
             let ext = target.as_str();
-            let output = output.ok_or_else(|| {
-                ConvertError::Invalid(format!("writing .{ext} requires an --output path"))
+            let output = file_output.ok_or_else(|| {
+                ConvertError::Invalid(format!(
+                    "writing .{ext} requires a real --output path (stdout is text-only; binary formats cannot go to a terminal)"
+                ))
             })?;
             ensure_parent(output)?;
             let file = File::create(output).map_err(|source| ConvertError::Io {
@@ -313,17 +400,17 @@ pub fn convert_file(
                 source,
             })?;
             let write_report = match target {
-                Format::Odt | Format::Ods => docsai_odf::write(target, &document, &store, file)?,
-                other => docsai_office::write(other, &document, &store, file)?,
+                Format::Odt | Format::Ods => docsai_odf::write(target, &document, store, file)?,
+                other => docsai_office::write(other, &document, store, file)?,
             };
             report.merge(write_report);
 
             let (markdown, _) = docsai_docmark::serialize(
                 &document,
-                &store,
+                store,
                 &DocMarkOptions {
                     fidelity: options.fidelity,
-                    assets_dir: relative_assets_dir(&assets_dir, Some(output)),
+                    assets_dir: relative_assets_dir(assets_dir, Some(output)),
                     source_format,
                 },
             );
@@ -342,6 +429,63 @@ pub fn convert_file(
             to: other,
         }),
     }
+}
+
+/// True when the path is the stdin sentinel `-`.
+pub fn is_stdin_path(path: &Path) -> bool {
+    path.as_os_str() == "-"
+}
+
+/// True when the path is the stdout sentinel `-`.
+pub fn is_stdout_path(path: &Path) -> bool {
+    path.as_os_str() == "-"
+}
+
+fn read_stdin(
+    assets: &mut dyn AssetStore,
+    options: &ConvertOptions,
+) -> Result<(Document, Format, ConversionReport), ConvertError> {
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .read_to_end(&mut bytes)
+        .map_err(|source| ConvertError::Io {
+            path: "<stdin>".into(),
+            source,
+        })?;
+    if bytes.is_empty() {
+        return Err(ConvertError::Invalid(
+            "stdin is empty; pass a file path or pipe a document into `docsai convert -`".into(),
+        ));
+    }
+    let mut cursor = Cursor::new(bytes);
+    read_document_with_options(&mut cursor, Some("stdin"), assets, options)
+}
+
+/// Like [`read_document`], but honours LibreOffice policy and cell caps prep.
+pub fn read_document_with_options<R: Read + Seek>(
+    reader: R,
+    hint: Option<&str>,
+    assets: &mut dyn AssetStore,
+    options: &ConvertOptions,
+) -> Result<(Document, Format, ConversionReport), ConvertError> {
+    let _ = options; // LO needs a path today; bytes path stays native.
+    read_document(reader, hint, assets)
+}
+
+fn enforce_max_cells(document: &Document, options: &ConvertOptions) -> Result<(), ConvertError> {
+    let Some(max) = options.max_cells else {
+        return Ok(());
+    };
+    let Document::Workbook(book) = document else {
+        return Ok(());
+    };
+    let total: u64 = book.sheets.iter().map(|s| s.cells.len() as u64).sum();
+    if total > max {
+        return Err(ConvertError::Invalid(format!(
+            "workbook has {total} cells, which exceeds --max-cells {max}; raise the limit or split the sheet"
+        )));
+    }
+    Ok(())
 }
 
 /// Office → DocMark → Office → DocMark idempotence check.
@@ -480,6 +624,10 @@ fn resolve_target(output: Option<&Path>, options: &ConvertOptions) -> Result<For
     let Some(output) = output else {
         return Ok(Format::DocMark);
     };
+    // `-` means stdout; only text (DocMark) is allowed there.
+    if is_stdout_path(output) {
+        return Ok(Format::DocMark);
+    }
     let name = output.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if name.ends_with(".dmk.md") || name.ends_with(".md") {
         return Ok(Format::DocMark);

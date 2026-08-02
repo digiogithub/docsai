@@ -6,16 +6,23 @@
 #![forbid(unsafe_code)]
 
 pub mod assets;
+pub mod batch;
+pub mod inspect;
 pub mod loffice;
 mod pipeline;
+pub mod style_map;
 
 pub use assets::DirAssetStore;
+pub use batch::{convert_batch, BatchOutcome, BatchReport};
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions};
+pub use inspect::{inspect_path, InspectReport};
 pub use loffice::UseLoffice;
 pub use pipeline::{
-    convert_file, read_document, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
+    convert_bytes, convert_file, is_stdin_path, is_stdout_path, read_document,
+    read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
     Outcome, RoundtripOutcome,
 };
+pub use style_map::{apply_style_map, StyleMap, StyleTarget};
 
 use docsai_model::Format;
 

@@ -23,15 +23,16 @@ Practical difference between the two folders:
 | [06 — Phase 2 round-trip closure](06-phase-2-roundtrip-closure.md) | Residual DOCX writer fidelity + corpus idempotence |
 | [07 — Phase 4 ODF](07-phase-4-odf.md) | ODT/ODS ⇄ DocMark: package, de-automatization, OpenFormula |
 | [08 — Phase 5 legacy DOC](08-phase-5-legacy-doc.md) | `.doc` native degraded read + LibreOffice fallback |
+| [09 — Phase 6 CLI & distribution](09-phase-6-cli.md) | inspect, batch, style-map, stdin/stdout, cargo-dist |
 
 ## Status in one line
 
-**Phases 0–5 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
+**Phases 0–6 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
 identity (Phases 1–2, including floating DrawingML and footnote bodies), xlsx ⇄
-DocMark plus xls read (Phase 3), odt/ods ⇄ DocMark (Phase 4), and legacy `.doc`
-read (Phase 5: native degraded + optional LibreOffice → docx). `docsai convert`
-/ `roundtrip` cover text and spreadsheet packages across OOXML and ODF; `.doc`
-reads to DocMark (write remains out of scope). MCP remains a later phase.
+DocMark plus xls read (Phase 3), odt/ods ⇄ DocMark (Phase 4), legacy `.doc`
+read (Phase 5: native degraded + optional LibreOffice → docx), and the full CLI
+product surface (Phase 6: `inspect`, batch `--out-dir`, `--style-map`, stdin/stdout,
+`cargo-dist`). MCP remains Phase 7.
 
 ## Quick checks
 
@@ -41,4 +42,5 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 python3 corpus/generate.py --check                      # corpus is up to date
 cargo run -p docsai-cli -- formats                      # real support matrix of the binary
+cargo run -p docsai-cli -- inspect corpus/docx/basic-text.docx
 ```
