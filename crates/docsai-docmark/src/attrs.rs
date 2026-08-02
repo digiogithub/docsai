@@ -182,9 +182,7 @@ impl Attrs {
                 return None;
             }
             let after_key = after_key.trim_start();
-            let Some(after_eq) = after_key.strip_prefix('=') else {
-                return None;
-            };
+            let after_eq = after_key.strip_prefix('=')?;
             let after_eq = after_eq.trim_start();
             let (value, next) = take_value(after_eq)?;
             attrs.set(key, value);

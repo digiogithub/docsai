@@ -9,6 +9,7 @@ mod drawing;
 mod format;
 mod numbering;
 mod styles;
+pub(crate) mod write;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek};

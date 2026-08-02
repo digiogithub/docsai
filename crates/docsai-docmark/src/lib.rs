@@ -20,8 +20,8 @@
 #![forbid(unsafe_code)]
 
 pub mod attrs;
-pub mod escape;
 mod error;
+pub mod escape;
 mod frontmatter;
 mod frontmatter_parse;
 mod parser;

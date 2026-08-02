@@ -1,6 +1,6 @@
 //! Small YAML subset used by DocMark front matter.
 //!
-//! Only the shapes the serializer emits are accepted: scalars, flow maps,
+//! Only the shapes the serialiser emits are accepted: scalars, flow maps,
 //! nested block maps and simple sequences of flow maps.
 
 use std::collections::BTreeMap;
@@ -99,16 +99,6 @@ impl Value {
             _ => String::new(),
         }
     }
-
-    /// Renders a scalar the way DocMark lengths and tokens expect it.
-    pub fn as_token(&self) -> Option<String> {
-        match self {
-            Value::String(s) => Some(s.clone()),
-            Value::Number(n) => Some(self.string_or_empty()),
-            Value::Bool(b) => Some(b.to_string()),
-            _ => None,
-        }
-    }
 }
 
 /// Parses a YAML document body (without the `---` fences) into a map.
@@ -117,7 +107,6 @@ pub fn parse_document(text: &str) -> Result<BTreeMap<String, Value>, String> {
     let mut parser = Parser {
         lines: &lines,
         index: 0,
-        base_line: 1,
     };
     parser.parse_block_map(0)
 }
@@ -125,12 +114,11 @@ pub fn parse_document(text: &str) -> Result<BTreeMap<String, Value>, String> {
 struct Parser<'a> {
     lines: &'a [&'a str],
     index: usize,
-    base_line: usize,
 }
 
 impl<'a> Parser<'a> {
     fn line_no(&self) -> usize {
-        self.base_line + self.index
+        self.index + 1
     }
 
     fn peek(&self) -> Option<&'a str> {
@@ -159,9 +147,8 @@ impl<'a> Parser<'a> {
                 ));
             }
             let content = &raw[indent..];
-            let (key, rest) = split_key(content).ok_or_else(|| {
-                format!("line {}: expected mapping key", self.line_no())
-            })?;
+            let (key, rest) = split_key(content)
+                .ok_or_else(|| format!("line {}: expected mapping key", self.line_no()))?;
             self.bump();
             let value = if rest.is_empty() {
                 self.parse_nested(indent + 2)?
@@ -234,27 +221,31 @@ fn split_key(content: &str) -> Option<(String, &str)> {
     let content = content.trim_end();
     if let Some(rest) = content.strip_prefix('"') {
         let mut out = String::new();
-        let mut chars = rest.chars();
-        while let Some(c) = chars.next() {
-            match c {
-                '\\' => match chars.next() {
-                    Some('"') => out.push('"'),
-                    Some('\\') => out.push('\\'),
-                    Some('n') => out.push('\n'),
-                    Some(other) => {
+        let mut idx = 0usize;
+        let bytes = rest.as_bytes();
+        while idx < bytes.len() {
+            if bytes[idx] == b'\\' {
+                let next = rest[idx + 1..].chars().next()?;
+                match next {
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    'n' => out.push('\n'),
+                    other => {
                         out.push('\\');
                         out.push(other);
                     }
-                    None => out.push('\\'),
-                },
-                '"' => {
-                    let rest: String = chars.collect();
-                    let rest = rest.trim_start();
-                    let rest = rest.strip_prefix(':')?;
-                    return Some((out, rest.trim_start()));
                 }
-                other => out.push(other),
+                idx += 1 + next.len_utf8();
+                continue;
             }
+            if bytes[idx] == b'"' {
+                let after = rest[idx + 1..].trim_start();
+                let after = after.strip_prefix(':')?;
+                return Some((out, after.trim_start()));
+            }
+            let ch = rest[idx..].chars().next()?;
+            out.push(ch);
+            idx += ch.len_utf8();
         }
         return None;
     }
@@ -263,7 +254,6 @@ fn split_key(content: &str) -> Option<(String, &str)> {
     if key.is_empty() {
         return None;
     }
-    // Bare keys cannot contain spaces in our serializer except when quoted.
     Some((key.to_string(), content[colon + 1..].trim_start()))
 }
 
@@ -293,8 +283,11 @@ fn parse_scalar(input: &str) -> Value {
         "null" | "Null" | "~" | "" => return Value::Null,
         _ => {}
     }
-    if let Ok(n) = input.parse::<f64>() {
-        if input.chars().all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')) {
+    if input
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E'))
+    {
+        if let Ok(n) = input.parse::<f64>() {
             return Value::Number(n);
         }
     }
@@ -302,12 +295,11 @@ fn parse_scalar(input: &str) -> Value {
 }
 
 fn unquote(input: &str) -> Option<String> {
-    let rest = input.strip_prefix('"')?;
-    if !input.ends_with('"') || input.len() < 2 {
+    if !input.starts_with('"') || !input.ends_with('"') || input.len() < 2 {
         return None;
     }
+    // Ensure the last quote is not escaped.
     let inner = &input[1..input.len() - 1];
-    // Ensure the closing quote is not escaped.
     let mut out = String::new();
     let mut chars = inner.chars();
     while let Some(c) = chars.next() {
@@ -327,8 +319,6 @@ fn unquote(input: &str) -> Option<String> {
             other => out.push(other),
         }
     }
-    // Verify it was properly quoted by checking we consumed a matching form.
-    let _ = rest;
     Some(out)
 }
 
@@ -368,7 +358,6 @@ fn strip_wrappers(input: &str, open: char, close: char) -> Result<&str, String> 
 fn split_flow_pair(item: &str) -> Result<(String, &str), String> {
     let item = item.trim();
     if let Some(rest) = item.strip_prefix('"') {
-        // quoted key
         let mut i = 0usize;
         let bytes = rest.as_bytes();
         while i < bytes.len() {
@@ -400,8 +389,7 @@ fn split_flow_items(input: &str) -> Result<Vec<&str>, String> {
     let mut depth = 0i32;
     let mut in_string = false;
     let mut escape = false;
-    let chars: Vec<(usize, char)> = input.char_indices().collect();
-    for (idx, &(i, c)) in chars.iter().enumerate() {
+    for (i, c) in input.char_indices() {
         if in_string {
             if escape {
                 escape = false;
@@ -422,7 +410,6 @@ fn split_flow_items(input: &str) -> Result<Vec<&str>, String> {
             }
             _ => {}
         }
-        let _ = idx;
     }
     let tail = input[start..].trim();
     if !tail.is_empty() {
@@ -437,9 +424,12 @@ mod tests {
 
     #[test]
     fn parses_flow_map_with_quoted_values() {
-        let v = parse_flow(r#"{ name: "Calibri Light", size: 16pt, color: "#2E74B5" }"#).unwrap();
+        let v = parse_flow(r##"{ name: "Calibri Light", size: 16pt, color: "#2E74B5" }"##).unwrap();
         let map = v.as_map().unwrap();
-        assert_eq!(map.get("name").and_then(|v| v.as_str()), Some("Calibri Light"));
+        assert_eq!(
+            map.get("name").and_then(|v| v.as_str()),
+            Some("Calibri Light")
+        );
         assert_eq!(map.get("size").and_then(|v| v.as_str()), Some("16pt"));
         assert_eq!(map.get("color").and_then(|v| v.as_str()), Some("#2E74B5"));
     }

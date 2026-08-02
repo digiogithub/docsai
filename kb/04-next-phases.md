@@ -7,6 +7,12 @@ already known.
 
 ## Phase 2 — DocMark → DOCX writing + round-trip
 
+> **Status: implemented** in-tree (`parse` / `parse_with_base`, `write_docx`,
+> `convert` DocMark↔DOCX, CLI `roundtrip`). Remaining polish is fidelity on
+> complex drawings, full footnote body rewrite, and floating anchors.
+
+## Phase 2 (original plan) — DocMark → DOCX writing + round-trip
+
 This is the immediate phase. It closes the cycle and builds the fidelity infrastructure.
 
 ### What is already done for it

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use docsai_model::assets::AssetStore;
+use docsai_model::image::RawId;
 use docsai_model::image::{
     AlignKeyword, Anchor, AxisPos, CropRect, Flip, HVPos, ImageGeometry, ImageRef, RelBase,
     SimpleBorder, WrapMode, WrapSide,
@@ -20,8 +21,7 @@ use docsai_model::text::{
     TextBox, TextDocument,
 };
 use docsai_model::units::{Length, Size};
-use docsai_model::{Document, ConversionReport as Report};
-use docsai_model::image::RawId;
+use docsai_model::{ConversionReport as Report, Document};
 
 use crate::attrs::Attrs;
 use crate::error::ParseError;
@@ -55,7 +55,7 @@ pub fn parse_with_base(
         assets,
         report: &mut report,
         footnotes: BTreeMap::new(),
-        styles: fm.styles.clone(),
+        _styles: fm.styles.clone(),
     };
 
     let blocks = parser.parse_blocks(body, body_line)?;
@@ -125,9 +125,8 @@ fn split_front_matter(markdown: &str) -> Result<(Option<&str>, &str, usize), Par
         rest
     } else if text == "---" {
         return Err(ParseError::front_matter(1, "unclosed front matter"));
-    } else if text.starts_with("---\r") {
-        return Ok((None, text, 1));
     } else {
+        // Not a line-bounded opening fence (e.g. `---foo`).
         return Ok((None, text, 1));
     };
 
@@ -138,25 +137,22 @@ fn split_front_matter(markdown: &str) -> Result<(Option<&str>, &str, usize), Par
             let after = &search[idx + 1..]; // starts at ---
             if after == "---" || after.starts_with("---\n") || after.starts_with("---\r") {
                 let yaml = &after_open[..offset + idx];
-                let body = if after.starts_with("---\n") {
-                    &after[4..]
+                let body = if let Some(rest) = after.strip_prefix("---\n") {
+                    rest
                 } else if after == "---" {
                     ""
+                } else if let Some(rest) = after.strip_prefix("---\r\n") {
+                    rest
+                } else if let Some(rest) = after.strip_prefix("---\r") {
+                    rest
                 } else {
-                    // ---\r\n already normalised
-                    &after[4..]
+                    after.get(3..).unwrap_or("")
                 };
                 // body starts after the closing fence line
                 let start_line = 2 + yaml.bytes().filter(|b| *b == b'\n').count() + 1;
                 // skip optional blank line after closing fence
                 let body = body.strip_prefix('\n').unwrap_or(body);
-                let start_line = if markdown[markdown.find(body).unwrap_or(0)..]
-                    .starts_with('\n')
-                {
-                    start_line + 1
-                } else {
-                    start_line + 1
-                };
+                let start_line = start_line + 1;
                 return Ok((Some(yaml), body, start_line));
             }
             offset += idx + 1;
@@ -167,6 +163,7 @@ fn split_front_matter(markdown: &str) -> Result<(Option<&str>, &str, usize), Par
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn partition_structure(
     blocks: Vec<ParsedBlock>,
 ) -> (
@@ -262,7 +259,7 @@ fn rewrite_inlines(inlines: &mut [Inline], footnotes: &BTreeMap<u32, Vec<Block>>
     for inline in inlines.iter_mut() {
         match inline {
             Inline::Footnote(blocks) => {
-                // Placeholder: single empty paragraph tagged with index in plain text? 
+                // Placeholder: single empty paragraph tagged with index in plain text?
                 // We store index via a temporary Text("\u{0}N") convention during parse.
                 if let Some(Block::Paragraph(p)) = blocks.first() {
                     if let Some(Inline::Text(t)) = p.content.first() {
@@ -284,6 +281,7 @@ fn rewrite_inlines(inlines: &mut [Inline], footnotes: &BTreeMap<u32, Vec<Block>>
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ParsedBlock {
     Normal(Block),
     Header(HeaderFooter),
@@ -296,7 +294,7 @@ struct BodyParser<'a> {
     assets: &'a mut dyn AssetStore,
     report: &'a mut Report,
     footnotes: BTreeMap<u32, Vec<Block>>,
-    styles: docsai_model::StyleCatalog,
+    _styles: docsai_model::StyleCatalog,
 }
 
 impl<'a> BodyParser<'a> {
@@ -326,7 +324,7 @@ impl<'a> BodyParser<'a> {
         }
         // Re-parse more carefully with list grouping
         let mut regrouped = Vec::new();
-        let mut list_buf: Vec<(usize, bool, String, usize)> = Vec::new();
+        let list_buf: Vec<(usize, bool, String, usize)> = Vec::new();
         // Actually lists are inside chunks already if blank-line separated.
         // Nested lists are in the same chunk. Good.
         for item in out {
@@ -477,10 +475,7 @@ impl<'a> BodyParser<'a> {
             // Flatten
             Err(ParseError::unexpected(
                 line,
-                format!(
-                    "unknown container class {:?}",
-                    attrs.classes()
-                ),
+                format!("unknown container class {:?}", attrs.classes()),
             ))
         }
     }
@@ -556,7 +551,9 @@ impl<'a> BodyParser<'a> {
                 continue;
             }
             let cells = split_table_row(line);
-            if cells.iter().all(|c| c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
+            if cells
+                .iter()
+                .all(|c| c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
                 && cells.iter().any(|c| c.contains('-'))
             {
                 delimiter_at = Some(idx);
@@ -646,7 +643,7 @@ impl<'a> BodyParser<'a> {
             let mut blocks = Vec::new();
             // First line is paragraph content (may include attrs)
             let first = item.lines.first().map(String::as_str).unwrap_or("");
-            let (mut para, list_id) = self.parse_paragraph_line(first, false)?;
+            let (para, list_id) = self.parse_paragraph_line(first, false)?;
             if list.def.is_none() {
                 if let Some(id) = list_id {
                     list.def = Some(ListId::new(id));
@@ -727,7 +724,13 @@ impl<'a> BodyParser<'a> {
             // shouldn't happen
         }
         let inlines = self.parse_inlines(content.trim_end())?;
-        Ok((Paragraph { format, content: inlines }, list_id))
+        Ok((
+            Paragraph {
+                format,
+                content: inlines,
+            },
+            list_id,
+        ))
     }
 
     fn try_parse_block_image(&mut self, text: &str) -> Result<Option<ImageRef>, ParseError> {
@@ -739,8 +742,9 @@ impl<'a> BodyParser<'a> {
         if text.lines().count() > 1 {
             return Ok(None);
         }
-        match self.parse_inlines(text)? {
-            [Inline::Image(img)] => Ok(Some(img)),
+        let inlines = self.parse_inlines(text)?;
+        match inlines.as_slice() {
+            [Inline::Image(img)] => Ok(Some(img.clone())),
             _ => Ok(None),
         }
     }
@@ -749,12 +753,18 @@ impl<'a> BodyParser<'a> {
         parse_inlines_inner(text, self)
     }
 
-    fn load_image(&mut self, path: &str, attrs: Attrs, alt: String) -> Result<ImageRef, ParseError> {
+    fn load_image(
+        &mut self,
+        path: &str,
+        attrs: Attrs,
+        alt: String,
+    ) -> Result<ImageRef, ParseError> {
         let mut asset_id = None;
         if let Some(base) = &self.base_dir {
             let full = base.join(path);
             if full.is_file() {
-                let bytes = std::fs::read(&full).map_err(|e| ParseError::io(Some(full.clone()), e))?;
+                let bytes =
+                    std::fs::read(&full).map_err(|e| ParseError::io(Some(full.clone()), e))?;
                 asset_id = Some(self.assets.put(&bytes)?);
             }
         }
@@ -762,7 +772,8 @@ impl<'a> BodyParser<'a> {
         if asset_id.is_none() {
             let p = Path::new(path);
             if p.is_file() {
-                let bytes = std::fs::read(p).map_err(|e| ParseError::io(Some(p.to_path_buf()), e))?;
+                let bytes =
+                    std::fs::read(p).map_err(|e| ParseError::io(Some(p.to_path_buf()), e))?;
                 asset_id = Some(self.assets.put(&bytes)?);
             }
         }
@@ -801,12 +812,8 @@ impl<'a> BodyParser<'a> {
         if let Some(crop) = attrs.get("crop") {
             let parts: Vec<_> = crop.split(',').collect();
             if parts.len() == 4 {
-                let parse_pct = |s: &str| {
-                    s.trim()
-                        .trim_end_matches('%')
-                        .parse::<f32>()
-                        .unwrap_or(0.0)
-                };
+                let parse_pct =
+                    |s: &str| s.trim().trim_end_matches('%').parse::<f32>().unwrap_or(0.0);
                 geometry.crop = Some(CropRect {
                     left: parse_pct(parts[0]),
                     top: parse_pct(parts[1]),
@@ -833,9 +840,6 @@ impl<'a> BodyParser<'a> {
             // Placeholder id from path hash when bytes unavailable.
             docsai_model::assets::AssetId::new(format!("missing-{}", path.replace('/', "_")))
         });
-        if self.assets.get(&id).is_none() && asset_id.is_none() {
-            // leave missing; writer may warn
-        }
 
         let mut image = ImageRef::new(id, geometry);
         image.alt = alt;
@@ -1087,10 +1091,7 @@ fn try_parse_bracket(
                     "REF" => FieldKind::Ref,
                     other => FieldKind::Other(other.to_string()),
                 };
-                let instruction = attrs
-                    .get("instr")
-                    .unwrap_or(kind.as_str())
-                    .to_string();
+                let instruction = attrs.get("instr").unwrap_or(kind.as_str()).to_string();
                 return Ok(Some((
                     Inline::Field {
                         kind,
@@ -1117,10 +1118,7 @@ fn try_parse_bracket(
                     i,
                 )));
             }
-            return Ok(Some((
-                Inline::Styled { content, props },
-                i,
-            )));
+            return Ok(Some((Inline::Styled { content, props }, i)));
         }
     }
     Ok(None)
@@ -1244,7 +1242,15 @@ fn paragraph_format_from_attrs(attrs: &Attrs, is_heading: bool) -> ParaFormat {
     for class in attrs.classes() {
         if matches!(
             class.as_str(),
-            "empty" | "table" | "row" | "cell" | "header" | "footer" | "section" | "raw" | "textbox"
+            "empty"
+                | "table"
+                | "row"
+                | "cell"
+                | "header"
+                | "footer"
+                | "section"
+                | "raw"
+                | "textbox"
         ) {
             continue;
         }
@@ -1339,19 +1345,26 @@ fn parse_anchor(attrs: &Attrs) -> Anchor {
         "floating" | "behind" => {
             let behind = attrs.get("anchor") == Some("behind");
             let rel_h = parse_rel(attrs.get("relative-to").unwrap_or("margin"));
-            let rel_v = attrs
-                .get("relative-to-v")
-                .map(parse_rel)
-                .unwrap_or(rel_h);
+            let rel_v = attrs.get("relative-to-v").map(parse_rel).unwrap_or(rel_h);
             let h = if let Some(a) = attrs.get("align-h") {
                 AxisPos::Align(parse_align_kw(a))
             } else {
-                AxisPos::Offset(attrs.get("x").and_then(Length::parse).unwrap_or(Length::ZERO))
+                AxisPos::Offset(
+                    attrs
+                        .get("x")
+                        .and_then(Length::parse)
+                        .unwrap_or(Length::ZERO),
+                )
             };
             let v = if let Some(a) = attrs.get("align-v") {
                 AxisPos::Align(parse_align_kw(a))
             } else {
-                AxisPos::Offset(attrs.get("y").and_then(Length::parse).unwrap_or(Length::ZERO))
+                AxisPos::Offset(
+                    attrs
+                        .get("y")
+                        .and_then(Length::parse)
+                        .unwrap_or(Length::ZERO),
+                )
             };
             let wrap = match attrs.get("wrap").unwrap_or("square") {
                 "tight" => WrapMode::Tight,
@@ -1377,8 +1390,14 @@ fn parse_anchor(attrs: &Attrs) -> Anchor {
         }
         "absolute" => Anchor::SheetAbsolute {
             pos: docsai_model::units::Point::new(
-                attrs.get("x").and_then(Length::parse).unwrap_or(Length::ZERO),
-                attrs.get("y").and_then(Length::parse).unwrap_or(Length::ZERO),
+                attrs
+                    .get("x")
+                    .and_then(Length::parse)
+                    .unwrap_or(Length::ZERO),
+                attrs
+                    .get("y")
+                    .and_then(Length::parse)
+                    .unwrap_or(Length::ZERO),
             ),
         },
         _ => Anchor::Inline,
@@ -1518,10 +1537,7 @@ fn split_top_level(text: &str) -> Vec<&str> {
     chunks
 }
 
-fn split_one_fence<'a>(
-    text: &'a str,
-    line: usize,
-) -> Result<(Attrs, &'a str, &'a str), ParseError> {
+fn split_one_fence(text: &str, line: usize) -> Result<(Attrs, &str, &str), ParseError> {
     let text = text.trim_start_matches('\n');
     let mut lines = text.lines();
     let first = lines
@@ -1551,8 +1567,8 @@ fn split_one_fence<'a>(
                 depth -= 1;
                 if depth == 0 {
                     let body = &text[body_start..consumed];
-                    let next = if consumed + l.len() < text.len() {
-                        &text[consumed + l.len()..].trim_start_matches('\n')
+                    let _next = if consumed + l.len() < text.len() {
+                        text[consumed + l.len()..].trim_start_matches('\n')
                     } else {
                         ""
                     };
@@ -1589,10 +1605,7 @@ fn looks_like_table(text: &str) -> bool {
     let Some(second) = lines.next() else {
         return false;
     };
-    second.contains('|')
-        && second
-            .chars()
-            .all(|c| matches!(c, '|' | '-' | ':' | ' '))
+    second.contains('|') && second.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
 }
 
 fn looks_like_list(text: &str) -> bool {
@@ -1625,7 +1638,7 @@ fn collect_list_items(text: &str) -> Vec<ListItemRaw> {
                 }
                 current = Some(ListItemRaw {
                     ordered,
-                    marker_len: marker_len,
+                    marker_len,
                     lines: vec![content.to_string()],
                 });
                 continue;
@@ -1661,12 +1674,12 @@ fn match_list_marker(trimmed: &str) -> Option<(bool, usize, &str)> {
 fn strip_list_indent(text: &str, marker_len: usize) -> String {
     let mut out = String::new();
     for line in text.lines() {
-        let stripped = if line.len() >= marker_len && line.chars().take(marker_len).all(|c| c == ' ')
-        {
-            &line[marker_len..]
-        } else {
-            line.trim_start()
-        };
+        let stripped =
+            if line.len() >= marker_len && line.chars().take(marker_len).all(|c| c == ' ') {
+                &line[marker_len..]
+            } else {
+                line.trim_start()
+            };
         if !out.is_empty() {
             out.push('\n');
         }
@@ -1727,7 +1740,7 @@ fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
                             let content: String = chars[..end].iter().collect();
                             // Leak-free: return slices via indices into original
                             // We need &str into text - recompute
-                            let content = &text[..content.len()];
+                            let _content = &text[..content.len()];
                             // careful: content len in bytes
                             let byte_end = text
                                 .char_indices()
@@ -1749,11 +1762,8 @@ fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
         }
         i -= 1;
     }
-    let _ = attr_str_unused();
     (text, None)
 }
-
-fn attr_str_unused() {}
 
 fn split_table_row(line: &str) -> Vec<String> {
     let line = line.trim().trim_matches('|');

@@ -24,7 +24,7 @@ Practical difference between the two folders:
 
 **Phases 0 and 1 closed**: `docsai convert x.docx -o x.dmk.md` works with styles, lists,
 tables, images (full geometry), headers, footers, footnotes, fields, and properties. The reverse
-path (DocMark → `.docx`) is Phase 2 and does not exist yet.
+path (DocMark → `.docx`) landed in Phase 2.
 
 ## Quick checks
 

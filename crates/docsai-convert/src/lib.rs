@@ -10,7 +10,10 @@ mod pipeline;
 
 pub use assets::DirAssetStore;
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions};
-pub use pipeline::{convert_file, read_document, ConvertOptions, Outcome};
+pub use pipeline::{
+    convert_file, read_document, read_path, roundtrip_file, ConvertOptions, Outcome,
+    RoundtripOutcome,
+};
 
 use docsai_model::Format;
 
@@ -19,6 +22,12 @@ use docsai_model::Format;
 pub enum ConvertError {
     #[error("{0}")]
     Read(#[from] docsai_office::ReadError),
+
+    #[error("{0}")]
+    Write(#[from] docsai_office::WriteError),
+
+    #[error("{0}")]
+    Parse(#[from] docsai_docmark::ParseError),
 
     #[error("i/o error on `{path}`: {source}")]
     Io {
@@ -52,8 +61,8 @@ pub const SUPPORT: &[FormatSupport] = &[
     FormatSupport {
         format: Format::Docx,
         read: true,
-        write: false,
-        note: "writing arrives in Phase 2",
+        write: true,
+        note: "Phase 2",
     },
     FormatSupport {
         format: Format::Doc,
@@ -87,9 +96,9 @@ pub const SUPPORT: &[FormatSupport] = &[
     },
     FormatSupport {
         format: Format::DocMark,
-        read: false,
+        read: true,
         write: true,
-        note: "reading arrives in Phase 2",
+        note: "Phase 2",
     },
 ];
 
@@ -120,8 +129,13 @@ mod tests {
             );
         }
         assert!(can_read(Format::Docx));
-        assert!(!can_write(Format::Docx), "docx writing is Phase 2");
+        assert!(can_write(Format::Docx));
+        assert!(can_read(Format::DocMark));
         assert!(can_write(Format::DocMark));
+        assert_eq!(
+            can_write(Format::Docx),
+            docsai_office::WRITABLE.contains(&Format::Docx)
+        );
     }
 
     #[test]

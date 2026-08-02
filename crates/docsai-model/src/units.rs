@@ -162,7 +162,9 @@ impl Length {
         if text.is_empty() {
             return None;
         }
-        let split = text.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(text.len());
+        let split = text
+            .find(|c: char| c.is_ascii_alphabetic())
+            .unwrap_or(text.len());
         let (number, unit) = text.split_at(split);
         let value: f64 = number.parse().ok()?;
         match unit {
@@ -335,7 +337,11 @@ mod tests {
         ];
         for length in samples {
             let text = length.to_string();
-            assert_eq!(Length::parse(&text), Some(length), "`{text}` did not round-trip");
+            assert_eq!(
+                Length::parse(&text),
+                Some(length),
+                "`{text}` did not round-trip"
+            );
         }
         assert_eq!(Length::from_twips(1417).to_string(), "70.85pt");
         assert_eq!(Length::from_emu(1).to_string(), "1emu");

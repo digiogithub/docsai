@@ -4,11 +4,11 @@
 
 `docsai` is a single cross-platform binary (Windows, Linux, macOS) that converts office documents to an extended Markdown profile — **DocMark** — designed to keep as much information as possible (styles, images, properties, formulas) and to allow the **reverse conversion with minimal format loss**. It can be used as a CLI tool or as an **MCP (Model Context Protocol) server over stdio**, for integration with AI assistants such as Claude.
 
-> **Project status: Phases 0 and 1 completed.**
-> `.docx` → DocMark already works with styles, lists, tables, images (full geometry),
-> headers, footers, footnotes, fields and properties. The reverse conversion
-> (DocMark → `.docx`) is Phase 2 and does not exist yet; spreadsheets arrive in
-> Phase 3. See [`docs/development-plan.md`](docs/development-plan.md).
+> **Project status: Phases 0–2 completed.**
+> `.docx` ⇄ DocMark works with styles, lists, tables, images, headers/footers,
+> footnotes, fields and properties. `docsai roundtrip` checks DocMark idempotence
+> after a write/read cycle. Spreadsheets arrive in Phase 3. See
+> [`docs/development-plan.md`](docs/development-plan.md).
 
 ```bash
 cargo run -p docsai-cli -- convert report.docx -o report.dmk.md
@@ -23,13 +23,13 @@ cargo run -p docsai-cli -- formats
 
 | Format | Extension | Read | Write | Notes |
 |---|---|---|---|---|
-| Word OOXML | `.docx` | ✅ | 🕓 Phase 2 | Styles, images, tables, lists, headers/footers, footnotes, fields, properties |
+| Word OOXML | `.docx` | ✅ | ✅ | Styles, images, tables, lists, headers/footers, footnotes, fields, properties |
 | Word binary | `.doc` | 🕓 Phase 5 | ➖ | Read only (native parser or LibreOffice headless fallback) |
 | Excel OOXML | `.xlsx` | 🕓 Phase 3 | 🕓 Phase 3 | Values **and formulas**, number formats, merged cells, anchored images |
 | Excel binary | `.xls` | 🕓 Phase 3 | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.xlsx` |
-| Extended Markdown | `.dmk.md` | 🕓 Phase 2 | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
+| Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
 
 `docsai formats` prints this same matrix for what the binary can actually do.
 
@@ -86,10 +86,10 @@ warnings as failures), `2` input error, `3` unsupported format.
 Planned:
 
 ```bash
-docsai convert report.dmk.md -o report.docx   # Phase 2
+docsai convert report.dmk.md -o report.docx
 docsai convert sales.xlsx -o sales.dmk.md      # Phase 3
 docsai inspect report.docx                      # Phase 6
-docsai roundtrip report.docx                    # Phase 2
+docsai roundtrip report.docx
 ```
 
 ## Intended usage (MCP server, Phase 7)

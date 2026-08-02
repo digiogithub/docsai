@@ -14,13 +14,25 @@ use docsai_model::{Format, DOCMARK_VERSION};
 use crate::error::ParseError;
 use crate::yaml::{self, Value};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FrontMatter {
     pub source_format: Format,
     pub meta: DocumentMeta,
     pub page: Option<PageGeometry>,
     pub styles: StyleCatalog,
     pub list_defs: ListCatalog,
+}
+
+impl Default for FrontMatter {
+    fn default() -> Self {
+        FrontMatter {
+            source_format: Format::DocMark,
+            meta: DocumentMeta::default(),
+            page: None,
+            styles: StyleCatalog::default(),
+            list_defs: ListCatalog::default(),
+        }
+    }
 }
 
 /// Parses the text between the opening and closing `---` fences.
@@ -115,9 +127,9 @@ fn read_meta(map: &BTreeMap<String, Value>) -> DocumentMeta {
 }
 
 fn read_page(value: &Value, line: usize) -> Result<PageGeometry, ParseError> {
-    let map = value.as_map().ok_or_else(|| {
-        ParseError::front_matter(line, "page must be a mapping")
-    })?;
+    let map = value
+        .as_map()
+        .ok_or_else(|| ParseError::front_matter(line, "page must be a mapping"))?;
     let mut page = PageGeometry {
         columns: 1,
         ..Default::default()
@@ -189,7 +201,11 @@ fn read_defaults(value: &Value) -> DocDefaults {
 
 fn read_style(id: &str, value: &Value) -> Option<Style> {
     let map = value.as_map()?;
-    let style_type = match map.get("type").and_then(|v| v.as_str()).unwrap_or("paragraph") {
+    let style_type = match map
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("paragraph")
+    {
         "character" => StyleType::Character,
         "table" => StyleType::Table,
         "numbering" => StyleType::Numbering,
@@ -321,7 +337,11 @@ fn read_list_def(value: &Value) -> Option<ListDef> {
     let mut def = ListDef::default();
     for level in levels {
         let map = level.as_map()?;
-        let format = match map.get("format").and_then(|v| v.as_str()).unwrap_or("decimal") {
+        let format = match map
+            .get("format")
+            .and_then(|v| v.as_str())
+            .unwrap_or("decimal")
+        {
             "decimal" => NumFormat::Decimal,
             "lowerLetter" => NumFormat::LowerLetter,
             "upperLetter" => NumFormat::UpperLetter,

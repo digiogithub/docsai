@@ -89,7 +89,15 @@ fn read_head<R: Read>(reader: &mut R, buffer: &mut [u8; 8]) -> usize {
 }
 
 fn looks_like_docmark(head: &[u8]) -> bool {
-    head.starts_with(b"---")
+    if !head.starts_with(b"---") {
+        return false;
+    }
+    // Prefer a stronger signal when the probe buffer already holds it.
+    if head.windows(8).any(|w| w == b"docmark:") {
+        return true;
+    }
+    // `---` alone is still a maybe for DocMark (Phase 2).
+    true
 }
 
 fn extension(hint: Option<&str>) -> Option<String> {

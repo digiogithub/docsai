@@ -1,31 +1,32 @@
 # DocMark Specification v1.0
 
-**DocMark** is the extended Markdown profile used by `docsai` as the textual pivot format.
+**DocMark** is the extended Markdown profile used by `docsai` as its textual pivot format.
 Goal: represent text documents (docx/odt/doc) and spreadsheets (xlsx/xls/ods) in a way that is
-**readable, hand-editable, and with enough information to regenerate the original document
-with minimal loss**.
+**readable, hand-editable, and rich enough to regenerate the original document with minimal
+loss**.
 
-Status: **frozen (v1.0)** at the close of Phase 0. Any later change increments the version
-declared in the front matter and requires documenting the migration (`AGENTS.md` §2).
+Status: **frozen (v1.0)** at the close of Phase 0. Any later change bumps the version declared
+in the front matter and requires documenting the migration (`AGENTS.md` §2).
 
-Annex A (complex tables) is resolved in §3.4. Draft TODOs are closed; additions that Phase 1
-implementation made explicit are marked in the text and collected in §10.
+Annex A (complex tables) is resolved in §3.4. Draft TODOs are closed; additions made explicit by
+the Phase 1 implementation are marked in the text and collected in §10.
 
 ## 0. Principles
 
-1. **Downward compatibility**: a DocMark file is valid CommonMark+GFM. A viewer that
-   ignores attributes and containers still shows a useful document.
-2. **Pandoc attribute syntax**: `{#id .class key="value"}` — no new syntax is invented
-   where Pandoc already has it.
-3. **Everything unrepresentable is preserved**, never discarded: `raw-block` mechanism (§7).
+1. **Downward compatibility**: a DocMark file is valid CommonMark+GFM. A viewer that ignores
+   attributes and containers still shows a useful document.
+2. **Pandoc attribute syntax**: `{#id .class key="value"}` — no new syntax is invented where
+   Pandoc already has one.
+3. **Everything non-representable is preserved**, never discarded: the `raw-block` mechanism
+   (§7).
 4. **Determinism**: two serializations of the same IR produce identical bytes (required for
-   golden tests and round-trip idempotence). Line endings always `\n`, UTF-8 without BOM.
+   golden tests and round-trip idempotence). Line endings are always `\n`, UTF-8 without BOM.
 
 ## 1. File conventions
 
 - Recommended extension: `.dmk.md` (double extension: editors treat it as Markdown).
-- One text document ⇒ one file. One spreadsheet workbook ⇒ one file with one H1 section per sheet.
-- Media is extracted to a sibling `assets/` directory (configurable with `--assets-dir`).
+- One text document ⇒ one file. One workbook ⇒ one file with one H1 section per sheet.
+- Media are extracted to a sibling `assets/` directory (configurable with `--assets-dir`).
 
 ## 2. Front matter (YAML)
 
@@ -40,7 +41,7 @@ author: "Ana Perez"
 created: 2026-03-01T10:00:00Z
 modified: 2026-07-15T09:30:00Z
 language: en-US
-custom-properties:              # custom document properties, as-is
+custom-properties:              # document custom properties, as-is
   Department: "Sales"
 
 page:                           # default page / section geometry (text documents)
@@ -72,13 +73,13 @@ list-definitions:               # numbering.xml / normalized ODF list styles
 
 Rules:
 - Keys in kebab-case. Explicit units (`px`, `cm`, `pt`, `emu`, `%`); colors `#RRGGBB`.
-- **Unit rule (normative)**: the serializer chooses the **first unit that represents the
-  length exactly**, in the order `px` (at 96 dpi) → `cm` → `pt` → `emu`. Readability
-  yields to exactness: a Word margin of 1417 twips is written `70.85pt`, never an
-  approximate `2.499cm`, because rounding would move the margin on every round trip. `emu` is the
-  final hatch and always exists.
+- **Unit rule (normative)**: the serializer chooses the **first unit that represents the length
+  exactly**, in the order `px` (at 96 dpi) → `cm` → `pt` → `emu`. Readability yields to exactness:
+  a Word margin of 1417 twips is written `70.85pt`, never an approximate `2.499cm`, because
+  rounding would shift the margin on every round-trip. `emu` is the final escape hatch and always
+  exists.
 - The `styles` block is a **catalog**: the body references styles by name via classes
-  (`{.Heading1}`); the reverse writer uses it to regenerate `styles.xml`/ODF `styles.xml`.
+  (`{.Heading1}`); the inverse writer uses it to regenerate `styles.xml` / ODF `styles.xml`.
 - Unknown fields are preserved (parsers must not reject them): forward-compatible.
 
 ## 3. Text blocks
@@ -93,16 +94,16 @@ A normal paragraph (default style, no attributes).
 Paragraph with style and direct formatting. {.Quote align=center space-after=12pt}
 ```
 
-- The `#` level reflects the outline level; the class indicates the real style.
+- The `#` level reflects the outline level; the class indicates the actual style.
 - Paragraph attributes go in `{...}` **at the end of the block**: `align`,
   `indent-left`, `indent-right`, `indent-first-line`, `indent-hanging`,
   `space-before`, `space-after`, `line-height`, `background`, `keep-with-next`,
   `page-break-before`, `outline-level`.
-- An **empty** paragraph is real content (that is how a document is spaced) and a blank line
-  cannot represent it, because Markdown absorbs it: in `full` mode it is written `[]{.empty}`.
+- An **empty** paragraph is real content (documents are spaced that way) and a blank line cannot
+  represent it, because Markdown absorbs it: in `full` mode it is written `[]{.empty}`.
   `standard` and `plain` modes discard it, which is exactly what they promise (§6).
-- Economy rule: if formatting matches exactly what the style defines, redundant attributes
-  are **not** emitted (keeps Markdown clean and diffs stable).
+- Economy rule: if formatting matches exactly what the style defines, redundant attributes are
+  **not** emitted (keeps Markdown clean and diffs stable).
 
 ### 3.2 Inline formatting
 
@@ -124,8 +125,8 @@ Paragraph with style and direct formatting. {.Quote align=center space-after=12p
 
 ### 3.3 Lists
 
-Standard Markdown lists; typographic definition lives in `list-definitions` and is referenced
-on the first item when it is not the default list:
+Standard Markdown lists; typographic definition lives in `list-definitions` and is referenced on
+the first item when it is not the default list:
 
 ```markdown
 1. First point {.ListParagraph list=L1}
@@ -133,17 +134,17 @@ on the first item when it is not the default list:
    1. Sub-point (the real marker is defined by L1 level 2) {.ListParagraph list=L1}
 ```
 
-- `list=` travels **inside the first item's attribute block**, not in a separate block: an
-  item never carries two `{...}`.
-- Nested lists are written *tight* (no blank line between the item and its sublist) so that
-  a CommonMark viewer does not wrap each item in a `<p>`.
-- The ordinal marker written is `1.`, `2.`… The real presentation marker is defined by
-  the corresponding level of `list-definitions`.
+- `list=` travels **inside the first item's attribute block**, not in a separate block: an item
+  never carries two `{...}`.
+- Nested lists are written *tight* (no blank line between the item and its sublist) so a
+  CommonMark viewer does not wrap each item in a `<p>`.
+- The ordinal marker written is `1.`, `2.`… The real presentation marker is defined by the
+  corresponding level of `list-definitions`.
 
 ### 3.4 Tables (text documents)
 
-GFM tables when they are regular. A table with merged cells, fixed widths or a table style
-is wrapped in a container that supplies the metadata:
+GFM tables when they are regular. A table with merged cells, fixed widths, or a table style is
+wrapped in a container that supplies the metadata:
 
 ```markdown
 ::: {.table style=TableGrid col-widths="3cm,5cm,5cm"}
@@ -155,11 +156,11 @@ is wrapped in a container that supplies the metadata:
 ```
 
 - `rowspan`/`colspan` on the **first cell** of the merged area; absorbed cells are left empty.
-- The container accepts `style`, `col-widths` and `header-row=false`. GFM requires a header
-  row: when the original had none, an empty row is emitted and `header-row=false`
-  records it, so the reverse trip does not invent a header.
-- If the structure exceeds what GFM can represent (nested tables, multi-paragraph cells), the full
-  table is emitted as a `::: {.table complex=true}` container with rows and cells as
+- The container accepts `style`, `col-widths`, and `header-row=false`. GFM requires a header row:
+  when the original had none, an empty row is emitted and `header-row=false` records that, so the
+  round-trip does not invent a header.
+- If the structure exceeds what GFM can represent (nested tables, multi-paragraph cells), the
+  full table is emitted as a `::: {.table complex=true}` container with rows and cells as
   sub-blocks:
 
 ````markdown
@@ -178,22 +179,21 @@ Another cell.
 ````
 
   Complex format rules: one `::: {.row}` per row, one `::: {.cell}` per cell **including
-  absorbed ones** (which are empty), `colspan`/`rowspan` on the cell that opens the area, and inside
-  each cell any valid DocMark block. This closes draft annex A.
+  absorbed ones** (which are empty), `colspan`/`rowspan` on the cell that opens the area, and
+  inside each cell any valid DocMark block. This closes draft annex A.
 
 ### 3.5 Images and objects
 
-Every image is extracted to `assets/` and referenced with standard Markdown image syntax
-plus a normalized set of attributes that capture the full geometry of the original
-(size, position, anchor, crop, rotation…). The same attribute model applies in
-text documents and spreadsheets (§4.1).
+Every image is extracted to `assets/` and referenced with standard Markdown image syntax plus a
+normalized set of attributes that capture the original's full geometry (size, position, anchor,
+crop, rotation…). The same attribute model applies in text documents and spreadsheets (§4.1).
 
 ```markdown
-Inline image (flows with text):
+Inline image (flows with the text):
 
 ![Sales diagram](assets/img-3f2a91.png){width=450px height=300px title="Figure 1"}
 
-Floating image with position and text wrapping:
+Floating image with position and text wrap:
 
 ![Logo](assets/img-9c04b7.png){#img-logo width=3.5cm height=3.5cm
   anchor=floating relative-to=margin x=1.2cm y=0.5cm
@@ -202,16 +202,16 @@ Floating image with position and text wrapping:
   name="Corporate logo" link="https://example.com"}
 ```
 
-**Normalized image attributes** (inapplicable ones are omitted; explicit units):
+**Normalized image attributes** (inapplicable ones are omitted; units explicit):
 
 | Attribute | Meaning | Typical origin |
 |---|---|---|
 | `width`, `height` | **Displayed** size (always required) | `wp:extent`, `svg:width/height` |
 | `native-size` | Pixel dimensions of the original bitmap (`AxB`) | file header |
-| `dpi` | Declared resolution, if different from 96 | bitmap metadata |
+| `dpi` | Declared resolution, if other than 96 | bitmap metadata |
 | `anchor` | `inline` (default) \| `floating` \| `behind` \| `front` | `wp:inline`/`wp:anchor`, `text:anchor-type` |
 | `relative-to` | Horizontal position reference: `page` \| `margin` \| `paragraph` \| `character` \| `line` \| `column` | `wp:positionH @relativeFrom` |
-| `relative-to-v` | Vertical reference, **only if different** from `relative-to` | `wp:positionV @relativeFrom` |
+| `relative-to-v` | Vertical reference, **only if it differs** from `relative-to` | `wp:positionV @relativeFrom` |
 | `x`, `y` | Offsets from the reference (floating only) | `wp:posOffset`, `svg:x/y` |
 | `align-h`, `align-v` | Symbolic alignment (`left/center/right`, `top/middle/bottom`) when the original uses alignment instead of offset | `wp:align` |
 | `wrap` | `square` \| `tight` \| `through` \| `top-bottom` \| `none` | `wp:wrapSquare…`, `style:wrap` |
@@ -225,24 +225,24 @@ Floating image with position and text wrapping:
 | `title` | Title/caption | `wp:docPr @title` |
 | `link` | Hyperlink on the image | `a:hlinkClick` |
 | `external-src` | Original URL if the image was **linked**, not embedded | `r:link`, `xlink:href` |
-| `render` | `unsupported` for formats a Markdown viewer does not draw (WMF/EMF) | content sniffing |
-| `effects-raw` | Id of the raw-block with unrepresentable effects | `a:effectLst`, `a:scene3d` |
+| `render` | `unsupported` for formats a Markdown viewer cannot draw (WMF/EMF) | content sniffing |
+| `effects-raw` | Id of the raw-block holding non-representable effects | `a:effectLst`, `a:scene3d` |
 
 Rules:
-- Alternative text (accessibility, `wp:docPr @descr` / `svg:desc`) goes in the standard
-  Markdown alt field `![…]`, not in an attribute — so every viewer shows it.
-- File name: `img-<hash8>.<ext>` (content hash → stable across conversions and
-  with deduplication: N appearances of the same bitmap share a file, each with its
-  own geometry attributes).
-- `width`/`height` are **always** required in serialization even when they match the
-  native size: the round-trip must not depend on rereading the bitmap.
+- Alternative text (accessibility, `wp:docPr @descr` / `svg:desc`) goes in the standard Markdown
+  alt field `![…]`, not in an attribute — so every viewer shows it.
+- File name: `img-<hash8>.<ext>` (content hash → stable across conversions and with
+  deduplication: N appearances of the same bitmap share a file, each with its own geometry
+  attributes).
+- `width`/`height` are **always** required in serialization even when they match native size:
+  the round-trip must not depend on re-reading the bitmap.
 - WMF/EMF are extracted with their original extension and full geometry; the serializer adds
   `render=unsupported` as a hint for viewers (warning in the report).
-- Image effects without representation (shadows, bevels, DrawingML 3D styles) are preserved
-  as an associated raw-block via `effects-raw=<id>` referencing a contiguous `::: {.raw}`.
-- Non-image objects (OLE, SmartArt, embedded charts): extracted to `assets/` and
-  referenced with `![...](assets/obj-xxx.bin){.embedded-object content-type="..."}`, plus
-  a warning in the report.
+- Image effects with no representation (shadows, bevels, DrawingML 3D styles) are preserved as a
+  raw-block associated via `effects-raw=<id>` referencing a contiguous `::: {.raw}`.
+- Non-image objects (OLE, SmartArt, embedded charts): extracted to `assets/` and referenced as
+  `![...](assets/obj-xxx.bin){.embedded-object content-type="..."}`, plus a warning in the
+  report.
 
 ### 3.6 Sections, headers and footers, text boxes
 
@@ -260,13 +260,13 @@ Text box content.
 :::
 ```
 
-Dynamic fields (page number, date, TOC) are represented as `{.field field=...}` spans
-with their last known value as visible text.
+Dynamic fields (page number, date, TOC) are represented as `{.field field=...}` spans with their
+last known value as visible text.
 
 ## 4. Spreadsheets
 
-Each sheet is a `#` section with a metadata container; data goes in a GFM table.
-**Golden rule: the cell shows the value; formula and format travel in metadata.**
+Each sheet is a `#` section with a metadata container; data go in a GFM table.
+**Golden rule: the cell shows the value; the formula and format travel in metadata.**
 
 ```markdown
 ---
@@ -275,7 +275,7 @@ source-format: xlsx
 workbook:
   active-sheet: Sales
   defined-names:
-    ANNUAL_TOTAL: "Sales!$D$10"
+    TOTAL_ANNUAL: "Sales!$D$10"
 ---
 
 # Sales {.sheet cols="A:D" col-widths="12,9,9,11" frozen="A2"}
@@ -295,24 +295,25 @@ workbook:
 ```
 
 Rules:
-- First table column/row = coordinates (generated, bold); they let the
-  `cell-meta` block use readable A1 references.
+- First column/row of the table = coordinates (generated, bold); they let the `cell-meta` block
+  use readable A1 references.
 - `cell-meta` accepts ranges (`B2:D3`) to compact repeated metadata; the parser expands them.
-- `formula` is stored **without** a leading `=` and in the original dialect; `formula-dialect: openformula`
-  is added when the source is ODS.
+- `formula` is stored **without** a leading `=` and in the original dialect; `formula-dialect:
+  openformula` is added when the source is ODS.
 - Cell types: `number | text | bool | date | error` (+ `num-fmt` with the format code).
   Dates are shown in the table as ISO-8601 and restored as serial+format on write.
 - Merged cells: `A5:C5: merge=true` (the value lives in the top-left cell).
-- Cell styles (font, border, fill) are catalogued in front-matter `styles:` and
-  referenced with `style=`.
+- Cell styles (font, border, fill) are catalogued in front-matter `styles:` and referenced with
+  `style=`.
 - Huge sheets: by default the full used range is dumped; `--max-cells` allows truncating
-  **only in unidirectional mode** (never when preparing a round-trip; truncating invalidates the reverse trip).
+  **only in unidirectional mode** (never when preparing a round-trip; truncating invalidates the
+  return trip).
 
 ### 4.1 Images in spreadsheets
 
-Sheets also carry images (logos, screenshots, diagrams) anchored to the grid. They are
-declared in a `sheet-images` block at the end of each sheet, using the same syntax and the
-same image attributes from §3.5 plus spreadsheet-specific anchor attributes:
+Sheets also carry images (logos, screenshots, diagrams) anchored to the grid. They are declared
+in a `sheet-images` block at the end of each sheet, using the same syntax and image attributes
+from §3.5 plus spreadsheet-specific anchor attributes:
 
 ```markdown
 ::: {.sheet-images}
@@ -326,23 +327,23 @@ same image attributes from §3.5 plus spreadsheet-specific anchor attributes:
 ```
 
 Rules:
-- Sheet `anchor`: `two-cell` (cell to cell; the image moves/stretches with the grid,
-  per `move-with-cells`/`size-with-cells`) | `one-cell` (origin cell + fixed size) |
-  `absolute` (absolute position). Correspond to OOXML `xdr:twoCellAnchor`/`oneCellAnchor`/
-  `absoluteAnchor` and ODF cell/sheet anchors.
+- `anchor` on sheets: `two-cell` (cell to cell; the image moves/stretches with the grid,
+  according to `move-with-cells`/`size-with-cells`) | `one-cell` (origin cell + fixed size) |
+  `absolute` (absolute position). They correspond to OOXML `xdr:twoCellAnchor`/`oneCellAnchor`/
+  `absoluteAnchor` and to ODF cell/sheet anchors.
 - In `two-cell`, `width`/`height` are **not serialized** (size is defined by the grid); in
   `one-cell` and `absolute` they are required, as in §3.5.
-- `from`/`to` use A1 references; in-cell offsets go in `from-offset`/`to-offset`.
-- Remaining properties (rotation, crop, alt, hyperlink, `native-size`…) work the same
-  as in §3.5.
-- Native sheet charts are not images: in v1 they are preserved as raw-block with a
-  warning (backlog: also export them as a courtesy image in unidirectional mode).
+- `from`/`to` use A1 references; offsets within the cell go in `from-offset`/`to-offset`.
+- Remaining properties (rotation, crop, alt, hyperlink, `native-size`…) work the same as in
+  §3.5.
+- Native sheet charts are not images: in v1 they are preserved as a raw-block with a warning
+  (backlog: also export them as a courtesy image in unidirectional mode).
 
 ## 5. Configurable style mapping ("publication" mode)
 
-Inspired by mammoth: an optional `style-map.yaml` file lets you project custom styles to
-pure Markdown elements (`MyTitle ⇒ h2`, `SourceCode ⇒ code-block`) for whoever wants clean
-output without metadata. This mode is **unidirectional by definition** and the CLI marks it as such.
+Inspired by mammoth: an optional `style-map.yaml` file lets you project custom styles onto pure
+Markdown elements (`MyTitle ⇒ h2`, `SourceCode ⇒ code-block`) for those who want clean output
+without metadata. This mode is **unidirectional by definition** and the CLI marks it as such.
 
 ## 6. Fidelity levels (`--fidelity`)
 
@@ -352,9 +353,9 @@ output without metadata. This mode is **unidirectional by definition** and the C
 | `standard` | Main attributes, no raw-blocks or full catalog | Readable rich Markdown |
 | `plain` | Pure CommonMark+GFM, no attributes | LLM/RAG consumption MarkItDown-style |
 
-## 7. Fidelity hatch: raw-blocks
+## 7. Fidelity escape hatch: raw-blocks
 
-Fragments without a DocMark representation (complex fields, SmartArt, DrawingML drawings, signed
+Fragments with no DocMark representation (complex fields, SmartArt, DrawingML drawings, signed
 content…) are preserved opaquely:
 
 ````markdown
@@ -365,50 +366,51 @@ content…) are preserved opaquely:
 :::
 ````
 
-- The reverse writer re-injects the fragment as-is if the destination matches `format`;
+- The inverse writer re-injects the fragment as-is if the destination matches `format`;
   otherwise it omits it with a warning.
 - A human editor can delete a raw-block knowing they only lose that element.
 - The `docsai convert` command reports how many raw-blocks it emitted (coverage metric: each
-  phase's goal is to reduce them).
+  phase aims to reduce them).
 
 ## 8. Escape rules and serializer determinism
 
 - Only characters that would change meaning in CommonMark are escaped (`*_#|[]<>` depending on
   context), with a fixed decision table documented in the code.
-- Attributes: canonical order (id, alphabetically sorted classes, sorted keys); values
-  always with double quotes except numbers/simple identifiers.
-- GFM tables: columns aligned with fixed padding if the table is < 120 cols; no padding if it exceeds.
+- Attributes: canonical order (id, alphabetically sorted classes, sorted keys); values always
+  double-quoted except simple numbers/identifiers.
+- GFM tables: columns aligned with fixed padding if the table has < 120 columns; no padding if
+  it exceeds that.
 - These rules are **normative**: the idempotence test (`parse(serialize(ir)) == ir` and
   `serialize(parse(md)) == md`) verifies them in CI.
 
 ## 9. Pandoc compatibility
 
 DocMark in `full` mode is parseable by `pandoc -f markdown` with these documented caveats:
-`cell-meta` and `raw` blocks appear as generic divs, and non-standard attributes are
-kept as div/span attributes. This is intentional: it gives free PDF/HTML/EPUB output
-via Pandoc without docsai having to implement it.
+`cell-meta` and `raw` blocks appear as generic divs, and non-standard attributes are kept as
+div/span attributes. This is intentional: it gives free PDF/HTML/EPUB output via Pandoc without
+docsai having to implement it.
 
 ---
 
 ## 10. v1.0 change log
 
 Additions relative to the draft, decided during Phase 1 while implementing the serializer. All
-are additions: no document written against the draft ceases to be valid.
+are additions: no document written against the draft becomes invalid.
 
 | Change | Reason |
 |---|---|
-| Exact unit rule (§2) with `emu` as hatch | The draft left the unit to the serializer's taste; rounding to `cm` moved margins and sizes on every round trip |
+| Exact unit rule (§2) with `emu` as escape hatch | The draft left the unit up to the serializer; rounding to `cm` shifted margins and sizes on every round-trip |
 | `style-defaults` in the front matter | `w:docDefaults` is the base of the 4-level cascade and had no home |
 | `indent-left/right/first-line/hanging` instead of a single `indent` | OOXML and ODF distinguish all four; a single one lost information |
 | `[]{.empty}` for empty paragraphs | A blank line does not survive Markdown, and empty paragraphs are real content |
-| `[]{.break kind=page\|column}` | The draft only covered the line break |
+| `[]{.break kind=page\|column}` | The draft only covered line breaks |
 | `.small-caps`, `.caps`, `underline=<style>`, `bold=false`, `italic=false` | Direct formatting that table §3.2 did not cover |
 | `{.field field=X instr="…"}` | The draft described fields in prose but did not fix the syntax |
 | `list=` inside the first item's attribute block | Avoids an item carrying two consecutive `{...}` |
 | `header-row=false` on the table container | GFM requires a header row the original may not have had |
 | Full `::: {.table complex=true}` format | Closes draft annex A |
-| `relative-to-v`, `render=unsupported`, `effects-raw` on images | Axes with different references, non-drawable media and effects without a model |
+| `relative-to-v`, `render=unsupported`, `effects-raw` on images | Axes with different references, non-drawable media, and effects without a model |
 
-**Extensions not yet implemented** (the spec defines them, Phase 1 does not emit them): paragraph
-`border`, `::: {.textbox}` (text boxes travel as raw-block), and everything in §4 (spreadsheets),
-which arrives in Phase 3.
+**Extensions not yet implemented** (the spec defines them; Phase 1 does not emit them): paragraph
+`border`, `::: {.textbox}` (text boxes travel as raw-block), and everything in §4
+(spreadsheets), which arrives in Phase 3.

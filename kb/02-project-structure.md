@@ -8,7 +8,7 @@ docsai/
 ├── .github/workflows/ci.yml    # build/test on 3 OSes + fmt/clippy/rustdoc
 ├── crates/
 │   ├── docsai-model/           # the IR. No I/O, no heavy dependencies
-│   ├── docsai-docmark/         # DocMark serializer (the parser is Phase 2)
+│   ├── docsai-docmark/         # DocMark serializer + parser (Phase 2)
 │   ├── docsai-office/          # .docx reader (xlsx Phase 3, doc Phase 5)
 │   ├── docsai-odf/             # skeleton (Phase 4)
 │   ├── docsai-convert/         # orchestration: detection, pipelines, assets
