@@ -320,6 +320,10 @@ name = "docsai-odf"
 version = "0.1.0"
 dependencies = [
  "docsai-model",
+ "quick-xml 0.37.5",
+ "thiserror",
+ "tracing",
+ "zip",
 ]
 
 [[package]]

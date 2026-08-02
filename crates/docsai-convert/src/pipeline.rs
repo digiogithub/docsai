@@ -93,6 +93,7 @@ pub fn read_document<R: Read + Seek>(
                 .map_err(ConvertError::Parse)?;
             (document, report)
         }
+        Format::Odt | Format::Ods => docsai_odf::read(format, reader, assets)?,
         other => docsai_office::read(other, reader, assets)?,
     };
     docsai_model::validate::validate(&document).map_err(|errors| {
@@ -152,7 +153,10 @@ pub fn read_path(
         path: input.display().to_string(),
         source,
     })?;
-    let (document, report) = docsai_office::read(format, file, assets)?;
+    let (document, report) = match format {
+        Format::Odt | Format::Ods => docsai_odf::read(format, file, assets)?,
+        other => docsai_office::read(other, file, assets)?,
+    };
     docsai_model::validate::validate(&document).map_err(|errors| {
         ConvertError::Invalid(
             errors
@@ -223,7 +227,7 @@ pub fn convert_file(
                 report,
             })
         }
-        Format::Docx | Format::Xlsx => {
+        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods => {
             let ext = target.as_str();
             let output = output.ok_or_else(|| {
                 ConvertError::Invalid(format!("writing .{ext} requires an --output path"))
@@ -233,7 +237,10 @@ pub fn convert_file(
                 path: output.display().to_string(),
                 source,
             })?;
-            let write_report = docsai_office::write(target, &document, &store, file)?;
+            let write_report = match target {
+                Format::Odt | Format::Ods => docsai_odf::write(target, &document, &store, file)?,
+                other => docsai_office::write(other, &document, &store, file)?,
+            };
             report.merge(write_report);
 
             let (markdown, _) = docsai_docmark::serialize(
@@ -279,7 +286,7 @@ pub fn roundtrip_file(
     let mut store1 = MemoryAssetStore::new();
     let (document1, source_format, mut report) = read_path(input, &mut store1)?;
     let office_format = match source_format {
-        Format::Docx | Format::Xlsx => source_format,
+        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods => source_format,
         Format::DocMark => match &document1 {
             Document::Workbook(_) => Format::Xlsx,
             Document::Text(_) => Format::Docx,
@@ -313,7 +320,12 @@ pub fn roundtrip_file(
     report.merge(r2);
 
     let mut office_buf = Cursor::new(Vec::new());
-    let r3 = docsai_office::write(office_format, &document2, &store2, &mut office_buf)?;
+    let r3 = match office_format {
+        Format::Odt | Format::Ods => {
+            docsai_odf::write(office_format, &document2, &store2, &mut office_buf)?
+        }
+        other => docsai_office::write(other, &document2, &store2, &mut office_buf)?,
+    };
     report.merge(r3);
 
     if let Some(output) = output {
@@ -326,7 +338,10 @@ pub fn roundtrip_file(
 
     office_buf.set_position(0);
     let mut store3 = MemoryAssetStore::new();
-    let (document3, r4) = docsai_office::read(office_format, &mut office_buf, &mut store3)?;
+    let (document3, r4) = match office_format {
+        Format::Odt | Format::Ods => docsai_odf::read(office_format, &mut office_buf, &mut store3)?,
+        other => docsai_office::read(other, &mut office_buf, &mut store3)?,
+    };
     report.merge(r4);
     let (md2, r5) = docsai_docmark::serialize(
         &document3,
@@ -499,10 +514,106 @@ mod tests {
         );
     }
 
+    fn corpus_odt(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus/odt")
+            .join(name)
+    }
+
+    fn corpus_ods(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus/ods")
+            .join(name)
+    }
+
+    #[test]
+    fn converts_an_odt_to_docmark() {
+        let outcome = convert_file(
+            &corpus_odt("basic-text.odt"),
+            None,
+            &ConvertOptions::default(),
+        )
+        .expect("converts odt");
+        assert_eq!(outcome.source_format, Format::Odt);
+        assert_eq!(outcome.target_format, Format::DocMark);
+        assert!(!outcome.markdown.is_empty());
+    }
+
+    #[test]
+    fn converts_an_ods_to_docmark() {
+        let outcome = convert_file(
+            &corpus_ods("values-types.ods"),
+            None,
+            &ConvertOptions::default(),
+        )
+        .expect("converts ods");
+        assert_eq!(outcome.source_format, Format::Ods);
+        assert!(!outcome.markdown.is_empty());
+    }
+
+    #[test]
+    fn roundtrip_basic_odt_is_stable() {
+        let outcome = roundtrip_file(
+            &corpus_odt("basic-text.odt"),
+            None,
+            &ConvertOptions::default(),
+        )
+        .expect("odt roundtrip");
+        assert!(
+            outcome.identical,
+            "basic-text.odt should round-trip cleanly\n--- first ---\n{}\n--- second ---\n{}",
+            outcome.first_markdown, outcome.second_markdown
+        );
+    }
+
+    #[test]
+    fn roundtrip_ods_values_is_stable() {
+        let outcome = roundtrip_file(
+            &corpus_ods("values-types.ods"),
+            None,
+            &ConvertOptions::default(),
+        )
+        .expect("ods roundtrip");
+        assert!(
+            outcome.identical,
+            "values-types.ods should round-trip cleanly\n--- first ---\n{}\n--- second ---\n{}",
+            outcome.first_markdown, outcome.second_markdown
+        );
+    }
+
+    #[test]
+    fn odt_target_writes_a_package() {
+        let dir = temp_dir("to-odt");
+        let dmk = dir.join("in.dmk.md");
+        let md = convert_file(
+            &corpus_odt("basic-text.odt"),
+            None,
+            &ConvertOptions::default(),
+        )
+        .unwrap()
+        .markdown;
+        std::fs::write(&dmk, md).unwrap();
+        let out = dir.join("out.odt");
+        let outcome = convert_file(
+            &dmk,
+            Some(&out),
+            &ConvertOptions {
+                target: Some(Format::Odt),
+                ..Default::default()
+            },
+        )
+        .expect("odt write");
+        assert_eq!(outcome.target_format, Format::Odt);
+        assert!(out.exists());
+        let bytes = std::fs::read(&out).unwrap();
+        assert!(bytes.starts_with(b"PK"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_unsupported_target_is_rejected() {
         let options = ConvertOptions {
-            target: Some(Format::Odt),
+            target: Some(Format::Doc),
             ..Default::default()
         };
         let error = convert_file(&corpus("basic-text.docx"), None, &options).unwrap_err();

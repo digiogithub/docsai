@@ -35,6 +35,24 @@ already known.
 
 ---
 
+## Phase 4 — ODF (ODT / ODS)
+
+> **Status: closed for the core path.** Details in
+> [`07-phase-4-odf.md`](07-phase-4-odf.md). Custom `docsai-odf` with de-automatization,
+> OpenFormula preserved, corpus + goldens + convert wiring.
+
+### Delivered (summary)
+
+- ODT/ODS read and write, package rules (`mimetype` first/stored), draw frames.
+- Convert `SUPPORT` and round-trip paths for both formats.
+- Detection via package mimetype (`Certain`).
+
+### Still open (non-blocking)
+
+- LibreOffice open checklist; richer named-style / column-width fidelity.
+
+---
+
 ## Phase 3 — Spreadsheets (XLSX/XLS)
 
 > **Status: implemented** for the core path. Details in

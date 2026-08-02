@@ -10,3 +10,7 @@ authors.workspace = true
 
 [dependencies]
 docsai-model = { workspace = true }
+quick-xml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+zip = { workspace = true }

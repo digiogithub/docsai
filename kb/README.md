@@ -24,10 +24,11 @@ Practical difference between the two folders:
 
 ## Status in one line
 
-**Phases 0–3 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
-identity (Phases 1–2, including floating DrawingML and footnote bodies) and
-xlsx ⇄ DocMark plus xls read (Phase 3). `docsai convert` / `roundtrip` cover both
-text and spreadsheet packages. ODF and MCP remain later phases.
+**Phases 0–4 closed for the core path**: docx ⇄ DocMark with full corpus round-trip
+identity (Phases 1–2, including floating DrawingML and footnote bodies), xlsx ⇄
+DocMark plus xls read (Phase 3), and odt/ods ⇄ DocMark (Phase 4). `docsai convert`
+/ `roundtrip` cover text and spreadsheet packages across both OOXML and ODF.
+MCP remains a later phase.
 
 ## Quick checks
 

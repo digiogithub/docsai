@@ -43,23 +43,51 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
     }
 
     if read >= 4 && magic[..4] == *ZIP_MAGIC {
-        if let Ok(zip) = zip::ZipArchive::new(&mut reader) {
+        if let Ok(mut zip) = zip::ZipArchive::new(&mut reader) {
             let names: Vec<String> = zip.file_names().map(str::to_string).collect();
             let has = |name: &str| names.iter().any(|n| n == name);
-            let _ = reader.seek(SeekFrom::Start(0));
 
             if has(crate::docx::DOCUMENT_PART) {
+                drop(zip);
+                let _ = reader.seek(SeekFrom::Start(0));
                 return (Format::Docx, DetectScore::Certain);
             }
             if has("xl/workbook.xml") {
+                drop(zip);
+                let _ = reader.seek(SeekFrom::Start(0));
                 return (Format::Xlsx, DetectScore::Certain);
             }
             if has("content.xml") && has("mimetype") {
-                let format = match extension(hint).as_deref() {
-                    Some("ods") => Format::Ods,
-                    _ => Format::Odt,
+                // Prefer the mandatory `mimetype` part over the file name so
+                // a misnamed package is still classified correctly (Phase 4).
+                let mime = zip
+                    .by_name("mimetype")
+                    .ok()
+                    .and_then(|mut e| {
+                        let mut buf = String::new();
+                        e.read_to_string(&mut buf).ok()?;
+                        Some(buf)
+                    })
+                    .unwrap_or_default();
+                let mime = mime.trim();
+                let format = if mime.contains("opendocument.spreadsheet") {
+                    Format::Ods
+                } else if mime.contains("opendocument.text") {
+                    Format::Odt
+                } else {
+                    match extension(hint).as_deref() {
+                        Some("ods") => Format::Ods,
+                        _ => Format::Odt,
+                    }
                 };
-                return (format, DetectScore::Maybe);
+                let score = if mime.contains("opendocument.") {
+                    DetectScore::Certain
+                } else {
+                    DetectScore::Maybe
+                };
+                drop(zip);
+                let _ = reader.seek(SeekFrom::Start(0));
+                return (format, score);
             }
         }
         let _ = reader.seek(SeekFrom::Start(0));

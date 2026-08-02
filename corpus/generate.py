@@ -145,6 +145,22 @@ def write_package(path: Path, parts: dict[str, bytes]) -> None:
             zf.writestr(info, parts[name])
 
 
+def write_odf_package(path: Path, parts: dict[str, bytes]) -> None:
+    """ODF package: `mimetype` first and stored uncompressed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        if "mimetype" in parts:
+            info = zipfile.ZipInfo("mimetype", date_time=FIXED_DATE)
+            info.compress_type = zipfile.ZIP_STORED
+            info.external_attr = 0o600 << 16
+            zf.writestr(info, parts["mimetype"])
+        for name in sorted(k for k in parts if k != "mimetype"):
+            info = zipfile.ZipInfo(name, date_time=FIXED_DATE)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            zf.writestr(info, parts[name])
+
+
 def core_props(title: str, author: str = "docsai corpus", lang: str = "es-ES") -> bytes:
     return (
         XML_DECL
@@ -1232,6 +1248,754 @@ def xlsx_images_anchored() -> None:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# ODF corpus (Phase 4)
+# --------------------------------------------------------------------------
+
+ODF_NS = (
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+    'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" '
+    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+    'xmlns:xlink="http://www.w3.org/1999/xlink" '
+    'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+    'xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" '
+    'xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" '
+    'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" '
+    'xmlns:chart="urn:oasis:names:tc:opendocument:xmlns:chart:1.0" '
+    'xmlns:dr3d="urn:oasis:names:tc:opendocument:xmlns:dr3d:1.0" '
+    'xmlns:math="http://www.w3.org/1998/Math/MathML" '
+    'xmlns:form="urn:oasis:names:tc:opendocument:xmlns:form:1.0" '
+    'xmlns:script="urn:oasis:names:tc:opendocument:xmlns:script:1.0" '
+    'xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0" '
+    'xmlns:ooo="http://openoffice.org/2004/office" '
+    'xmlns:ooow="http://openoffice.org/2004/writer" '
+    'xmlns:oooc="http://openoffice.org/2004/calc" '
+    'xmlns:dom="http://www.w3.org/2001/xml-events" '
+    'xmlns:xforms="http://www.w3.org/2002/xforms" '
+    'xmlns:xsd="http://www.w3.org/2001/XMLSchema" '
+    'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+)
+
+MIME_ODT = b"application/vnd.oasis.opendocument.text"
+MIME_ODS = b"application/vnd.oasis.opendocument.spreadsheet"
+
+
+def odf_manifest(entries: list[tuple[str, str]]) -> bytes:
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" '
+        'manifest:version="1.3">',
+    ]
+    for path, media in entries:
+        lines.append(
+            f'<manifest:file-entry manifest:full-path="{path}" manifest:media-type="{media}"/>'
+        )
+    lines.append("</manifest:manifest>")
+    return ("\n".join(lines) + "\n").encode()
+
+
+def odf_meta(title: str, *, author: str = "docsai corpus", lang: str = "es-ES") -> bytes:
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f"<office:document-meta {ODF_NS} office:version=\"1.3\">"
+        f"<office:meta>"
+        f"<dc:title>{title}</dc:title>"
+        f"<meta:initial-creator>{author}</meta:initial-creator>"
+        f"<dc:creator>{author}</dc:creator>"
+        f"<dc:language>{lang}</dc:language>"
+        f"<meta:creation-date>2026-01-01T00:00:00Z</meta:creation-date>"
+        f"<dc:date>2026-01-02T00:00:00Z</dc:date>"
+        f"<meta:generator>docsai-corpus</meta:generator>"
+        f"</office:meta></office:document-meta>"
+    ).encode()
+
+
+def odf_styles_odt(
+    *,
+    extra_styles: str = "",
+    page_width: str = "21.001cm",
+    page_height: str = "29.7cm",
+    margin: str = "2cm",
+    header: str = "",
+    footer: str = "",
+) -> bytes:
+    header_xml = f"<style:header>{header}</style:header>" if header else ""
+    footer_xml = f"<style:footer>{footer}</style:footer>" if footer else ""
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f"<office:document-styles {ODF_NS} office:version=\"1.3\">"
+        f"<office:font-face-decls>"
+        f'<style:font-face style:name="Liberation Serif" svg:font-family="&apos;Liberation Serif&apos;"/>'
+        f'<style:font-face style:name="Liberation Sans" svg:font-family="&apos;Liberation Sans&apos;"/>'
+        f"</office:font-face-decls>"
+        f"<office:styles>"
+        f'<style:default-style style:family="paragraph">'
+        f'<style:paragraph-properties fo:line-height="115%" style:tab-stop-distance="1.251cm"/>'
+        f'<style:text-properties style:font-name="Liberation Serif" fo:font-size="12pt"/>'
+        f"</style:default-style>"
+        f'<style:style style:name="Standard" style:family="paragraph" style:class="text"/>'
+        f'<style:style style:name="Heading" style:family="paragraph" style:parent-style-name="Standard" '
+        f'style:next-style-name="Standard" style:class="text">'
+        f'<style:paragraph-properties fo:margin-top="0.423cm" fo:margin-bottom="0.212cm" fo:keep-with-next="always"/>'
+        f'<style:text-properties style:font-name="Liberation Sans" fo:font-size="14pt"/>'
+        f"</style:style>"
+        f'<style:style style:name="Heading_20_1" style:display-name="Heading 1" style:family="paragraph" '
+        f'style:parent-style-name="Heading" style:next-style-name="Standard" '
+        f'style:default-outline-level="1" style:class="text">'
+        f'<style:text-properties fo:font-size="16pt" fo:font-weight="bold" fo:color="#2E74B5"/>'
+        f"</style:style>"
+        f'<style:style style:name="Heading_20_2" style:display-name="Heading 2" style:family="paragraph" '
+        f'style:parent-style-name="Heading" style:default-outline-level="2" style:class="text">'
+        f'<style:text-properties fo:font-size="14pt" fo:font-weight="bold" fo:color="#2E74B5"/>'
+        f"</style:style>"
+        f'<style:style style:name="Emphasis" style:family="text">'
+        f'<style:text-properties fo:font-style="italic"/>'
+        f"</style:style>"
+        f'<style:style style:name="Strong_20_Emphasis" style:display-name="Strong Emphasis" style:family="text">'
+        f'<style:text-properties fo:font-weight="bold"/>'
+        f"</style:style>"
+        f"{extra_styles}"
+        f"</office:styles>"
+        f"<office:automatic-styles>"
+        f'<style:page-layout style:name="Mpm1">'
+        f'<style:page-layout-properties fo:page-width="{page_width}" fo:page-height="{page_height}" '
+        f'style:print-orientation="portrait" fo:margin-top="{margin}" fo:margin-bottom="{margin}" '
+        f'fo:margin-left="{margin}" fo:margin-right="{margin}"/>'
+        f"</style:page-layout>"
+        f"</office:automatic-styles>"
+        f"<office:master-styles>"
+        f'<style:master-page style:name="Standard" style:page-layout-name="Mpm1">'
+        f"{header_xml}{footer_xml}"
+        f"</style:master-page>"
+        f"</office:master-styles>"
+        f"</office:document-styles>"
+    ).encode()
+
+
+def build_odt(
+    name: str,
+    body: str,
+    *,
+    title: str,
+    auto_styles: str = "",
+    styles_extra: str = "",
+    pictures: dict[str, bytes] | None = None,
+    header: str = "",
+    footer: str = "",
+) -> None:
+    pictures = pictures or {}
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f"<office:document-content {ODF_NS} office:version=\"1.3\">"
+        f"<office:scripts/>"
+        f"<office:font-face-decls>"
+        f'<style:font-face style:name="Liberation Serif" svg:font-family="&apos;Liberation Serif&apos;"/>'
+        f"</office:font-face-decls>"
+        f"<office:automatic-styles>{auto_styles}</office:automatic-styles>"
+        f"<office:body><office:text>"
+        f'<text:sequence-decls>'
+        f'<text:sequence-decl text:display-outline-level="0" text:name="Illustration"/>'
+        f"</text:sequence-decls>"
+        f"{body}"
+        f"</office:text></office:body></office:document-content>"
+    ).encode()
+    parts: dict[str, bytes] = {
+        "mimetype": MIME_ODT,
+        "content.xml": content,
+        "styles.xml": odf_styles_odt(extra_styles=styles_extra, header=header, footer=footer),
+        "meta.xml": odf_meta(title),
+        "settings.xml": (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f"<office:document-settings {ODF_NS} office:version=\"1.3\">"
+            f"<office:settings/></office:document-settings>"
+        ).encode(),
+    }
+    manifest_entries = [
+        ("/", "application/vnd.oasis.opendocument.text"),
+        ("content.xml", "text/xml"),
+        ("styles.xml", "text/xml"),
+        ("meta.xml", "text/xml"),
+        ("settings.xml", "text/xml"),
+    ]
+    for pic_name, data in sorted(pictures.items()):
+        parts[f"Pictures/{pic_name}"] = data
+        ext = Path(pic_name).suffix.lower()
+        media = CONTENT_TYPE.get(ext, "application/octet-stream")
+        manifest_entries.append((f"Pictures/{pic_name}", media))
+    parts["META-INF/manifest.xml"] = odf_manifest(manifest_entries)
+    write_odf_package(ROOT / "odt" / name, parts)
+
+
+def odt_p(text: str, style: str = "Standard", inner: str | None = None) -> str:
+    body = inner if inner is not None else text
+    return f'<text:p text:style-name="{style}">{body}</text:p>'
+
+
+def odt_h(text: str, level: int = 1, style: str | None = None) -> str:
+    style = style or f"Heading_20_{level}"
+    return f'<text:h text:style-name="{style}" text:outline-level="{level}">{text}</text:h>'
+
+
+def odt_span(text: str, style: str) -> str:
+    return f'<text:span text:style-name="{style}">{text}</text:span>'
+
+
+def odt_basic_text() -> None:
+    body = (
+        odt_p("Primer parrafo del documento.")
+        + odt_p("Segundo parrafo con un salto<text:line-break/>de linea manual.")
+        + odt_p(
+            "Caracteres que Markdown escapa: *asterisco* _guion_ #almohadilla "
+            "|tuberia| [corchete] &lt;angulo&gt; `backtick` \\barra."
+        )
+        + odt_p("")
+        + odt_p("Parrafo final tras uno vacio.")
+    )
+    build_odt("basic-text.odt", body, title="Texto basico")
+
+
+def odt_basic_styles() -> None:
+    auto = (
+        '<style:style style:name="P1" style:family="paragraph" style:parent-style-name="Standard">'
+        '<style:paragraph-properties fo:text-align="center"/>'
+        "</style:style>"
+        '<style:style style:name="T1" style:family="text">'
+        '<style:text-properties fo:font-weight="bold"/>'
+        "</style:style>"
+        '<style:style style:name="T2" style:family="text" style:parent-style-name="Emphasis">'
+        '<style:text-properties fo:font-weight="bold"/>'
+        "</style:style>"
+        '<style:style style:name="T3" style:family="text">'
+        '<style:text-properties fo:color="#C00000" style:text-underline-style="solid"/>'
+        "</style:style>"
+    )
+    body = (
+        odt_h("Titulo principal", 1)
+        + odt_h("Subtitulo", 2)
+        + odt_p(
+            "",
+            inner=(
+                "Texto con "
+                + odt_span("negrita", "T1")
+                + ", "
+                + odt_span("italica", "Emphasis")
+                + " y "
+                + odt_span("ambas", "T2")
+                + "."
+            ),
+        )
+        + odt_p("", style="P1", inner="Centrado por estilo automatico.")
+        + odt_p("", inner="Color " + odt_span("rojo subrayado", "T3") + ".")
+        + odt_p(
+            "",
+            inner=(
+                'Enlace a <text:a xlink:href="https://example.com/docsai" xlink:type="simple">'
+                "example.com</text:a>."
+            ),
+        )
+    )
+    build_odt("basic-styles.odt", body, title="Estilos basicos", auto_styles=auto)
+
+
+def odt_nested_lists() -> None:
+    styles_extra = (
+        '<text:list-style style:name="L1">'
+        '<text:list-level-style-bullet text:level="1" text:bullet-char="•">'
+        '<style:list-level-properties text:space-before="0.635cm" text:min-label-width="0.635cm"/>'
+        "</text:list-level-style-bullet>"
+        '<text:list-level-style-bullet text:level="2" text:bullet-char="◦">'
+        '<style:list-level-properties text:space-before="1.27cm" text:min-label-width="0.635cm"/>'
+        "</text:list-level-style-bullet>"
+        "</text:list-style>"
+        '<text:list-style style:name="L2">'
+        '<text:list-level-style-number text:level="1" style:num-suffix="." style:num-format="1">'
+        '<style:list-level-properties text:space-before="0.635cm" text:min-label-width="0.635cm"/>'
+        "</text:list-level-style-number>"
+        '<text:list-level-style-number text:level="2" style:num-suffix="." style:num-format="a">'
+        '<style:list-level-properties text:space-before="1.27cm" text:min-label-width="0.635cm"/>'
+        "</text:list-level-style-number>"
+        "</text:list-style>"
+    )
+    body = (
+        odt_p("Listas anidadas:")
+        + '<text:list text:style-name="L1">'
+        + "<text:list-item>"
+        + odt_p("Uno")
+        + '<text:list text:style-name="L1">'
+        + "<text:list-item>"
+        + odt_p("Uno-A")
+        + "</text:list-item>"
+        + "<text:list-item>"
+        + odt_p("Uno-B")
+        + "</text:list-item>"
+        + "</text:list>"
+        + "</text:list-item>"
+        + "<text:list-item>"
+        + odt_p("Dos")
+        + "</text:list-item>"
+        + "</text:list>"
+        + '<text:list text:style-name="L2">'
+        + "<text:list-item>"
+        + odt_p("Primero")
+        + '<text:list text:style-name="L2">'
+        + "<text:list-item>"
+        + odt_p("Primero-a")
+        + "</text:list-item>"
+        + "</text:list>"
+        + "</text:list-item>"
+        + "<text:list-item>"
+        + odt_p("Segundo")
+        + "</text:list-item>"
+        + "</text:list>"
+    )
+    build_odt(
+        "nested-lists.odt", body, title="Listas anidadas", styles_extra=styles_extra
+    )
+
+
+def odt_table_simple() -> None:
+    body = (
+        odt_p("Tabla simple:")
+        + '<table:table table:name="Table1">'
+        + '<table:table-column table:number-columns-repeated="3"/>'
+        + "<table:table-header-rows><table:table-row>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("A")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("B")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("C")
+        + "</table:table-cell>"
+        + "</table:table-row></table:table-header-rows>"
+        + "<table:table-row>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("1")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("2")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("3")
+        + "</table:table-cell>"
+        + "</table:table-row>"
+        + "</table:table>"
+    )
+    build_odt("table-simple.odt", body, title="Tabla simple")
+
+
+def odt_table_merged() -> None:
+    body = (
+        odt_p("Tabla con celdas combinadas:")
+        + '<table:table table:name="Table1">'
+        + '<table:table-column table:number-columns-repeated="3"/>'
+        + "<table:table-row>"
+        + '<table:table-cell table:number-columns-spanned="2" office:value-type="string">'
+        + odt_p("AB")
+        + "</table:table-cell>"
+        + "<table:covered-table-cell/>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("C")
+        + "</table:table-cell>"
+        + "</table:table-row>"
+        + "<table:table-row>"
+        + '<table:table-cell table:number-rows-spanned="2" office:value-type="string">'
+        + odt_p("D")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("E")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("F")
+        + "</table:table-cell>"
+        + "</table:table-row>"
+        + "<table:table-row>"
+        + "<table:covered-table-cell/>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("G")
+        + "</table:table-cell>"
+        + "<table:table-cell office:value-type=\"string\">"
+        + odt_p("H")
+        + "</table:table-cell>"
+        + "</table:table-row>"
+        + "</table:table>"
+    )
+    build_odt("table-merged.odt", body, title="Tabla combinada")
+
+
+def odt_frame(
+    href: str,
+    w: str,
+    h: str,
+    *,
+    name: str = "Image1",
+    anchor: str = "as-char",
+    style: str = "fr1",
+    x: str | None = None,
+    y: str | None = None,
+    z: int | None = None,
+) -> str:
+    attrs = (
+        f'draw:style-name="{style}" draw:name="{name}" text:anchor-type="{anchor}" '
+        f'svg:width="{w}" svg:height="{h}"'
+    )
+    if x is not None:
+        attrs += f' svg:x="{x}"'
+    if y is not None:
+        attrs += f' svg:y="{y}"'
+    if z is not None:
+        attrs += f' draw:z-index="{z}"'
+    return (
+        f"<draw:frame {attrs}>"
+        f'<draw:image xlink:href="{href}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>'
+        f"</draw:frame>"
+    )
+
+
+def odt_images_inline() -> None:
+    auto = (
+        '<style:style style:name="fr1" style:family="graphic" style:parent-style-name="Graphics">'
+        '<style:graphic-properties style:vertical-pos="top" style:vertical-rel="baseline" '
+        'style:horizontal-pos="center" style:horizontal-rel="paragraph" style:mirror="none" '
+        'fo:clip="rect(0cm, 0cm, 0cm, 0cm)" draw:luminance="0%" draw:contrast="0%" '
+        'draw:red="0%" draw:green="0%" draw:blue="0%" draw:gamma="100%" draw:color-inversion="false" '
+        'draw:image-opacity="100%" draw:color-mode="standard"/>'
+        "</style:style>"
+    )
+    styles_extra = (
+        '<style:style style:name="Graphics" style:family="graphic">'
+        '<style:graphic-properties text:anchor-type="paragraph" svg:x="0cm" svg:y="0cm" '
+        'style:wrap="none" style:vertical-pos="top" style:vertical-rel="paragraph" '
+        'style:horizontal-pos="center" style:horizontal-rel="paragraph"/>'
+        "</style:style>"
+    )
+    body = odt_p(
+        "",
+        inner="Antes "
+        + odt_frame("Pictures/image1.png", "3cm", "2.25cm", name="Blue")
+        + " despues.",
+    )
+    build_odt(
+        "images-inline.odt",
+        body,
+        title="Imagenes en linea",
+        auto_styles=auto,
+        styles_extra=styles_extra,
+        pictures={"image1.png": BLUE_PNG},
+    )
+
+
+def odt_images_floating() -> None:
+    auto = (
+        '<style:style style:name="fr1" style:family="graphic" style:parent-style-name="Graphics">'
+        '<style:graphic-properties style:wrap="parallel" style:number-wrapped-paragraphs="no-limit" '
+        'style:wrap-contour="false" style:vertical-pos="from-top" style:vertical-rel="paragraph" '
+        'style:horizontal-pos="from-left" style:horizontal-rel="paragraph" '
+        'fo:margin-left="0.2cm" fo:margin-right="0.2cm"/>'
+        "</style:style>"
+        '<style:style style:name="fr2" style:family="graphic" style:parent-style-name="Graphics">'
+        '<style:graphic-properties style:wrap="run-through" style:run-through="background" '
+        'style:vertical-pos="from-top" style:vertical-rel="page" '
+        'style:horizontal-pos="from-left" style:horizontal-rel="page"/>'
+        "</style:style>"
+    )
+    styles_extra = (
+        '<style:style style:name="Graphics" style:family="graphic">'
+        '<style:graphic-properties text:anchor-type="paragraph" style:wrap="none"/>'
+        "</style:style>"
+    )
+    body = (
+        odt_p(
+            "",
+            inner=odt_frame(
+                "Pictures/image1.png",
+                "4cm",
+                "3cm",
+                name="FloatPara",
+                anchor="paragraph",
+                style="fr1",
+                x="1cm",
+                y="0.5cm",
+                z=1,
+            )
+            + "Texto que fluye junto a la imagen flotante anclada al parrafo.",
+        )
+        + odt_p(
+            "",
+            inner=odt_frame(
+                "Pictures/image2.png",
+                "3cm",
+                "3cm",
+                name="BehindPage",
+                anchor="page",
+                style="fr2",
+                x="2cm",
+                y="5cm",
+                z=0,
+            )
+            + "Texto sobre imagen detras de la pagina.",
+        )
+    )
+    build_odt(
+        "images-floating.odt",
+        body,
+        title="Imagenes flotantes",
+        auto_styles=auto,
+        styles_extra=styles_extra,
+        pictures={"image1.png": BLUE_PNG, "image2.png": RED_PNG},
+    )
+
+
+def odt_images_transformed() -> None:
+    auto = (
+        '<style:style style:name="fr1" style:family="graphic">'
+        '<style:graphic-properties style:mirror="horizontal" draw:rotation-angle="15" '
+        'fo:clip="rect(0.3cm, 0.4cm, 0.3cm, 0.4cm)" style:wrap="none" '
+        'style:vertical-pos="top" style:vertical-rel="baseline"/>'
+        "</style:style>"
+    )
+    body = odt_p(
+        "",
+        inner=odt_frame(
+            "Pictures/image1.png",
+            "3cm",
+            "3cm",
+            name="Transformed",
+            anchor="as-char",
+            style="fr1",
+        ),
+    )
+    build_odt(
+        "images-transformed.odt",
+        body,
+        title="Imagenes transformadas",
+        auto_styles=auto,
+        pictures={"image1.png": RED_PNG},
+    )
+
+
+def odt_headers_footers() -> None:
+    header = odt_p("Encabezado del documento")
+    footer = odt_p(
+        "",
+        inner='Pagina <text:page-number text:select-page="current">1</text:page-number>'
+        " de "
+        '<text:page-count>1</text:page-count>',
+    )
+    body = odt_p("Cuerpo con encabezado y pie.")
+    build_odt(
+        "headers-footers.odt",
+        body,
+        title="Encabezados y pies",
+        header=header,
+        footer=footer,
+    )
+
+
+def odt_footnotes() -> None:
+    body = odt_p(
+        "",
+        inner=(
+            "Texto con nota"
+            '<text:note text:id="ftn1" text:note-class="footnote">'
+            '<text:note-citation>1</text:note-citation>'
+            "<text:note-body>"
+            + odt_p("Primera nota al pie.")
+            + "</text:note-body></text:note>."
+        ),
+    )
+    build_odt("footnotes.odt", body, title="Notas al pie")
+
+
+def build_ods(
+    name: str,
+    sheets: list[tuple[str, str]],
+    *,
+    title: str,
+    auto_styles: str = "",
+    pictures: dict[str, bytes] | None = None,
+) -> None:
+    pictures = pictures or {}
+    tables = "".join(
+        f'<table:table table:name="{n}" table:style-name="ta1">{body}</table:table>'
+        for n, body in sheets
+    )
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f"<office:document-content {ODF_NS} office:version=\"1.3\">"
+        f"<office:automatic-styles>"
+        f'<style:style style:name="ta1" style:family="table">'
+        f'<style:table-properties table:display="true" style:writing-mode="lr-tb"/>'
+        f"</style:style>"
+        f"{auto_styles}"
+        f"</office:automatic-styles>"
+        f"<office:body><office:spreadsheet>{tables}</office:spreadsheet></office:body>"
+        f"</office:document-content>"
+    ).encode()
+    parts: dict[str, bytes] = {
+        "mimetype": MIME_ODS,
+        "content.xml": content,
+        "styles.xml": (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f"<office:document-styles {ODF_NS} office:version=\"1.3\">"
+            f"<office:styles/>"
+            f"<office:automatic-styles>"
+            f'<style:page-layout style:name="pm1">'
+            f'<style:page-layout-properties style:writing-mode="lr-tb"/>'
+            f"</style:page-layout>"
+            f"</office:automatic-styles>"
+            f"<office:master-styles>"
+            f'<style:master-page style:name="Default" style:page-layout-name="pm1"/>'
+            f"</office:master-styles>"
+            f"</office:document-styles>"
+        ).encode(),
+        "meta.xml": odf_meta(title),
+    }
+    manifest_entries = [
+        ("/", "application/vnd.oasis.opendocument.spreadsheet"),
+        ("content.xml", "text/xml"),
+        ("styles.xml", "text/xml"),
+        ("meta.xml", "text/xml"),
+    ]
+    for pic_name, data in sorted(pictures.items()):
+        parts[f"Pictures/{pic_name}"] = data
+        ext = Path(pic_name).suffix.lower()
+        media = CONTENT_TYPE.get(ext, "application/octet-stream")
+        manifest_entries.append((f"Pictures/{pic_name}", media))
+    parts["META-INF/manifest.xml"] = odf_manifest(manifest_entries)
+    write_odf_package(ROOT / "ods" / name, parts)
+
+
+def ods_cell(
+    value: str = "",
+    *,
+    vtype: str = "string",
+    office_value: str | None = None,
+    formula: str | None = None,
+    span_cols: int = 1,
+    span_rows: int = 1,
+    date_value: str | None = None,
+    bool_value: str | None = None,
+) -> str:
+    attrs = [f'office:value-type="{vtype}"']
+    if office_value is not None:
+        attrs.append(f'office:value="{office_value}"')
+    if date_value is not None:
+        attrs.append(f'office:date-value="{date_value}"')
+    if bool_value is not None:
+        attrs.append(f'office:boolean-value="{bool_value}"')
+    if formula is not None:
+        attrs.append(f'table:formula="{formula}"')
+    if span_cols > 1:
+        attrs.append(f'table:number-columns-spanned="{span_cols}"')
+    if span_rows > 1:
+        attrs.append(f'table:number-rows-spanned="{span_rows}"')
+    inner = f"<text:p>{value}</text:p>" if value != "" or vtype == "string" else ""
+    return f"<table:table-cell {' '.join(attrs)}>{inner}</table:table-cell>"
+
+
+def ods_row(cells: str, repeat: int = 1) -> str:
+    rep = f' table:number-rows-repeated="{repeat}"' if repeat > 1 else ""
+    return f"<table:table-row{rep}>{cells}</table:table-row>"
+
+
+def ods_values_types() -> None:
+    rows = (
+        ods_row(
+            ods_cell("texto")
+            + ods_cell("3.14", vtype="float", office_value="3.14")
+            + ods_cell("1", vtype="boolean", bool_value="true")
+            + ods_cell("2026-01-15", vtype="date", date_value="2026-01-15")
+        )
+        + ods_row(
+            ods_cell("vacio")
+            + ods_cell("-2", vtype="float", office_value="-2")
+            + ods_cell("0", vtype="boolean", bool_value="false")
+            + ods_cell("12.5%", vtype="percentage", office_value="0.125")
+        )
+    )
+    body = '<table:table-column table:number-columns-repeated="4"/>' + rows
+    build_ods("values-types.ods", [("Hoja1", body)], title="Tipos de valor")
+
+
+def ods_formulas_basic() -> None:
+    rows = (
+        ods_row(
+            ods_cell("10", vtype="float", office_value="10")
+            + ods_cell("20", vtype="float", office_value="20")
+            + ods_cell(
+                "30",
+                vtype="float",
+                office_value="30",
+                formula="of:=[.A1]+[.B1]",
+            )
+        )
+        + ods_row(
+            ods_cell(
+                "30",
+                vtype="float",
+                office_value="30",
+                formula="of:=SUM([.A1:.B1])",
+            )
+        )
+    )
+    body = '<table:table-column table:number-columns-repeated="3"/>' + rows
+    build_ods("formulas-basic.ods", [("Calc", body)], title="Formulas basicas")
+
+
+def ods_merged_cells() -> None:
+    rows = (
+        ods_row(
+            ods_cell("AB", span_cols=2)
+            + "<table:covered-table-cell/>"
+            + ods_cell("C")
+        )
+        + ods_row(
+            ods_cell("D", span_rows=2)
+            + ods_cell("E")
+            + ods_cell("F")
+        )
+        + ods_row(
+            "<table:covered-table-cell/>"
+            + ods_cell("G")
+            + ods_cell("H")
+        )
+    )
+    body = '<table:table-column table:number-columns-repeated="3"/>' + rows
+    build_ods("merged-cells.ods", [("Hoja", body)], title="Celdas combinadas")
+
+
+def ods_images_anchored() -> None:
+    auto = (
+        '<style:style style:name="gr1" style:family="graphic">'
+        '<style:graphic-properties style:wrap="none"/>'
+        "</style:style>"
+    )
+    frame = (
+        '<draw:frame draw:style-name="gr1" draw:name="Pic1" table:end-cell-address="Hoja.B2" '
+        'table:end-x="1cm" table:end-y="1cm" svg:width="2cm" svg:height="1.5cm" svg:x="0.1cm" svg:y="0.1cm">'
+        '<draw:image xlink:href="Pictures/image1.png" xlink:type="simple" xlink:show="embed" '
+        'xlink:actuate="onLoad"/>'
+        "</draw:frame>"
+    )
+    rows = ods_row(
+        f'<table:table-cell office:value-type="string"><text:p>Con imagen</text:p>{frame}</table:table-cell>'
+        + ods_cell("otra")
+    )
+    body = '<table:table-column table:number-columns-repeated="2"/>' + rows
+    build_ods(
+        "images-anchored.ods",
+        [("Hoja", body)],
+        title="Imagenes ancladas",
+        auto_styles=auto,
+        pictures={"image1.png": BLUE_PNG},
+    )
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -1253,12 +2017,26 @@ GENERATORS = [
     xlsx_number_formats,
     xlsx_merged_cells,
     xlsx_images_anchored,
+    odt_basic_text,
+    odt_basic_styles,
+    odt_nested_lists,
+    odt_table_simple,
+    odt_table_merged,
+    odt_images_inline,
+    odt_images_floating,
+    odt_images_transformed,
+    odt_headers_footers,
+    odt_footnotes,
+    ods_values_types,
+    ods_formulas_basic,
+    ods_merged_cells,
+    ods_images_anchored,
 ]
 
 
 def digest_tree() -> dict[str, str]:
     out = {}
-    for sub in ("docx", "xlsx"):
+    for sub in ("docx", "xlsx", "odt", "ods"):
         d = ROOT / sub
         if not d.exists():
             continue
