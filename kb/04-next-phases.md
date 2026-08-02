@@ -62,6 +62,10 @@ This is the immediate phase. It closes the cycle and builds the fidelity infrast
 
 ## Phase 3 — Spreadsheets (XLSX/XLS)
 
+> **Status: implemented** for the core path. Details in
+> [`05-phase-3-spreadsheets.md`](05-phase-3-spreadsheets.md). Remaining: 100k-cell perf budget
+> and Excel/LibreOffice open checklist.
+
 ### What is already done
 
 - **The xlsx corpus exists**: `values-types`, `formulas-basic`, `formulas-shared`,
@@ -74,7 +78,7 @@ This is the immediate phase. It closes the cycle and builds the fidelity infrast
   outside a `Workbook`.
 - **`float_roundtrip`** is enabled: numeric values are not corrupted when going through JSON.
 
-### What needs to be decided and built
+### What was decided and built (summary; see kb/05)
 
 1. **xlsx writer spike**: `umya-spreadsheet` versus `rust_xlsxwriter`. Criterion: which regenerates
    styles + `numFmt` from the IR with higher fidelity. Document in `docs/spikes/`.

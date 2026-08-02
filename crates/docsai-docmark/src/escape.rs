@@ -31,13 +31,19 @@ pub fn escape(text: &str, context: TextContext) -> String {
     let mut at_line_start = true;
     let mut chars = text.chars().peekable();
 
+    // Inside a GFM table cell the content is never at a CommonMark line start,
+    // so block-marker and ordered-list escaping does not apply (spreadsheet
+    // values routinely start with digits or `#DIV/0!`).
+    let line_rules = context != TextContext::TableCell;
+
     while let Some(c) = chars.next() {
         let needs_escape = ALWAYS.contains(&c)
             || (context == TextContext::TableCell && c == '|')
-            || (at_line_start && matches!(c, '#' | '>' | '-' | '+' | '=' | '~'))
+            || (line_rules && at_line_start && matches!(c, '#' | '>' | '-' | '+' | '=' | '~'))
             // A digit that starts a line and is followed by `.` or `)` would
             // become an ordered list marker.
-            || (at_line_start
+            || (line_rules
+                && at_line_start
                 && c.is_ascii_digit()
                 && chars.peek().is_some_and(|n| matches!(n, '.' | ')')))
             // `&` only matters when it could open an entity reference.

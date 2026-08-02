@@ -19,17 +19,18 @@ Practical difference between the two folders:
 | [02 — Project structure](02-project-structure.md) | Crates, modules, dependency rules, and where each piece enters |
 | [03 — Technical decisions](03-technical-decisions.md) | The non-obvious decisions, with their rationale and cost |
 | [04 — Considerations for the next phases](04-next-phases.md) | What Phase 2 and later will already find solved, and what awaits them |
+| [05 — Phase 3 spreadsheets](05-phase-3-spreadsheets.md) | XLSX/XLS ⇄ DocMark: what landed, decisions, gaps |
 
 ## Status in one line
 
-**Phases 0 and 1 closed**: `docsai convert x.docx -o x.dmk.md` works with styles, lists,
-tables, images (full geometry), headers, footers, footnotes, fields, and properties. The reverse
-path (DocMark → `.docx`) landed in Phase 2.
+**Phases 0–3 closed for the core path**: docx ⇄ DocMark (Phases 1–2) and xlsx ⇄ DocMark
+plus xls read (Phase 3). `docsai convert` / `roundtrip` cover both text and spreadsheet packages.
+ODF and MCP remain later phases.
 
 ## Quick checks
 
 ```bash
-cargo test --workspace                                  # 164 tests
+cargo test --workspace                                  # workspace tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 python3 corpus/generate.py --check                      # corpus is up to date

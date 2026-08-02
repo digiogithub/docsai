@@ -148,16 +148,16 @@ Tasks:
 1. **Spike (3 days)**: decide xlsx writer — `umya-spreadsheet` (reads and writes styles) vs
    `rust_xlsxwriter` (better pure-write API). Criterion: which regenerates with higher fidelity
    styles+numFmt from the IR. Document in `docs/spikes/`.
-2. xlsx reader: `calamine` for values and formulas; complementary custom reading of
-   `xl/styles.xml` (numFmt, fonts, fills, borders by index) and of dimensions/merges/panes
-   with `quick-xml`. Shared and array formulas expanded with metadata.
+2. xlsx reader: custom OPC/`quick-xml` reader (not calamine) for values, formulas,
+   `xl/styles.xml` (numFmt, fonts, fills, borders by index), dimensions/merges/panes and
+   drawings. Shared and array formulas expanded with metadata. (Spike R3.)
 3. Cell typing: date/time detection via numFmt (serial→ISO-8601 and back); booleans,
    errors (`#DIV/0!`…).
 4. Sheet serialization to DocMark per spec §4 (value table + `cell-meta` with compacted
    ranges) and reverse parser.
-5. xlsx writer from IR (crate chosen in the spike): values, formulas (recalc delegated to
-   Excel/LibreOffice on open: write formula without cached value or with the preserved value),
-   numFmt, styles, merges, widths, defined names.
+5. xlsx writer from IR (custom OPC/SpreadsheetML writer per spike R3): values, formulas
+   (cached value preserved when present; recalc delegated to Excel/LibreOffice on open),
+   numFmt, styles, merges, widths, defined names, shared/array formulas.
 6. **Sheet images** (spec §4.1): custom reading of `xl/drawings/drawing*.xml` with
    `quick-xml` (calamine/umya do not cover them with full geometry) → `ImageRef` with anchors
    `SheetTwoCell`/`SheetOneCell`/`SheetAbsolute`, in-cell offsets,
@@ -169,10 +169,10 @@ Tasks:
    names, images with all three anchor types, 100k cells (performance).
 
 Acceptance criteria:
-- [ ] xlsx round-trip: values, formulas and numFmt intact on the corpus (fidelity ≥ 95 %).
-- [ ] Sheet image round-trip: all three anchors preserved symbolically (two-cell
+- [x] xlsx round-trip: values, formulas and numFmt intact on the corpus (fidelity ≥ 95 %).
+- [x] Sheet image round-trip: all three anchors preserved symbolically (two-cell
       still stretches with the grid after the round trip), bitmaps without recompression.
-- [ ] An xlsx with dates survives round-trip without corrupting serials (dedicated test).
+- [x] An xlsx with dates survives round-trip without corrupting serials (dedicated test).
 - [ ] 100k-cell xlsx: < 3 s, < 500 MB RAM.
 - [ ] Excel and LibreOffice recalculate generated files without errors (checklist).
 

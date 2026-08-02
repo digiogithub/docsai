@@ -197,6 +197,17 @@ impl Relationships {
     pub fn first_of_kind(&self, kind: &str) -> Option<&Relationship> {
         self.map.values().find(|r| r.kind == kind)
     }
+
+    /// All relationships, in deterministic id order.
+    #[allow(dead_code)]
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Relationship)> {
+        self.map.iter().map(|(id, rel)| (id.as_str(), rel))
+    }
+
+    /// Every relationship of a given kind.
+    pub fn of_kind<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Relationship> + 'a {
+        self.map.values().filter(move |r| r.kind == kind)
+    }
 }
 
 /// Normalises a ZIP member name, rejecting anything that escapes the package.

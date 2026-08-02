@@ -25,6 +25,8 @@ pub mod escape;
 mod frontmatter;
 mod frontmatter_parse;
 mod parser;
+mod sheet_parser;
+mod sheet_writer;
 pub mod units;
 mod writer;
 mod yaml;
@@ -110,14 +112,10 @@ pub fn serialize(
             report.stats.styles = text.styles.styles.len() as u32;
             (out, report)
         }
-        Document::Workbook(_) => {
-            // Spreadsheet serialisation is Phase 3; emitting a half-formed sheet
-            // would be worse than saying so.
-            let mut report = ConversionReport::new();
-            report.warn(docsai_model::Warning::Degraded {
-                what: "workbook".into(),
-                why: "spreadsheet serialisation arrives in Phase 3".into(),
-            });
+        Document::Workbook(book) => {
+            let (body, mut report) = sheet_writer::write_workbook(book, assets, options);
+            out.push_str(&body);
+            report.stats.styles = book.styles.styles.len() as u32;
             (out, report)
         }
     }
