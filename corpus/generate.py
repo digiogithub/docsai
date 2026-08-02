@@ -23,6 +23,7 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import os
 import struct
@@ -1996,6 +1997,156 @@ def ods_images_anchored() -> None:
     )
 
 
+
+
+# --------------------------------------------------------------------------
+# Legacy .doc fixtures (Phase 5)
+# --------------------------------------------------------------------------
+# Built by docsai_office::doc::test_fixture and embedded so generate.py stays
+# dependency-free. Regenerate the constants by writing the fixtures with the
+# Rust helper and re-base64-encoding them.
+
+
+BASIC_TEXT_DOC_B64 = (
+    "0M8R4KGxGuEAAAAAAAAAAAAAAAAAAAAAPgADAP7/CQAGAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAA"
+    "EAAAAgAAAAEAAAD+////AAAAAAAAAAD/////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "///////////////////////////////////////////////////////////////////////////9"
+    "/////v////7///8EAAAABQAAAP7/////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "/////////////////////////////////////////////////////////////////////////1IA"
+    "bwBvAHQAIABFAG4AdAByAHkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAWAAUB//////////8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AwAAAEAEAAAAAAAAVwBvAHIAZABEAG8AYwB1AG0AZQBuAHQAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAABoAAgECAAAA//////////8AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAzAMAAAAAAAAxAFQAYQBiAGwAZQAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgACAf///////////////wAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAA////////"
+    "////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA"
+    "AAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAAPAAAA"
+    "/v////7/////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "///////////////////////////////////////////////////////////////////////spcEA"
+    "AAAJBAAAABK/AAAAAAAAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "ABYAzAMAAAAAAAAAAAAAJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAF0AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABIAGUAbABsAG8AIABmAHIA"
+    "bwBtACAAUABoAGEAcwBlACAANQANAFMAZQBjAG8AbgBkACAAcABhAHIAYQBnAHIAYQBwAGgADQAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAhAAAAAA"
+    "AAAAJAAAAAAAhAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+)
+
+ENCRYPTED_DOC_B64 = (
+    "0M8R4KGxGuEAAAAAAAAAAAAAAAAAAAAAPgADAP7/CQAGAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAA"
+    "EAAAAgAAAAEAAAD+////AAAAAAAAAAD/////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "///////////////////////////////////////////////////////////////////////////9"
+    "/////v////7///8EAAAA/v//////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "/////////////////////////////////////////////////////////////////////////1IA"
+    "bwBvAHQAIABFAG4AdAByAHkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAWAAUB//////////8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AwAAAAAEAAAAAAAAVwBvAHIAZABEAG8AYwB1AG0AZQBuAHQAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAABoAAgECAAAA//////////8AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAkgMAAAAAAAAxAFQAYQBiAGwAZQAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgACAf///////////////wAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8AAAAVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAA////////"
+    "////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA"
+    "AAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAD+////"
+    "/v//////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "////////////////////////////////////////////////////////////////////////////"
+    "///////////////////////////////////////////////////////////////////////spcEA"
+    "AAAJBAAAABO/AAAAAAAAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "ABYAkgMAAAAAAAAAAAAABwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAF0AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABzAGUAYwByAGUAdAANAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACEAAAAAAAAAAHAAAA"
+    "AACEAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+)
+
+
+def _write_doc(name: str, b64: str) -> None:
+    out = ROOT / "doc" / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(base64.b64decode(b64))
+
+
+def doc_basic_text() -> None:
+    """Native-path paragraphs for the degraded MS-DOC reader."""
+    _write_doc("basic-text.doc", BASIC_TEXT_DOC_B64)
+
+
+def doc_encrypted() -> None:
+    """FIB fEncrypted set — must be rejected with a clear error."""
+    _write_doc("encrypted.doc", ENCRYPTED_DOC_B64)
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -2031,12 +2182,14 @@ GENERATORS = [
     ods_formulas_basic,
     ods_merged_cells,
     ods_images_anchored,
+    doc_basic_text,
+    doc_encrypted,
 ]
 
 
 def digest_tree() -> dict[str, str]:
     out = {}
-    for sub in ("docx", "xlsx", "odt", "ods"):
+    for sub in ("docx", "xlsx", "odt", "ods", "doc"):
         d = ROOT / sub
         if not d.exists():
             continue

@@ -1,8 +1,9 @@
 //! Office readers and writers for docsai.
 //!
 //! Phase 1 lands the `.docx` reader; Phase 2 the docx writer; Phase 3 adds
-//! `.xlsx` read/write and `.xls` read. The crate depends on `docsai-model` and
-//! on nothing else in the workspace (`AGENTS.md` §3).
+//! `.xlsx` read/write and `.xls` read; Phase 5 adds degraded `.doc` reading.
+//! The crate depends on `docsai-model` and on nothing else in the workspace
+//! (`AGENTS.md` §3).
 //!
 //! ```no_run
 //! use docsai_model::MemoryAssetStore;
@@ -16,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 pub mod detect;
+mod doc;
 mod docx;
 mod error;
 mod package;
@@ -33,7 +35,7 @@ use docsai_model::{ConversionReport, Document, Format};
 use std::io::{Read, Seek};
 
 /// Formats this crate can read today.
-pub const READABLE: &[Format] = &[Format::Docx, Format::Xlsx, Format::Xls];
+pub const READABLE: &[Format] = &[Format::Docx, Format::Doc, Format::Xlsx, Format::Xls];
 
 /// Formats this crate can write today.
 pub const WRITABLE: &[Format] = &[Format::Docx, Format::Xlsx];
@@ -44,6 +46,17 @@ pub fn read_docx<R: Read + Seek>(
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
     docx::read(reader, assets)
+}
+
+/// Reads a legacy `.doc` document (degraded native path).
+///
+/// For full fidelity, prefer the LibreOffice fallback in `docsai-convert`
+/// (`--use-loffice`).
+pub fn read_doc<R: Read + Seek>(
+    reader: R,
+    assets: &mut dyn AssetStore,
+) -> Result<(Document, ConversionReport), ReadError> {
+    doc::read(reader, assets)
 }
 
 /// Reads a `.xlsx` workbook.
@@ -70,13 +83,21 @@ pub fn read<R: Read + Seek>(
 ) -> Result<(Document, ConversionReport), ReadError> {
     match format {
         Format::Docx => read_docx(reader, assets),
+        Format::Doc => read_doc(reader, assets),
         Format::Xlsx => read_xlsx(reader, assets),
         Format::Xls => read_xls(reader, assets),
         other => Err(ReadError::WrongShape {
             part: other.to_string(),
-            expected: "a format supported in this phase (docx, xlsx, xls)".into(),
+            expected: "a format supported in this phase (docx, doc, xlsx, xls)".into(),
         }),
     }
+}
+
+/// Hidden test helpers (synthetic `.doc` fixtures).
+#[doc(hidden)]
+pub mod test_support {
+    pub use crate::doc::classify_ole2;
+    pub use crate::doc::test_fixture;
 }
 
 /// Writes a `.docx` document.

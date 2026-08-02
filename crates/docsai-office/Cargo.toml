@@ -15,4 +15,5 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 zip = { workspace = true }
 calamine = { workspace = true }
+cfb = { workspace = true }
 

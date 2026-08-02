@@ -39,6 +39,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 calamine = "0.26"
+cfb = "0.14"
+tempfile = "3"
 
 [profile.release]
 lto = true

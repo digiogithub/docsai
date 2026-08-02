@@ -99,12 +99,12 @@ already known.
 
 ## Phase 5 — Legacy DOC
 
-- `detect()` already recognizes the OLE2 container and disambiguates `.doc` from `.xls` by name;
-  that remains to be replaced by reading the CFB directory.
-- The two-level strategy from analysis §1.3 still stands: fallback to headless LibreOffice and a
-  degraded native extractor.
-- The `Warning::ImageGeometryDegraded` that the native extractor needs already exists and is
-  already used (for VML), so the pattern is established.
+> **Status: closed for the core path.** Details in
+> [`08-phase-5-legacy-doc.md`](08-phase-5-legacy-doc.md).
+
+- `detect()` classifies OLE2 via the CFB directory (`WordDocument` vs `Workbook`/`Book`).
+- Native degraded reader + `--use-loffice auto|never|require` are wired.
+- Remaining polish: richer native structure (lists/tables), real LO-saved samples in CI.
 
 ---
 

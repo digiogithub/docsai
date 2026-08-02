@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use docsai_convert::{ConvertOptions, Fidelity, SUPPORT};
+use docsai_convert::{ConvertOptions, Fidelity, UseLoffice, SUPPORT};
 use docsai_model::Format;
 
 /// Exit codes (architecture §5).
@@ -54,6 +54,9 @@ enum Command {
         /// Treat severe warnings as failures.
         #[arg(long)]
         strict: bool,
+        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        #[arg(long, default_value = "auto", value_name = "MODE")]
+        use_loffice: String,
     },
     /// Show which formats this build can read and write.
     Formats {
@@ -74,6 +77,9 @@ enum Command {
         /// Print the fidelity report as JSON on stdout.
         #[arg(long)]
         json: bool,
+        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        #[arg(long, default_value = "auto", value_name = "MODE")]
+        use_loffice: String,
     },
 }
 
@@ -108,12 +114,15 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             output,
             fidelity,
             json,
+            use_loffice,
         } => {
             let fidelity = docsai_convert::Fidelity::parse(fidelity).ok_or_else(|| {
                 anyhow::anyhow!("unknown --fidelity `{fidelity}`; use full, standard or plain")
             })?;
+            let use_loffice = parse_use_loffice(use_loffice)?;
             let options = docsai_convert::ConvertOptions {
                 fidelity,
+                use_loffice,
                 ..Default::default()
             };
             let outcome = docsai_convert::roundtrip_file(input, output.as_deref(), &options)?;
@@ -165,10 +174,12 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             assets_dir,
             json,
             strict,
+            use_loffice,
         } => {
             let fidelity = Fidelity::parse(fidelity).ok_or_else(|| {
                 anyhow::anyhow!("unknown --fidelity `{fidelity}`; use full, standard or plain")
             })?;
+            let use_loffice = parse_use_loffice(use_loffice)?;
             let target = match to {
                 Some(name) => Some(
                     Format::parse(name)
@@ -180,6 +191,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
                 fidelity,
                 assets_dir: assets_dir.clone(),
                 target,
+                use_loffice,
             };
             let outcome = docsai_convert::convert_file(input, output.as_deref(), &options)?;
 
@@ -263,10 +275,17 @@ fn print_formats(json: bool) {
     }
 }
 
+fn parse_use_loffice(value: &str) -> anyhow::Result<UseLoffice> {
+    UseLoffice::parse(value).ok_or_else(|| {
+        anyhow::anyhow!("unknown --use-loffice `{value}`; use auto, never or require")
+    })
+}
+
 fn exit_code_for(error: &anyhow::Error) -> u8 {
     match error.downcast_ref::<docsai_convert::ConvertError>() {
         Some(docsai_convert::ConvertError::Unsupported { .. }) => EXIT_UNSUPPORTED,
         Some(docsai_convert::ConvertError::UnknownFormat(_)) => EXIT_UNSUPPORTED,
+        Some(docsai_convert::ConvertError::Loffice { .. }) => EXIT_INPUT,
         Some(_) => EXIT_INPUT,
         None => EXIT_INPUT,
     }

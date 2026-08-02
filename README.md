@@ -4,10 +4,10 @@
 
 `docsai` is a single cross-platform binary (Windows, Linux, macOS) that converts office documents to an extended Markdown profile — **DocMark** — designed to keep as much information as possible (styles, images, properties, formulas) and to allow the **reverse conversion with minimal format loss**. It can be used as a CLI tool or as an **MCP (Model Context Protocol) server over stdio**, for integration with AI assistants such as Claude.
 
-> **Project status: Phases 0–2 completed.**
-> `.docx` ⇄ DocMark works with styles, lists, tables, images, headers/footers,
-> footnotes, fields and properties. `docsai roundtrip` checks DocMark idempotence
-> after a write/read cycle. Spreadsheets (xlsx ⇄ DocMark, xls read) landed in Phase 3. See
+> **Project status: Phases 0–5 completed for the core path.**
+> `.docx` / `.odt` ⇄ DocMark, `.xlsx` / `.ods` ⇄ DocMark, `.xls` read, and legacy
+> `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
+> `docsai roundtrip` checks DocMark idempotence after a write/read cycle. See
 > [`docs/development-plan.md`](docs/development-plan.md).
 
 ```bash
@@ -24,7 +24,7 @@ cargo run -p docsai-cli -- formats
 | Format | Extension | Read | Write | Notes |
 |---|---|---|---|---|
 | Word OOXML | `.docx` | ✅ | ✅ | Styles, images, tables, lists, headers/footers, footnotes, fields, properties |
-| Word binary | `.doc` | 🕓 Phase 5 | ➖ | Read only (native parser or LibreOffice headless fallback) |
+| Word binary | `.doc` | ✅ | ➖ | Read only: native degraded text, or LibreOffice headless → docx (`--use-loffice`) |
 | Excel OOXML | `.xlsx` | ✅ | ✅ | Values **and formulas**, number formats, merged cells, anchored images |
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
@@ -73,12 +73,20 @@ docsai convert report.docx -o report.dmk.md      # extracts assets/ next to the 
 docsai convert report.docx                         # to stdout, without writing media beside it
 docsai convert report.docx --fidelity plain        # clean CommonMark, for LLM/RAG
 docsai convert report.docx -o out.md --json        # conversion report as JSON
+docsai convert legacy.doc -o legacy.dmk.md         # .doc: LO if installed, else native text
+docsai convert legacy.doc --use-loffice never      # force native degraded path
+docsai convert legacy.doc --use-loffice require    # fail if LibreOffice is missing
 docsai formats                                      # support matrix for this binary
+docsai roundtrip report.docx
 ```
 
 Fidelity levels (`--fidelity`, spec §6): `full` (default, round-trip grade),
 `standard` (rich Markdown without catalogues or raw-blocks) and `plain` (pure
 CommonMark+GFM).
+
+Legacy `.doc` policy (`--use-loffice`): `auto` (default — use LibreOffice when
+found), `never` (native piece-table extractor only), `require` (error if
+LibreOffice is missing). Override the binary with `DOCSAI_LIBREOFFICE`.
 
 Exit codes: `0` success, `1` conversion with losses (`--strict` also treats minor
 warnings as failures), `2` input error, `3` unsupported format.
@@ -86,10 +94,8 @@ warnings as failures), `2` input error, `3` unsupported format.
 Planned:
 
 ```bash
-docsai convert report.dmk.md -o report.docx
-docsai convert sales.xlsx -o sales.dmk.md
 docsai inspect report.docx                      # Phase 6
-docsai roundtrip report.docx
+docsai convert *.docx --out-dir md/             # Phase 6 batch
 ```
 
 ## Intended usage (MCP server, Phase 7)

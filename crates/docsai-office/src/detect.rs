@@ -33,13 +33,26 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
     let _ = reader.seek(SeekFrom::Start(0));
 
     if read >= 8 && magic == OLE2_MAGIC {
-        // Both legacy formats are the same container; only the name tells them
-        // apart without parsing the directory (Phase 5 does that properly).
-        let format = match extension(hint).as_deref() {
-            Some("xls") | Some("xlt") => Format::Xls,
-            _ => Format::Doc,
-        };
-        return (format, DetectScore::Maybe);
+        // Prefer the CFB directory (WordDocument vs Workbook/Book). Fall back
+        // to the file name only when the directory cannot be read.
+        match crate::doc::classify_ole2(&mut reader) {
+            Ok(format) => {
+                let score = DetectScore::Certain;
+                // If classification is generic Doc but the name clearly says
+                // xls and there was no WordDocument, classify_ole2 already
+                // returned Xls when Workbook/Book is present.
+                let _ = reader.seek(SeekFrom::Start(0));
+                return (format, score);
+            }
+            Err(_) => {
+                let _ = reader.seek(SeekFrom::Start(0));
+                let format = match extension(hint).as_deref() {
+                    Some("xls") | Some("xlt") => Format::Xls,
+                    _ => Format::Doc,
+                };
+                return (format, DetectScore::Maybe);
+            }
+        }
     }
 
     if read >= 4 && magic[..4] == *ZIP_MAGIC {
@@ -189,6 +202,15 @@ mod tests {
             Format::Doc
         );
         assert_eq!(detect(Cursor::new(ole), Some("a.xls")).0, Format::Xls);
+    }
+
+    #[test]
+    fn legacy_doc_fixture_is_certain() {
+        let bytes = crate::doc::test_fixture::minimal_doc("Detect me\r");
+        assert_eq!(
+            detect(Cursor::new(bytes), Some("note.bin")),
+            (Format::Doc, DetectScore::Certain)
+        );
     }
 
     #[test]
