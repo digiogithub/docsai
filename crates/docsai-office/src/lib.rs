@@ -1,7 +1,7 @@
 //! Office readers and writers for docsai.
 //!
-//! Fase 1 lands the `.docx` reader; `.xlsx`/`.xls` arrive in Fase 3 and `.doc`
-//! in Fase 5. The crate depends on `docsai-model` and on nothing else in the
+//! Phase 1 lands the `.docx` reader; `.xlsx`/`.xls` arrive in Phase 3 and `.doc`
+//! in Phase 5. The crate depends on `docsai-model` and on nothing else in the
 //! workspace (`AGENTS.md` §3).
 //!
 //! ```no_run
@@ -19,10 +19,12 @@ pub mod detect;
 mod docx;
 mod error;
 mod package;
+mod write_error;
 mod xml;
 
 pub use detect::{detect, DetectScore};
 pub use error::ReadError;
+pub use write_error::WriteError;
 
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format};
@@ -32,7 +34,7 @@ use std::io::{Read, Seek};
 pub const READABLE: &[Format] = &[Format::Docx];
 
 /// Formats this crate can write today.
-pub const WRITABLE: &[Format] = &[];
+pub const WRITABLE: &[Format] = &[Format::Docx];
 
 /// Reads a `.docx` document.
 pub fn read_docx<R: Read + Seek>(
@@ -54,5 +56,27 @@ pub fn read<R: Read + Seek>(
             part: other.to_string(),
             expected: "a format supported in this phase (docx)".into(),
         }),
+    }
+}
+
+/// Writes a `.docx` document.
+pub fn write_docx<W: std::io::Write + std::io::Seek>(
+    document: &Document,
+    assets: &dyn AssetStore,
+    writer: W,
+) -> Result<ConversionReport, WriteError> {
+    docx::write::write_docx(document, assets, writer)
+}
+
+/// Writes any Office document this crate supports.
+pub fn write<W: std::io::Write + std::io::Seek>(
+    format: Format,
+    document: &Document,
+    assets: &dyn AssetStore,
+    writer: W,
+) -> Result<ConversionReport, WriteError> {
+    match format {
+        Format::Docx => write_docx(document, assets, writer),
+        other => Err(WriteError::Unsupported(other.to_string())),
     }
 }

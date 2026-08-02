@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use docsai_convert::{ConvertOptions, Fidelity, SUPPORT};
 use docsai_model::Format;
 
-/// Exit codes (arquitectura §5).
+/// Exit codes (architecture §5).
 const EXIT_OK: u8 = 0;
 const EXIT_WARNINGS: u8 = 1;
 const EXIT_INPUT: u8 = 2;
@@ -61,6 +61,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Round-trip a document (Office → DocMark → Office → DocMark) and compare.
+    Roundtrip {
+        /// Input Office document.
+        input: PathBuf,
+        /// Optional path for the regenerated .docx.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// How much of the source survives: full, standard or plain.
+        #[arg(long, default_value = "full")]
+        fidelity: String,
+        /// Print the fidelity report as JSON on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -88,6 +102,60 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
         Command::Formats { json } => {
             print_formats(*json);
             Ok(EXIT_OK)
+        }
+        Command::Roundtrip {
+            input,
+            output,
+            fidelity,
+            json,
+        } => {
+            let fidelity = docsai_convert::Fidelity::parse(fidelity).ok_or_else(|| {
+                anyhow::anyhow!("unknown --fidelity `{fidelity}`; use full, standard or plain")
+            })?;
+            let options = docsai_convert::ConvertOptions {
+                fidelity,
+                ..Default::default()
+            };
+            let outcome = docsai_convert::roundtrip_file(input, output.as_deref(), &options)?;
+            if *json {
+                let payload = serde_json::json!({
+                    "source_format": outcome.source_format.as_str(),
+                    "identical": outcome.identical,
+                    "report": outcome.report,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                eprintln!(
+                    "docsai: roundtrip {} — second DocMark {} first",
+                    outcome.source_format.as_str(),
+                    if outcome.identical {
+                        "matches"
+                    } else {
+                        "differs from"
+                    }
+                );
+                if !outcome.identical {
+                    eprintln!(
+                        "  first: {} bytes, second: {} bytes",
+                        outcome.first_markdown.len(),
+                        outcome.second_markdown.len()
+                    );
+                }
+                if !outcome.report.warnings.is_empty() {
+                    eprintln!(
+                        "  {} warning(s), {} raw-block(s)",
+                        outcome.report.warnings.len(),
+                        outcome.report.raw_blocks_emitted
+                    );
+                    if cli.verbose {
+                        for warning in &outcome.report.warnings {
+                            eprintln!("  [{:?}] {}", warning.severity(), warning.message());
+                        }
+                    }
+                }
+            }
+            let lost = outcome.report.has_severe() || !outcome.identical;
+            Ok(if lost { EXIT_WARNINGS } else { EXIT_OK })
         }
         Command::Convert {
             input,

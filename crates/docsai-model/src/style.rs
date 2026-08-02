@@ -1,6 +1,6 @@
 //! Named styles with inheritance.
 //!
-//! The cardinal rule (análisis §5.2): the IR stores **a reference plus a
+//! The cardinal rule (analysis §5.2): the IR stores **a reference plus a
 //! delta**, never flattened formatting. Every field of [`FontProps`] and
 //! [`ParaProps`] is an `Option`; `None` means "inherit", not "off".
 
@@ -126,7 +126,7 @@ impl FontProps {
 
     /// The subset of `self` that is not already implied by `base`.
     ///
-    /// Used by the serialiser to honour the "economy rule" of the spec (§3.1):
+    /// Used by the serializer to honour the "economy rule" of the spec (§3.1):
     /// formatting identical to the applied style is not emitted.
     pub fn minus(&self, base: &FontProps) -> FontProps {
         macro_rules! drop_same {

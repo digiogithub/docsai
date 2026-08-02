@@ -1,6 +1,6 @@
 //! Reader errors.
 //!
-//! Fase 1 acceptance criterion: *no panics on corrupt input, always `Err`*.
+//! Phase 1 acceptance criterion: *no panics on corrupt input, always `Err`*.
 //! Every failure path in this crate ends in one of these variants.
 
 /// Something went wrong reading an Office document.

@@ -71,6 +71,32 @@ pub fn escape_attr_value(value: &str) -> String {
     out
 }
 
+/// Inverse of [`escape`] for block (and table-cell) content: each backslash
+/// escapes the following character, and is dropped.
+///
+/// ```
+/// use docsai_docmark::escape::{escape, unescape, TextContext};
+/// let raw = r"a*b_c[d]";
+/// let once = escape(raw, TextContext::Block);
+/// assert_eq!(unescape(&once), raw);
+/// ```
+pub fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            } else {
+                out.push('\\');
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// True when a value can be written without quotes: a number or a simple
 /// identifier (spec §8).
 pub fn is_bare_value(value: &str) -> bool {
@@ -138,5 +164,25 @@ mod tests {
         let once = escape("a*b", TextContext::Block);
         let twice = escape(&once, TextContext::Block);
         assert_eq!(twice, r"a\\\*b");
+    }
+
+    #[test]
+    fn unescape_inverts_escape() {
+        let samples = [
+            "*asterisco* _guion_ `code` [x] <y> \\z",
+            "# titulo",
+            "- item",
+            "1. uno",
+            "a|b",
+            "a&amp;b",
+            "coma, punto. dos: puntos; ¿eñe?",
+            r"\*asterisco\* \_guion\_",
+        ];
+        for sample in samples {
+            let escaped = escape(sample, TextContext::Block);
+            assert_eq!(unescape(&escaped), sample, "failed on {sample:?}");
+        }
+        assert_eq!(unescape(r"a\|b"), "a|b");
+        assert_eq!(unescape("trailing\\"), "trailing\\");
     }
 }

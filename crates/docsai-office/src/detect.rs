@@ -1,4 +1,4 @@
-//! Format detection **by content**, not by extension (arquitectura §4).
+//! Format detection **by content**, not by extension (architecture §4).
 //!
 //! A file called `informe.txt` that is really a `.docx` must still convert,
 //! and a `.docx` extension on a ZIP of holiday photos must not.
@@ -34,7 +34,7 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
 
     if read >= 8 && magic == OLE2_MAGIC {
         // Both legacy formats are the same container; only the name tells them
-        // apart without parsing the directory (Fase 5 does that properly).
+        // apart without parsing the directory (Phase 5 does that properly).
         let format = match extension(hint).as_deref() {
             Some("xls") | Some("xlt") => Format::Xls,
             _ => Format::Doc,
@@ -89,7 +89,15 @@ fn read_head<R: Read>(reader: &mut R, buffer: &mut [u8; 8]) -> usize {
 }
 
 fn looks_like_docmark(head: &[u8]) -> bool {
-    head.starts_with(b"---")
+    if !head.starts_with(b"---") {
+        return false;
+    }
+    // Prefer a stronger signal when the probe buffer already holds it.
+    if head.windows(8).any(|w| w == b"docmark:") {
+        return true;
+    }
+    // `---` alone is still a maybe for DocMark (Phase 2).
+    true
 }
 
 fn extension(hint: Option<&str>) -> Option<String> {

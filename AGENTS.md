@@ -1,144 +1,157 @@
-# AGENTS.md — Guía para desarrolladores y agentes de IA
+# AGENTS.md — Guide for developers and AI agents
 
-Este fichero es la referencia operativa para cualquier persona o agente de IA que trabaje
-en el repositorio `docsai`. Léelo completo antes de tocar código.
+This file is the operational reference for anyone or any AI agent working
+on the `docsai` repository. Read it fully before touching code.
 
-## 1. Qué es este proyecto
+## 1. What this project is
 
-`docsai` es un binario Rust multiplataforma (Windows/Linux/macOS) que convierte documentos
-Office (`.doc`, `.docx`, `.xls`, `.xlsx`) y LibreOffice (`.odt`, `.ods`) a un Markdown
-extendido llamado **DocMark**, y de vuelta, con pérdida mínima de formato. Se invoca como
-CLI o como servidor **MCP por stdio**.
+`docsai` is a cross-platform Rust binary (Windows/Linux/macOS) that converts
+Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`) and LibreOffice documents
+(`.odt`, `.ods`) to an extended Markdown called **DocMark**, and back, with
+minimal format loss. It is invoked as a CLI or as an **MCP server over stdio**.
 
-**Estado actual**: **Fases 0 y 1 cerradas**. Existe el workspace con los siete crates, el IR
-(`docsai-model`), el lector `.docx` (`docsai-office`), el serializador DocMark
-(`docsai-docmark`), la orquestación (`docsai-convert`) y la CLI con `convert` y `formats`.
-`docsai-odf` y `docsai-mcp` son esqueletos que sólo fijan las reglas de dependencia.
+**Current status**: **Phases 0–2 are closed** for the core path. The workspace
+has the seven crates, the IR (`docsai-model`), the `.docx` reader **and writer**
+(`docsai-office`), DocMark serialize **and parse** (`docsai-docmark`),
+orchestration (`docsai-convert`), and the CLI with `convert`, `formats` and
+`roundtrip`. `docsai-odf` and `docsai-mcp` remain skeletons that only fix the
+dependency rules.
 
-Lo siguiente es la **Fase 2**: parser DocMark, writer `.docx` y el comando `roundtrip`.
+Next up is **Phase 3**: spreadsheets (`.xlsx` / `.xls` ⇄ DocMark).
 
-## 2. Documentos que debes leer antes de implementar
+## 2. Documents you must read before implementing
 
-Orden de lectura obligatorio:
+Mandatory reading order:
 
-1. `docs/plan-desarrollo.md` — el plan por fases. **Identifica en qué fase está el proyecto
-   antes de escribir nada.** No implementes elementos de fases futuras.
-2. `docs/arquitectura.md` — estructura del workspace, modelo IR, contratos entre crates.
-3. `docs/especificacion-docmark.md` — el formato Markdown extendido. Es un contrato:
-   cualquier cambio requiere subir la versión del campo `docmark` del front matter y
-   documentar la migración.
-4. `docs/analisis-tecnico.md` — por qué se eligió cada librería. No sustituyas una
-   dependencia clave (calamine, docx-rs, rmcp, comrak…) sin dejar constancia escrita del
-   motivo en ese documento.
-5. `kb/` — base de conocimiento de lo **ya construido**: resumen de las fases cerradas,
-   estructura real del código, decisiones técnicas con su motivo, y las consideraciones para
-   la fase que vayas a abordar. Empieza por `kb/README.md`. Si tu cambio altera la estructura
-   o toma una decisión técnica no obvia, actualízala en el mismo PR.
+1. `docs/development-plan.md` — the phased plan. **Identify which phase the
+   project is in before writing anything.** Do not implement items from future
+   phases.
+2. `docs/architecture.md` — workspace structure, IR model, contracts between
+   crates.
+3. `docs/docmark-specification.md` — the extended Markdown format. It is a
+   contract: any change requires bumping the `docmark` field version in the
+   front matter and documenting the migration.
+4. `docs/technical-analysis.md` — why each library was chosen. Do not replace a
+   key dependency (calamine, docx-rs, rmcp, comrak…) without leaving a written
+   record of the reason in that document.
+5. `kb/` — knowledge base of what is **already built**: summary of closed
+   phases, real code structure, technical decisions with their rationale, and
+   considerations for the phase you are about to tackle. Start with
+   `kb/README.md`. If your change alters the structure or takes a non-obvious
+   technical decision, update it in the same PR.
 
-## 3. Estructura del repositorio (objetivo)
+## 3. Repository structure (target)
 
 ```
 docsai/
-├── Cargo.toml                # workspace raíz
+├── Cargo.toml                # root workspace
 ├── crates/
-│   ├── docsai-model/         # IR: modelo de documento intermedio (sin I/O, sin deps pesadas)
-│   ├── docsai-docmark/       # serializador + parser de DocMark (IR ⇄ Markdown extendido)
-│   ├── docsai-office/        # lectores/escritores OOXML: docx, xlsx (+ xls, doc lectura)
-│   ├── docsai-odf/           # lectores/escritores ODF: odt, ods
-│   ├── docsai-convert/       # orquestación: pipelines, detección de formato, assets, informes de fidelidad
-│   ├── docsai-cli/           # binario CLI (clap)
-│   └── docsai-mcp/           # servidor MCP stdio (rmcp)
-├── docs/                     # documentación de diseño (este conjunto)
-├── corpus/                   # documentos de prueba versionados (ver §6)
-└── tests/                    # tests de integración y round-trip
+│   ├── docsai-model/         # IR: intermediate document model (no I/O, no heavy deps)
+│   ├── docsai-docmark/       # DocMark serializer + parser (IR ⇄ extended Markdown)
+│   ├── docsai-office/        # OOXML readers/writers: docx, xlsx (+ xls, doc read)
+│   ├── docsai-odf/           # ODF readers/writers: odt, ods
+│   ├── docsai-convert/       # orchestration: pipelines, format detection, assets, fidelity reports
+│   ├── docsai-cli/           # CLI binary (clap)
+│   └── docsai-mcp/           # MCP stdio server (rmcp)
+├── docs/                     # design documentation (this set)
+├── corpus/                   # versioned test documents (see §6)
+└── tests/                    # integration and round-trip tests
 ```
 
-Reglas de dependencia entre crates (violarlas es un error de arquitectura):
+Dependency rules between crates (violating them is an architecture error):
 
-- `docsai-model` no depende de ningún otro crate del workspace.
-- `docsai-docmark`, `docsai-office`, `docsai-odf` dependen **solo** de `docsai-model`.
-- `docsai-convert` depende de los cuatro anteriores. `docsai-cli` y `docsai-mcp`
-  dependen solo de `docsai-convert` (y `docsai-model` para tipos).
-- Ningún crate de formato importa a otro crate de formato.
+- `docsai-model` depends on no other crate in the workspace.
+- `docsai-docmark`, `docsai-office`, `docsai-odf` depend **only** on `docsai-model`.
+- `docsai-convert` depends on the four above. `docsai-cli` and `docsai-mcp`
+  depend only on `docsai-convert` (and `docsai-model` for types).
+- No format crate imports another format crate.
 
-## 4. Comandos de trabajo
+## 4. Working commands
 
-Cuando exista el workspace, estos son los comandos canónicos (deben mantenerse verdes):
+When the workspace exists, these are the canonical commands (they must stay green):
 
 ```bash
 cargo build --workspace
-cargo test --workspace                 # unit + integración + round-trip
+cargo test --workspace                 # unit + integration + round-trip
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo run -p docsai-cli -- convert corpus/docx/basic-styles.docx -o /tmp/out.dmk.md
-python3 corpus/generate.py --check     # el corpus es generado; CI comprueba que está al día
+python3 corpus/generate.py --check     # the corpus is generated; CI checks it is up to date
 ```
 
-Actualizar un golden es un acto deliberado, y su diff se revisa a mano:
+Updating a golden is a deliberate act, and its diff is reviewed by hand:
 
 ```bash
 DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens
 ```
 
-CI (GitHub Actions) ejecuta la matriz `{ubuntu-latest, windows-latest, macos-latest}` ×
-`{stable}`. Un PR no se fusiona con CI en rojo.
+CI (GitHub Actions) runs the matrix `{ubuntu-latest, windows-latest, macos-latest}` ×
+`{stable}`. A PR is not merged with red CI.
 
-## 5. Convenciones de código
+## 5. Code conventions
 
-- **Edición Rust 2021+ / toolchain stable**. Nada de `nightly` en el árbol principal.
-- `rustfmt` por defecto y `clippy -D warnings`. Sin excepciones sin comentario `#[allow]` justificado.
-- Errores: `thiserror` en las bibliotecas, `anyhow` solo en los binarios (`docsai-cli`, `docsai-mcp`).
-- Logging: `tracing`. En el servidor MCP **jamás escribir en stdout** salvo el protocolo
-  (stdout es el canal JSON-RPC); logs siempre a stderr.
-- Nombres de código, mensajes de commit y comentarios de código en **inglés**;
-  la documentación de `docs/` se mantiene en español.
-- Commits: Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`),
-  con ámbito de crate cuando aplique: `feat(office): read numbering.xml`.
-- `unsafe` prohibido salvo justificación documentada en el PR (no debería ser necesario).
-- Toda función pública de los crates de biblioteca lleva doc-comment con ejemplo cuando sea razonable.
+- **Rust edition 2021+ / stable toolchain**. No `nightly` in the main tree.
+- Default `rustfmt` and `clippy -D warnings`. No exceptions without a justified
+  `#[allow]` comment.
+- Errors: `thiserror` in libraries, `anyhow` only in binaries (`docsai-cli`,
+  `docsai-mcp`).
+- Logging: `tracing`. In the MCP server **never write to stdout** except for the
+  protocol (stdout is the JSON-RPC channel); logs always go to stderr.
+- **Hard language rule: everything is English.** All documentation (`docs/`,
+  `kb/`, `README.md`, `AGENTS.md`), code identifiers, commit messages, and code
+  comments **must** be in English. Do not write Spanish (or any other language)
+  in those places.
+- Commits: Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`,
+  `chore:`), with crate scope when applicable: `feat(office): read numbering.xml`.
+- `unsafe` is forbidden unless justified in the PR documentation (it should not
+  be necessary).
+- Every public function in library crates has a doc-comment with an example when
+  reasonable.
 
-## 6. Estrategia de pruebas (resumen; detalle en el plan §Fase 0 y §Fase 8)
+## 6. Testing strategy (summary; detail in the plan §Phase 0 and §Phase 8)
 
-- **Corpus versionado** en `corpus/`: documentos pequeños creados a propósito, un rasgo
-  por fichero (`basic-styles.docx`, `nested-lists.docx`, `formulas-basic.xlsx`…). Nunca
-  añadir documentos con datos reales o privados.
-- **Golden files**: cada documento del corpus tiene su DocMark esperado al lado
-  (`.expected.dmk.md`). Los tests comparan la salida con el golden; actualizar un golden
-  requiere revisar el diff a mano.
-- **Round-trip tests**: `Office → DocMark → Office → DocMark` debe producir DocMark
-  idéntico en la segunda pasada (idempotencia). La comparación primera-vs-segunda pasada
-  del fichero Office se hace a nivel de IR normalizado, no de bytes.
-- **Fuzzing** (`cargo-fuzz`) sobre los parsers de entrada a partir de la Fase 8; los
-  parsers nunca deben entrar en pánico con entrada corrupta: siempre `Err`, nunca `panic!`.
+- **Versioned corpus** in `corpus/`: small documents created on purpose, one
+  trait per file (`basic-styles.docx`, `nested-lists.docx`,
+  `formulas-basic.xlsx`…). Never add documents with real or private data.
+- **Golden files**: each corpus document has its expected DocMark beside it
+  (`.expected.dmk.md`). Tests compare output against the golden; updating a
+  golden requires reviewing the diff by hand.
+- **Round-trip tests**: `Office → DocMark → Office → DocMark` must produce
+  identical DocMark on the second pass (idempotence). First-vs-second pass
+  comparison of the Office file is done at the normalized IR level, not bytes.
+- **Fuzzing** (`cargo-fuzz`) on input parsers from Phase 8 onward; parsers must
+  never panic on corrupt input: always `Err`, never `panic!`.
 
-## 7. Reglas específicas para agentes de IA
+## 7. Specific rules for AI agents
 
-1. **No amplíes el alcance.** Si la tarea pide la Fase N, no adelantes trabajo de la fase
-   N+1 "ya que estás". El plan define el orden por dependencias reales.
-2. **No cambies la especificación DocMark para hacer pasar un test.** Si el formato no
-   puede representar algo, documenta la limitación y usa el mecanismo `raw-block` descrito
-   en la especificación.
-3. **Nunca degrades la fidelidad en silencio.** Toda pérdida de información en una
-   conversión debe emitir una advertencia estructurada (ver `ConversionReport` en
-   `docs/arquitectura.md`).
-4. **No añadas dependencias pesadas sin justificación.** El objetivo es un binario único y
-   razonablemente pequeño. Antes de añadir un crate: ¿está mantenido?, ¿es pure-Rust?,
-   ¿qué añade al tamaño del binario? Deja la justificación en el PR.
-5. **Documenta al terminar.** Si tu cambio altera comportamiento visible (CLI, formato,
-   tools MCP), actualiza README.md y el documento de `docs/` correspondiente en el mismo PR.
-6. **Verifica en las tres plataformas mentales.** Rutas con `std::path` (nunca concatenar
-   con `/`), finales de línea (el serializador DocMark emite siempre `\n`; el parser acepta
-   `\r\n`), y nada de dependencias de herramientas POSIX en el código de producción.
-7. Trabaja en ramas y push a la rama que se te indique; no hagas push a `main`.
+1. **Do not expand scope.** If the task asks for Phase N, do not advance Phase
+   N+1 work "while you are at it". The plan defines order by real dependencies.
+2. **Do not change the DocMark specification to make a test pass.** If the
+   format cannot represent something, document the limitation and use the
+   `raw-block` mechanism described in the specification.
+3. **Never degrade fidelity silently.** Every information loss in a conversion
+   must emit a structured warning (see `ConversionReport` in
+   `docs/architecture.md`).
+4. **Do not add heavy dependencies without justification.** The goal is a single,
+   reasonably small binary. Before adding a crate: is it maintained? is it
+   pure-Rust? what does it add to binary size? Leave the justification in the PR.
+5. **Document when you finish.** If your change alters visible behavior (CLI,
+   format, MCP tools), update README.md and the corresponding document under
+   `docs/` in the same PR.
+6. **Verify against the three mental platforms.** Paths with `std::path` (never
+   concatenate with `/`), line endings (the DocMark serializer always emits
+   `\n`; the parser accepts `\r\n`), and no POSIX tool dependencies in production
+   code.
+7. Work on branches and push to the branch you are told; do not push to `main`.
 
-## 8. Definición de "hecho" (Definition of Done)
+## 8. Definition of Done
 
-Una tarea/fase se considera terminada cuando:
+A task/phase is considered finished when:
 
-- [ ] Compila y pasa `cargo test --workspace` en las tres plataformas de CI.
-- [ ] `clippy` y `fmt` limpios.
-- [ ] Tests nuevos cubren el comportamiento añadido (incluidos casos de error).
-- [ ] Golden files y corpus actualizados si aplica.
-- [ ] Documentación actualizada (README, docs/, `--help` de la CLI).
-- [ ] Los criterios de aceptación de la fase correspondiente en `docs/plan-desarrollo.md`
-      están marcados y verificados.
+- [ ] It compiles and passes `cargo test --workspace` on all three CI platforms.
+- [ ] `clippy` and `fmt` are clean.
+- [ ] New tests cover the added behavior (including error cases).
+- [ ] Golden files and corpus are updated if applicable.
+- [ ] Documentation is updated (README, docs/, CLI `--help`).
+- [ ] The acceptance criteria for the corresponding phase in
+      `docs/development-plan.md` are marked and verified.

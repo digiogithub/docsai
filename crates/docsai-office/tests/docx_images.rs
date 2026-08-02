@@ -1,4 +1,4 @@
-//! The image half of the Fase 1 acceptance criteria: floating, transformed and
+//! The image half of the Phase 1 acceptance criteria: floating, transformed and
 //! duplicated pictures must reach the IR with their geometry intact.
 
 use docsai_model::assets::AssetStore;

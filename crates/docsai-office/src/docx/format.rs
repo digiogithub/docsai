@@ -90,7 +90,8 @@ pub fn paragraph_props(ppr: &Element) -> ParaProps {
                 // `auto` counts in 240ths of a line; the IR stores 1000ths.
                 Some("exact") => LineHeight::Exact(Length::from_twips(line)),
                 Some("atLeast") => LineHeight::AtLeast(Length::from_twips(line)),
-                _ => LineHeight::Multiple((line * 1000 / 240) as i32),
+                // Round half-up so writer↔reader stays stable for common multiples.
+                _ => LineHeight::Multiple(((line * 1000 + 120) / 240) as i32),
             });
         }
     }

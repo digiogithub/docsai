@@ -1,6 +1,6 @@
 //! Spreadsheet side of the IR.
 //!
-//! Populated from Fase 3 onwards; defined now because [`CellRef`] is part of
+//! Populated from Phase 3 onwards; defined now because [`CellRef`] is part of
 //! the shared image model and because the IR validator must know the
 //! `Workbook`-only invariants from day one.
 

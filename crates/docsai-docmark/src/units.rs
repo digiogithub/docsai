@@ -1,7 +1,7 @@
 //! How lengths and numbers appear in DocMark.
 //!
 //! Centralised so that every attribute renders a length the same way, which
-//! the idempotence test of Fase 2 will depend on.
+//! the idempotence test of Phase 2 will depend on.
 
 use docsai_model::units::{trim_float, Length};
 

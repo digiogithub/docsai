@@ -1,4 +1,4 @@
-//! Fase 0 acceptance criterion: the IR serialises to JSON and back
+//! Phase 0 acceptance criterion: the IR serializes to JSON and back
 //! identically. Checked with hand-written documents covering every node kind
 //! and with `proptest` over randomly generated IRs.
 
@@ -13,8 +13,8 @@ use docsai_model::Document;
 use proptest::prelude::*;
 
 fn assert_json_round_trip(doc: &Document) {
-    let json = serde_json::to_string(doc).expect("serialises");
-    let back: Document = serde_json::from_str(&json).expect("deserialises");
+    let json = serde_json::to_string(doc).expect("serializes");
+    let back: Document = serde_json::from_str(&json).expect("deserializes");
     assert_eq!(doc, &back, "round-trip changed the document\n{json}");
     // Serialising the reconstructed value must produce the very same bytes.
     assert_eq!(json, serde_json::to_string(&back).unwrap());

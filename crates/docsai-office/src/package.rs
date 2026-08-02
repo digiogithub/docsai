@@ -8,7 +8,7 @@ use crate::xml::Element;
 
 /// Cap on the total uncompressed size of a package.
 ///
-/// A first line of defence against decompression bombs; Fase 8 hardens this
+/// A first line of defence against decompression bombs; Phase 8 hardens this
 /// further with a dedicated adversarial suite.
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 /// Cap on a single part.
@@ -21,6 +21,37 @@ pub struct Package {
 }
 
 impl Package {
+    /// Builds an empty package.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Inserts or replaces a part.
+    pub fn insert(&mut self, name: impl Into<String>, bytes: impl Into<Vec<u8>>) {
+        self.parts.insert(name.into(), bytes.into());
+    }
+
+    /// Writes the package as a ZIP archive with deterministic part order.
+    pub fn write_to<W: std::io::Write + std::io::Seek>(
+        &self,
+        writer: W,
+    ) -> Result<(), crate::write_error::WriteError> {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(writer);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .last_modified_time(
+                zip::DateTime::from_date_and_time(2020, 1, 1, 0, 0, 0)
+                    .unwrap_or_else(|_| zip::DateTime::default_for_write()),
+            );
+        for (name, bytes) in &self.parts {
+            zip.start_file(name.as_str(), options)?;
+            zip.write_all(bytes)?;
+        }
+        zip.finish()?;
+        Ok(())
+    }
+
     /// Reads every part of the ZIP container.
     pub fn open<R: Read + Seek>(reader: R) -> Result<Package, ReadError> {
         let mut zip = zip::ZipArchive::new(reader)?;
@@ -171,7 +202,7 @@ impl Relationships {
 /// Normalises a ZIP member name, rejecting anything that escapes the package.
 ///
 /// Media file names inside a document are attacker-controlled, so a member
-/// called `../../etc/passwd` must never become a part name (arquitectura §3.2).
+/// called `../../etc/passwd` must never become a part name (architecture §3.2).
 fn normalise_part_name(raw: &str) -> Option<String> {
     let raw = raw.replace('\\', "/");
     if raw.starts_with('/') || raw.contains(':') {
