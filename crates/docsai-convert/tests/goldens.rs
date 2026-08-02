@@ -1,6 +1,6 @@
-//! Golden tests over the whole docx corpus (`AGENTS.md` §6).
+//! Golden tests over the docx and xlsx corpora (`AGENTS.md` §6).
 //!
-//! Each `corpus/docx/<name>.docx` has its expected DocMark beside it as
+//! Each corpus document has its expected DocMark beside it as
 //! `<name>.expected.dmk.md`. Updating a golden is a deliberate act:
 //!
 //! ```text
@@ -12,20 +12,20 @@
 use std::path::{Path, PathBuf};
 
 use docsai_docmark::{Fidelity, Options};
-use docsai_model::{ConversionReport, Document, MemoryAssetStore};
+use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
 
-fn corpus_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/docx")
+fn corpus_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
 }
 
-fn documents() -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(corpus_dir())
-        .expect("the corpus is present")
+fn documents(subdir: &str, extension: &str) -> Vec<PathBuf> {
+    let dir = corpus_root().join(subdir);
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
         .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("docx"))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(extension))
         .collect();
     paths.sort();
-    assert!(paths.len() >= 14, "only {} documents found", paths.len());
     paths
 }
 
@@ -34,8 +34,19 @@ fn documents() -> Vec<PathBuf> {
 fn convert(path: &Path, fidelity: Fidelity) -> (String, ConversionReport, MemoryAssetStore) {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut assets = MemoryAssetStore::new();
-    let (document, mut report) = docsai_office::read_docx(file, &mut assets)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let (document, mut report, source_format) = match ext {
+        "xlsx" => {
+            let (document, report) = docsai_office::read_xlsx(file, &mut assets)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            (document, report, Format::Xlsx)
+        }
+        _ => {
+            let (document, report) = docsai_office::read_docx(file, &mut assets)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            (document, report, Format::Docx)
+        }
+    };
 
     if let Err(errors) = docsai_model::validate::validate(&document) {
         panic!("{}: invalid IR: {errors:?}", path.display());
@@ -44,7 +55,7 @@ fn convert(path: &Path, fidelity: Fidelity) -> (String, ConversionReport, Memory
     let options = Options {
         fidelity,
         assets_dir: "assets".into(),
-        source_format: docsai_model::Format::Docx,
+        source_format,
     };
     let (markdown, write_report) = docsai_docmark::serialize(&document, &assets, &options);
     report.merge(write_report);
@@ -56,14 +67,13 @@ fn golden_path(document: &Path) -> PathBuf {
     document.with_file_name(format!("{stem}.expected.dmk.md"))
 }
 
-#[test]
-fn the_corpus_matches_its_goldens() {
+fn assert_goldens(docs: &[PathBuf]) {
     let updating = std::env::var_os("DOCSAI_UPDATE_GOLDENS").is_some();
     let mut mismatches = Vec::new();
 
-    for document in documents() {
-        let (markdown, _, _) = convert(&document, Fidelity::Full);
-        let golden = golden_path(&document);
+    for document in docs {
+        let (markdown, _, _) = convert(document, Fidelity::Full);
+        let golden = golden_path(document);
         if updating {
             std::fs::write(&golden, &markdown).expect("writes the golden");
             continue;
@@ -88,6 +98,20 @@ fn the_corpus_matches_its_goldens() {
     );
 }
 
+#[test]
+fn the_docx_corpus_matches_its_goldens() {
+    let docs = documents("docx", "docx");
+    assert!(docs.len() >= 14, "only {} docx documents found", docs.len());
+    assert_goldens(&docs);
+}
+
+#[test]
+fn the_xlsx_corpus_matches_its_goldens() {
+    let docs = documents("xlsx", "xlsx");
+    assert!(docs.len() >= 6, "only {} xlsx documents found", docs.len());
+    assert_goldens(&docs);
+}
+
 fn first_difference(expected: &str, actual: &str) -> String {
     for (index, (want, got)) in expected.lines().zip(actual.lines()).enumerate() {
         if want != got {
@@ -103,7 +127,10 @@ fn first_difference(expected: &str, actual: &str) -> String {
 
 #[test]
 fn serialisation_is_deterministic() {
-    for document in documents() {
+    for document in documents("docx", "docx")
+        .into_iter()
+        .chain(documents("xlsx", "xlsx"))
+    {
         let (first, _, _) = convert(&document, Fidelity::Full);
         let (second, _, _) = convert(&document, Fidelity::Full);
         assert_eq!(
@@ -117,7 +144,10 @@ fn serialisation_is_deterministic() {
 
 #[test]
 fn every_document_uses_unix_line_endings_and_no_bom() {
-    for document in documents() {
+    for document in documents("docx", "docx")
+        .into_iter()
+        .chain(documents("xlsx", "xlsx"))
+    {
         let (markdown, _, _) = convert(&document, Fidelity::Full);
         assert!(
             !markdown.contains('\r'),
@@ -146,7 +176,7 @@ fn plain_fidelity_is_clean_commonmark() {
     options.extension.strikethrough = true;
     options.extension.autolink = true;
 
-    for document in documents() {
+    for document in documents("docx", "docx") {
         let (markdown, _, _) = convert(&document, Fidelity::Plain);
         let name = document.display();
 
@@ -185,7 +215,7 @@ fn plain_fidelity_is_clean_commonmark() {
 
 #[test]
 fn standard_fidelity_drops_raw_blocks_and_says_so() {
-    let document = corpus_dir().join("fields-raw.docx");
+    let document = corpus_root().join("docx/fields-raw.docx");
     let (_full, full_report, _) = convert(&document, Fidelity::Full);
     let (standard, standard_report, _) = convert(&document, Fidelity::Standard);
 
@@ -242,6 +272,24 @@ fn a_fifty_page_document_converts_quickly_with_few_raw_blocks() {
         elapsed < budget,
         "conversion took {elapsed:?}, over the {budget:?} budget"
     );
+}
+
+/// Office → DocMark → Office → DocMark idempotence for the xlsx corpus.
+#[test]
+fn xlsx_roundtrip_is_idempotent() {
+    for document in documents("xlsx", "xlsx") {
+        let outcome = docsai_convert::roundtrip_file(
+            &document,
+            None,
+            &docsai_convert::ConvertOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{}: {e}", document.display()));
+        assert!(
+            outcome.identical,
+            "{} second DocMark differs from the first",
+            document.display()
+        );
+    }
 }
 
 /// Writes a synthetic document of roughly 50 pages: paragraphs, headings and

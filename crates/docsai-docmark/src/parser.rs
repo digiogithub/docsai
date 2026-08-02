@@ -50,6 +50,18 @@ pub fn parse_with_base(
         None => FrontMatter::default(),
     };
 
+    if crate::sheet_parser::looks_like_workbook(&fm, body) {
+        let doc = crate::sheet_parser::parse_workbook(
+            body,
+            body_line,
+            fm,
+            base_dir,
+            assets,
+            &mut report,
+        )?;
+        return Ok((doc, report));
+    }
+
     let mut parser = BodyParser {
         base_dir: base_dir.map(Path::to_path_buf),
         assets,
@@ -777,6 +789,23 @@ impl<'a> BodyParser<'a> {
                 asset_id = Some(self.assets.put(&bytes)?);
             }
         }
+        // Assets already present in the store (round-trip via MemoryAssetStore).
+        if asset_id.is_none() {
+            let file_name = Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+            for id in self.assets.ids() {
+                if self
+                    .assets
+                    .info(&id)
+                    .is_some_and(|info| info.file_name == file_name)
+                {
+                    asset_id = Some(id);
+                    break;
+                }
+            }
+        }
 
         let width = attrs
             .get("width")
@@ -1400,8 +1429,42 @@ fn parse_anchor(attrs: &Attrs) -> Anchor {
                     .unwrap_or(Length::ZERO),
             ),
         },
+        "two-cell" => {
+            let from = parse_cell_anchor_attr(attrs.get("from"), attrs.get("from-offset"));
+            let to = parse_cell_anchor_attr(attrs.get("to"), attrs.get("to-offset"));
+            Anchor::SheetTwoCell {
+                from,
+                to,
+                move_with_cells: attrs.get("move-with-cells") != Some("false"),
+                size_with_cells: attrs.get("size-with-cells") == Some("true"),
+            }
+        }
+        "one-cell" => Anchor::SheetOneCell {
+            from: parse_cell_anchor_attr(attrs.get("from"), attrs.get("from-offset")),
+        },
         _ => Anchor::Inline,
     }
+}
+
+fn parse_cell_anchor_attr(
+    cell: Option<&str>,
+    offset: Option<&str>,
+) -> docsai_model::image::CellAnchor {
+    use docsai_model::image::CellAnchor;
+    use docsai_model::sheet::CellRef;
+    let cell = cell
+        .and_then(CellRef::parse_a1)
+        .unwrap_or(CellRef::new(0, 0));
+    let (ox, oy) = match offset {
+        Some(o) => {
+            let mut parts = o.split(',');
+            let x = parts.next().and_then(Length::parse).unwrap_or(Length::ZERO);
+            let y = parts.next().and_then(Length::parse).unwrap_or(Length::ZERO);
+            (x, y)
+        }
+        None => (Length::ZERO, Length::ZERO),
+    };
+    CellAnchor::new(cell, ox, oy)
 }
 
 fn parse_rel(v: &str) -> RelBase {

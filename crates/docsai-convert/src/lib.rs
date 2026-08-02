@@ -72,15 +72,15 @@ pub const SUPPORT: &[FormatSupport] = &[
     },
     FormatSupport {
         format: Format::Xlsx,
-        read: false,
-        write: false,
-        note: "arrives in Phase 3",
+        read: true,
+        write: true,
+        note: "Phase 3",
     },
     FormatSupport {
         format: Format::Xls,
-        read: false,
+        read: true,
         write: false,
-        note: "reading arrives in Phase 3; writing is out of scope",
+        note: "Phase 3 read-only; writing is out of scope",
     },
     FormatSupport {
         format: Format::Odt,

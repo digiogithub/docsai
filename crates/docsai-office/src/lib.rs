@@ -1,8 +1,8 @@
 //! Office readers and writers for docsai.
 //!
-//! Phase 1 lands the `.docx` reader; `.xlsx`/`.xls` arrive in Phase 3 and `.doc`
-//! in Phase 5. The crate depends on `docsai-model` and on nothing else in the
-//! workspace (`AGENTS.md` §3).
+//! Phase 1 lands the `.docx` reader; Phase 2 the docx writer; Phase 3 adds
+//! `.xlsx` read/write and `.xls` read. The crate depends on `docsai-model` and
+//! on nothing else in the workspace (`AGENTS.md` §3).
 //!
 //! ```no_run
 //! use docsai_model::MemoryAssetStore;
@@ -20,6 +20,8 @@ mod docx;
 mod error;
 mod package;
 mod write_error;
+mod xls;
+mod xlsx;
 mod xml;
 
 pub use detect::{detect, DetectScore};
@@ -31,10 +33,10 @@ use docsai_model::{ConversionReport, Document, Format};
 use std::io::{Read, Seek};
 
 /// Formats this crate can read today.
-pub const READABLE: &[Format] = &[Format::Docx];
+pub const READABLE: &[Format] = &[Format::Docx, Format::Xlsx, Format::Xls];
 
 /// Formats this crate can write today.
-pub const WRITABLE: &[Format] = &[Format::Docx];
+pub const WRITABLE: &[Format] = &[Format::Docx, Format::Xlsx];
 
 /// Reads a `.docx` document.
 pub fn read_docx<R: Read + Seek>(
@@ -42,6 +44,22 @@ pub fn read_docx<R: Read + Seek>(
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
     docx::read(reader, assets)
+}
+
+/// Reads a `.xlsx` workbook.
+pub fn read_xlsx<R: Read + Seek>(
+    reader: R,
+    assets: &mut dyn AssetStore,
+) -> Result<(Document, ConversionReport), ReadError> {
+    xlsx::read(reader, assets)
+}
+
+/// Reads a legacy `.xls` workbook (values and formulas only).
+pub fn read_xls<R: Read + Seek>(
+    reader: R,
+    assets: &mut dyn AssetStore,
+) -> Result<(Document, ConversionReport), ReadError> {
+    xls::read(reader, assets)
 }
 
 /// Reads any Office document this crate supports.
@@ -52,9 +70,11 @@ pub fn read<R: Read + Seek>(
 ) -> Result<(Document, ConversionReport), ReadError> {
     match format {
         Format::Docx => read_docx(reader, assets),
+        Format::Xlsx => read_xlsx(reader, assets),
+        Format::Xls => read_xls(reader, assets),
         other => Err(ReadError::WrongShape {
             part: other.to_string(),
-            expected: "a format supported in this phase (docx)".into(),
+            expected: "a format supported in this phase (docx, xlsx, xls)".into(),
         }),
     }
 }
@@ -68,6 +88,15 @@ pub fn write_docx<W: std::io::Write + std::io::Seek>(
     docx::write::write_docx(document, assets, writer)
 }
 
+/// Writes a `.xlsx` workbook.
+pub fn write_xlsx<W: std::io::Write + std::io::Seek>(
+    document: &Document,
+    assets: &dyn AssetStore,
+    writer: W,
+) -> Result<ConversionReport, WriteError> {
+    xlsx::write::write_xlsx(document, assets, writer)
+}
+
 /// Writes any Office document this crate supports.
 pub fn write<W: std::io::Write + std::io::Seek>(
     format: Format,
@@ -77,6 +106,7 @@ pub fn write<W: std::io::Write + std::io::Seek>(
 ) -> Result<ConversionReport, WriteError> {
     match format {
         Format::Docx => write_docx(document, assets, writer),
+        Format::Xlsx => write_xlsx(document, assets, writer),
         other => Err(WriteError::Unsupported(other.to_string())),
     }
 }

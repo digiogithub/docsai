@@ -223,16 +223,17 @@ pub fn convert_file(
                 report,
             })
         }
-        Format::Docx => {
+        Format::Docx | Format::Xlsx => {
+            let ext = target.as_str();
             let output = output.ok_or_else(|| {
-                ConvertError::Invalid("writing .docx requires an --output path".into())
+                ConvertError::Invalid(format!("writing .{ext} requires an --output path"))
             })?;
             ensure_parent(output)?;
             let file = File::create(output).map_err(|source| ConvertError::Io {
                 path: output.display().to_string(),
                 source,
             })?;
-            let write_report = docsai_office::write_docx(&document, &store, file)?;
+            let write_report = docsai_office::write(target, &document, &store, file)?;
             report.merge(write_report);
 
             let (markdown, _) = docsai_docmark::serialize(
@@ -277,12 +278,19 @@ pub fn roundtrip_file(
 
     let mut store1 = MemoryAssetStore::new();
     let (document1, source_format, mut report) = read_path(input, &mut store1)?;
-    if source_format != Format::Docx && source_format != Format::DocMark {
-        return Err(ConvertError::Unsupported {
-            from: source_format,
-            to: Format::Docx,
-        });
-    }
+    let office_format = match source_format {
+        Format::Docx | Format::Xlsx => source_format,
+        Format::DocMark => match &document1 {
+            Document::Workbook(_) => Format::Xlsx,
+            Document::Text(_) => Format::Docx,
+        },
+        other => {
+            return Err(ConvertError::Unsupported {
+                from: other,
+                to: Format::DocMark,
+            })
+        }
+    };
 
     let (md1, r1) = docsai_docmark::serialize(
         &document1,
@@ -304,21 +312,21 @@ pub fn roundtrip_file(
     let (document2, r2) = docsai_docmark::parse(&md1, &mut store2).map_err(ConvertError::Parse)?;
     report.merge(r2);
 
-    let mut docx_buf = Cursor::new(Vec::new());
-    let r3 = docsai_office::write_docx(&document2, &store2, &mut docx_buf)?;
+    let mut office_buf = Cursor::new(Vec::new());
+    let r3 = docsai_office::write(office_format, &document2, &store2, &mut office_buf)?;
     report.merge(r3);
 
     if let Some(output) = output {
         ensure_parent(output)?;
-        std::fs::write(output, docx_buf.get_ref()).map_err(|source| ConvertError::Io {
+        std::fs::write(output, office_buf.get_ref()).map_err(|source| ConvertError::Io {
             path: output.display().to_string(),
             source,
         })?;
     }
 
-    docx_buf.set_position(0);
+    office_buf.set_position(0);
     let mut store3 = MemoryAssetStore::new();
-    let (document3, r4) = docsai_office::read_docx(&mut docx_buf, &mut store3)?;
+    let (document3, r4) = docsai_office::read(office_format, &mut office_buf, &mut store3)?;
     report.merge(r4);
     let (md2, r5) = docsai_docmark::serialize(
         &document3,
@@ -326,7 +334,7 @@ pub fn roundtrip_file(
         &DocMarkOptions {
             fidelity: Fidelity::Full,
             assets_dir: "assets".into(),
-            source_format: Format::Docx,
+            source_format: office_format,
         },
     );
     report.merge(r5);

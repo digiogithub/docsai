@@ -7,7 +7,7 @@
 > **Project status: Phases 0–2 completed.**
 > `.docx` ⇄ DocMark works with styles, lists, tables, images, headers/footers,
 > footnotes, fields and properties. `docsai roundtrip` checks DocMark idempotence
-> after a write/read cycle. Spreadsheets arrive in Phase 3. See
+> after a write/read cycle. Spreadsheets (xlsx ⇄ DocMark, xls read) landed in Phase 3. See
 > [`docs/development-plan.md`](docs/development-plan.md).
 
 ```bash
@@ -25,8 +25,8 @@ cargo run -p docsai-cli -- formats
 |---|---|---|---|---|
 | Word OOXML | `.docx` | ✅ | ✅ | Styles, images, tables, lists, headers/footers, footnotes, fields, properties |
 | Word binary | `.doc` | 🕓 Phase 5 | ➖ | Read only (native parser or LibreOffice headless fallback) |
-| Excel OOXML | `.xlsx` | 🕓 Phase 3 | 🕓 Phase 3 | Values **and formulas**, number formats, merged cells, anchored images |
-| Excel binary | `.xls` | 🕓 Phase 3 | ➖ | Read only (calamine) |
+| Excel OOXML | `.xlsx` | ✅ | ✅ | Values **and formulas**, number formats, merged cells, anchored images |
+| Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | 🕓 Phase 4 | 🕓 Phase 4 | Free equivalent of `.xlsx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
@@ -87,7 +87,7 @@ Planned:
 
 ```bash
 docsai convert report.dmk.md -o report.docx
-docsai convert sales.xlsx -o sales.dmk.md      # Phase 3
+docsai convert sales.xlsx -o sales.dmk.md
 docsai inspect report.docx                      # Phase 6
 docsai roundtrip report.docx
 ```

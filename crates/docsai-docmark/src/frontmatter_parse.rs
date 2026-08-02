@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use docsai_model::list::{ListCatalog, ListDef, ListId, ListLevel, NumFormat};
+use docsai_model::sheet::DefinedName;
 use docsai_model::style::{
     Align, DocDefaults, FontProps, LineHeight, ParaProps, Style, StyleCatalog, StyleId, StyleType,
     Underline, VertAlign,
@@ -21,6 +22,8 @@ pub struct FrontMatter {
     pub page: Option<PageGeometry>,
     pub styles: StyleCatalog,
     pub list_defs: ListCatalog,
+    pub active_sheet: Option<String>,
+    pub defined_names: Vec<DefinedName>,
 }
 
 impl Default for FrontMatter {
@@ -31,6 +34,8 @@ impl Default for FrontMatter {
             page: None,
             styles: StyleCatalog::default(),
             list_defs: ListCatalog::default(),
+            active_sheet: None,
+            defined_names: Vec::new(),
         }
     }
 }
@@ -90,6 +95,22 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
         for (id, value) in lists {
             if let Some(def) = read_list_def(value) {
                 fm.list_defs.insert(ListId::new(id.clone()), def);
+            }
+        }
+    }
+    if let Some(wb) = map.get("workbook").and_then(|v| v.as_map()) {
+        if let Some(active) = wb.get("active-sheet").and_then(|v| v.as_str()) {
+            fm.active_sheet = Some(active.to_string());
+        }
+        if let Some(names) = wb.get("defined-names").and_then(|v| v.as_map()) {
+            for (name, value) in names {
+                if let Some(refers) = value.as_str() {
+                    fm.defined_names.push(DefinedName {
+                        name: name.clone(),
+                        refers_to: refers.to_string(),
+                        sheet: None,
+                    });
+                }
             }
         }
     }

@@ -198,14 +198,12 @@ impl Element {
     }
 
     /// Concatenation of every descendant text node.
-    #[cfg(test)]
     pub fn deep_text(&self) -> String {
         let mut out = String::new();
         self.push_deep_text(&mut out);
         out
     }
 
-    #[cfg(test)]
     fn push_deep_text(&self, out: &mut String) {
         for node in &self.children {
             match node {

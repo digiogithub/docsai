@@ -10,14 +10,14 @@ Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`) and LibreOffice documents
 (`.odt`, `.ods`) to an extended Markdown called **DocMark**, and back, with
 minimal format loss. It is invoked as a CLI or as an **MCP server over stdio**.
 
-**Current status**: **Phases 0–2 are closed** for the core path. The workspace
-has the seven crates, the IR (`docsai-model`), the `.docx` reader **and writer**
-(`docsai-office`), DocMark serialize **and parse** (`docsai-docmark`),
-orchestration (`docsai-convert`), and the CLI with `convert`, `formats` and
-`roundtrip`. `docsai-odf` and `docsai-mcp` remain skeletons that only fix the
-dependency rules.
+**Current status**: **Phases 0–3 are closed** for the core path. The workspace
+has the seven crates, the IR (`docsai-model`), the `.docx` and `.xlsx` readers
+**and writers** plus `.xls` read (`docsai-office`), DocMark serialize **and parse**
+for text and workbooks (`docsai-docmark`), orchestration (`docsai-convert`), and
+the CLI with `convert`, `formats` and `roundtrip`. `docsai-odf` and `docsai-mcp`
+remain skeletons that only fix the dependency rules.
 
-Next up is **Phase 3**: spreadsheets (`.xlsx` / `.xls` ⇄ DocMark).
+Next up is **Phase 4**: ODF (`.odt` / `.ods` ⇄ DocMark).
 
 ## 2. Documents you must read before implementing
 
