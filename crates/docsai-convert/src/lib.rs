@@ -17,7 +17,7 @@ pub mod tokens;
 
 pub use assets::DirAssetStore;
 pub use batch::{convert_batch, BatchOutcome, BatchReport};
-pub use docsai_docmark::{Fidelity, Options as DocMarkOptions};
+pub use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
 pub use inspect::{inspect_path, InspectReport};
 pub use loffice::UseLoffice;
 pub use outline::{outline, outline_path, Outline, OutlineNode};

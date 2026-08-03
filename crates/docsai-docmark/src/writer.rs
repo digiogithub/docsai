@@ -21,7 +21,7 @@ use crate::attrs::Attrs;
 use crate::escape::{escape, TextContext};
 use crate::ids::IdSource;
 use crate::units::{len, number, percent, pt};
-use crate::{Fidelity, Options};
+use crate::{Fidelity, Options, RawPolicy};
 
 /// Serialises a text document body (front matter excluded).
 pub struct Writer<'a> {
@@ -247,6 +247,15 @@ impl<'a> Writer<'a> {
             .set("format", &raw.format)
             .set("part", &raw.part)
             .id(raw.id.as_str());
+        if self.options.raw == RawPolicy::Sidecar {
+            // The bytes are in a file of their own; the body keeps the stub so
+            // a reader sees that something is there without paying for it.
+            attrs.set(
+                "src",
+                crate::raw::sidecar_path(&self.options.assets_dir, raw),
+            );
+            return format!("::: {}\n:::", attrs.render());
+        }
         // The fence must be longer than the longest backtick run inside.
         let longest = raw
             .content

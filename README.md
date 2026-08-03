@@ -98,6 +98,7 @@ docsai convert report.docx --fidelity plain        # clean CommonMark, for LLM/R
 docsai convert report.docx -o out.md --json        # conversion report as JSON
 docsai convert *.docx --out-dir md/                # batch (parallel) into a folder
 docsai convert report.docx --ids never             # DocMark 1.0 output, no node ids
+docsai convert report.docx --raw inline            # raw-block bytes in the body, not aside
 docsai convert report.docx --style-map map.yaml    # publication mode (spec §5)
 docsai convert sheet.xlsx --max-cells 100000       # refuse oversized workbooks
 docsai convert legacy.doc -o legacy.dmk.md         # .doc: LO if installed, else native text
@@ -124,6 +125,14 @@ agent can point at a node and keep pointing at it across edits. Ids are never
 renumbered on insertion and never reused after deletion. `--ids preserve` writes
 back only the ids a document already had, `--ids never` reproduces the DocMark 1.0
 shape. The lossy levels default to `never`, and `plain` never carries ids.
+
+Raw-blocks (`--raw`, spec §7): what no DocMark construct can express — SmartArt,
+OMML maths, signed content — travels as opaque source bytes. By default those
+bytes go to a **sidecar**, `assets/_raw/<id>.xml`, and the body keeps a one-line
+stub naming it, so reading the document does not mean paying for markup nobody can
+edit. `--raw inline` puts the payload back in a fenced block, which is what a
+self-contained single file needs. Either way nothing is lost: a **missing sidecar
+is an error**, not a warning.
 
 Document map (`docsai outline`): the tree of addressable nodes — id, kind, a
 ~60-character preview and the measured cost of each — so an agent can decide what

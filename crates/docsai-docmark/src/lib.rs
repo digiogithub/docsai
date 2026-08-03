@@ -26,6 +26,7 @@ mod frontmatter;
 mod frontmatter_parse;
 mod ids;
 mod parser;
+pub mod raw;
 mod sheet_parser;
 mod sheet_writer;
 pub mod units;
@@ -80,6 +81,42 @@ impl std::fmt::Display for Fidelity {
     }
 }
 
+/// Where the bytes of a raw-block live (spec §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RawPolicy {
+    /// In the body, inside a fenced code block. Self-contained, and the reason
+    /// a document with heavy raw fragments costs what it costs to read.
+    Inline,
+    /// In `<assets>/_raw/<id>.xml`, referenced by `src=`. The body keeps the
+    /// stub, so an agent sees that something is there without paying for it.
+    #[default]
+    Sidecar,
+}
+
+impl RawPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RawPolicy::Inline => "inline",
+            RawPolicy::Sidecar => "sidecar",
+        }
+    }
+
+    /// Parses a `--raw` value.
+    pub fn parse(value: &str) -> Option<RawPolicy> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "inline" => Some(RawPolicy::Inline),
+            "sidecar" => Some(RawPolicy::Sidecar),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for RawPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Serialisation settings.
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -91,6 +128,9 @@ pub struct Options {
     pub assets_dir: String,
     /// The format the document came from, recorded in the front matter.
     pub source_format: Format,
+    /// Where raw-block bytes go (spec §7). Only `full` emits raw-blocks at
+    /// all, so this is inert at the lossy levels.
+    pub raw: RawPolicy,
 }
 
 impl Default for Options {
@@ -100,6 +140,7 @@ impl Default for Options {
             ids: IdPolicy::Assign,
             assets_dir: "assets".into(),
             source_format: Format::Docx,
+            raw: RawPolicy::default(),
         }
     }
 }

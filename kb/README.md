@@ -32,6 +32,8 @@ Practical difference between the two folders:
 | [16 — Phase 10 D](16-phase-10-tokens.md) | `docsai tokens`: tokenizer decision, traced fragments, first budget numbers |
 | [17 — Phase 10 E](17-phase-10-outline.md) | `docsai outline`: the containment tree, previews, the 5 % budget |
 | [18 — Phase 10 F](18-phase-10-token-gate.md) | The corpus token budget golden, the CI gate, and the phase close |
+| [19 — Phase 11 plan](19-phase-11-plan.md) | Projections, raw sidecar, `--fidelity agent`, `read --select`: the increments |
+| [20 — Phase 11 A](20-phase-11-raw-sidecar.md) | Raw-block bytes move to `assets/_raw/`, and a missing sidecar is an error |
 
 ## Status in one line
 

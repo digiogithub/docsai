@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
-use docsai_docmark::{Fidelity, Options as DocMarkOptions};
+use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
 use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
@@ -26,6 +26,9 @@ pub struct ConvertOptions {
     pub style_map: Option<crate::style_map::StyleMap>,
     /// Safety cap on workbook cells; `None` means unlimited.
     pub max_cells: Option<u64>,
+    /// Where raw-block bytes go (spec §7). `sidecar` keeps the document
+    /// readable: the body says what is there, the bytes wait in a file.
+    pub raw: RawPolicy,
     /// What happens to node ids (DocMark 1.1, spec §11.1). `None` takes the
     /// per-fidelity default: `assign` at `full`, `never` otherwise, because
     /// the lossy levels are meant to stay readable.
@@ -41,6 +44,7 @@ impl Default for ConvertOptions {
             use_loffice: crate::UseLoffice::Auto,
             style_map: None,
             max_cells: None,
+            raw: RawPolicy::default(),
             ids: None,
         }
     }
@@ -382,10 +386,12 @@ fn write_document(
                 ids: options.id_policy(),
                 assets_dir: relative_assets_dir(assets_dir, file_output),
                 source_format,
+                raw: options.raw,
             };
             let (markdown, write_report) =
                 docsai_docmark::serialize(&document, store, &docmark_options);
             report.merge(write_report);
+            let sidecars = write_raw_sidecars(&document, &docmark_options, assets_dir)?;
 
             if let Some(output) = file_output {
                 ensure_parent(output)?;
@@ -395,12 +401,14 @@ fn write_document(
                 })?;
             }
 
+            let mut assets_written = store.written().to_vec();
+            assets_written.extend(sidecars);
             Ok(Outcome {
                 source_format,
                 target_format: target,
                 markdown,
                 output_path: file_output.map(Path::to_path_buf),
-                assets_written: store.written().to_vec(),
+                assets_written,
                 report,
             })
         }
@@ -430,6 +438,9 @@ fn write_document(
                     ids: options.id_policy(),
                     assets_dir: relative_assets_dir(assets_dir, Some(output)),
                     source_format,
+                    // This DocMark is the caller's view of what was written, not
+                    // a file on disk: a `src=` here would point at nothing.
+                    raw: RawPolicy::Inline,
                 },
             );
 
@@ -547,6 +558,9 @@ pub fn roundtrip_file(
             ids: IdPolicy::Assign,
             assets_dir: "assets".into(),
             source_format,
+            // The round trip happens in memory, so it has to be self-contained:
+            // there is no directory for a sidecar to live in.
+            raw: RawPolicy::Inline,
         },
     );
     report.merge(r1);
@@ -592,6 +606,7 @@ pub fn roundtrip_file(
             ids: IdPolicy::Assign,
             assets_dir: "assets".into(),
             source_format: office_format,
+            raw: RawPolicy::Inline,
         },
     );
     report.merge(r5);
@@ -665,6 +680,43 @@ fn default_assets_dir(input: &Path, output: Option<&Path>) -> PathBuf {
         .or_else(|| input.parent())
         .unwrap_or_else(|| Path::new("."));
     base.join("assets")
+}
+
+/// Writes the raw-block sidecars this serialisation refers to, and returns the
+/// paths written.
+///
+/// The body already points at these files by name, so a failure here is a
+/// document that references bytes nobody wrote: it is an error, never a
+/// warning. Nothing happens unless the options actually put raw-blocks aside.
+pub(crate) fn write_raw_sidecars(
+    document: &Document,
+    options: &DocMarkOptions,
+    assets_dir: &Path,
+) -> Result<Vec<PathBuf>, ConvertError> {
+    let sidecars = docsai_docmark::raw::raw_sidecars(document, options);
+    if sidecars.is_empty() {
+        return Ok(Vec::new());
+    }
+    let dir = assets_dir.join("_raw");
+    std::fs::create_dir_all(&dir).map_err(|source| ConvertError::Io {
+        path: dir.display().to_string(),
+        source,
+    })?;
+    let mut written = Vec::new();
+    for sidecar in sidecars {
+        // The name is the serializer's, taken from the reference it wrote, so
+        // the file and the `src=` cannot drift apart.
+        let name = sidecar.path.rsplit('/').next().unwrap_or(&sidecar.path);
+        let path = dir.join(name);
+        std::fs::write(&path, format!("{}\n", sidecar.content)).map_err(|source| {
+            ConvertError::Io {
+                path: path.display().to_string(),
+                source,
+            }
+        })?;
+        written.push(path);
+    }
+    Ok(written)
 }
 
 fn relative_assets_dir(assets_dir: &Path, output: Option<&Path>) -> String {

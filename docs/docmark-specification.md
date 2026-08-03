@@ -372,6 +372,19 @@ content…) are preserved opaquely:
 :::
 ````
 
+Since 1.1 the payload may live in a **sidecar** instead, which is the default (`--raw
+sidecar`); `--raw inline` keeps the form above:
+
+```markdown
+::: {#raw-0007 .raw format=ooxml part="word/document.xml" src="assets/_raw/raw-0007.xml"}
+:::
+```
+
+- `src` is relative to the `.dmk.md` file. The name is derived from the id, sanitised: an id
+  comes from the source package, and a package is not a trustworthy source of file names.
+- A **missing sidecar is an error**, never a warning: the raw-block exists to hold what nothing
+  else can hold, so a parser that shrugged it off would be a way to lose data quietly. Parsing a
+  sidecar reference with no base directory is an error for the same reason.
 - The inverse writer re-injects the fragment as-is if the destination matches `format`;
   otherwise it omits it with a warning.
 - A human editor can delete a raw-block knowing they only lose that element.
@@ -475,14 +488,16 @@ the remaining bullets stay a sketch until Phase 11 implements them.
   `assign` at `--fidelity full` and `never` at the lossy levels, which stay readable; `plain` is
   CommonMark and never carries ids whatever is asked for.
 
+#### Implemented in Phase 11
+
+- **Raw-block sidecar** (§7): `src=` in the stub, payload in `assets/_raw/<id>.xml`, `--raw
+  inline|sidecar` with `sidecar` as the default. Inline raw-blocks remain valid.
+
 #### The rest of 1.1 (not yet implemented)
 
 - **Etags**: optional 6-character content hash, `{#s4.b2 etag=a3f9c1}`, over the *normalised*
   node content, so formatting-only changes do not churn it. Used as an edit precondition. The
   hash is **derived from the node, never stored in it**, so it cannot go stale behind an edit.
-- **Raw-block sidecar**: `::: {.raw format=ooxml id=r7}` with no inline payload; the payload
-  lives in `assets/_raw/r7.xml`. Body-inline raw blocks (§7) remain valid and are the default
-  for `--raw inline`.
 - **Attribute-set dictionary**: repeated attribute patterns interned in the front matter and
   referenced as a class (`{.g1}`), with deterministic naming so §8 idempotence still holds.
 - **Fidelity level `agent`** added to §6: editable content as text, everything else collapsed to

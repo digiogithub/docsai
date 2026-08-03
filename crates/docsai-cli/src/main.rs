@@ -6,8 +6,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use docsai_convert::{
-    convert_batch, convert_file, inspect_path, ConvertOptions, Fidelity, StyleMap, UseLoffice,
-    SUPPORT,
+    convert_batch, convert_file, inspect_path, ConvertOptions, Fidelity, RawPolicy, StyleMap,
+    UseLoffice, SUPPORT,
 };
 use docsai_model::addressing::IdPolicy;
 use docsai_model::Format;
@@ -66,6 +66,9 @@ enum Command {
         /// Defaults to `assign` at `--fidelity full` and `never` otherwise.
         #[arg(long, value_name = "MODE")]
         ids: Option<String>,
+        /// Raw-block bytes: `sidecar` (a file per fragment) or `inline`.
+        #[arg(long, default_value = "sidecar", value_name = "MODE")]
+        raw: String,
         /// Where to extract media. Defaults to `assets/` next to the output.
         #[arg(long, value_name = "DIR")]
         assets_dir: Option<PathBuf>,
@@ -284,6 +287,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             to,
             fidelity,
             ids,
+            raw,
             assets_dir,
             style_map,
             max_cells,
@@ -297,6 +301,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             to.as_deref(),
             fidelity,
             ids.as_deref(),
+            raw,
             assets_dir.clone(),
             style_map.as_ref(),
             *max_cells,
@@ -554,6 +559,7 @@ fn run_convert(
     to: Option<&str>,
     fidelity: &str,
     ids: Option<&str>,
+    raw: &str,
     assets_dir: Option<PathBuf>,
     style_map: Option<&PathBuf>,
     max_cells: Option<u64>,
@@ -564,6 +570,8 @@ fn run_convert(
 ) -> anyhow::Result<u8> {
     let fidelity = parse_fidelity(fidelity)?;
     let ids = parse_ids(ids)?;
+    let raw = RawPolicy::parse(raw)
+        .ok_or_else(|| anyhow::anyhow!("unknown --raw `{raw}`; use sidecar or inline"))?;
     let use_loffice = parse_use_loffice(use_loffice)?;
     let target = match to {
         Some(name) => Some(Format::parse(name).ok_or_else(|| {
@@ -578,6 +586,7 @@ fn run_convert(
     let options = ConvertOptions {
         fidelity,
         ids,
+        raw,
         assets_dir,
         target,
         use_loffice,

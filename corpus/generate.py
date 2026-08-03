@@ -976,9 +976,20 @@ def docx_fields_raw() -> None:
           + r("Tabla de contenido generada")
           + '<w:r><w:fldChar w:fldCharType="end"/></w:r>')
     )
+    # OMML: block-level maths, which the IR does not model. It travels as a
+    # raw-block, which is what this fixture exists to exercise end to end.
+    math = (
+        '<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+        "<m:oMath>"
+        "<m:sSup><m:e><m:r><m:t>E</m:t></m:r></m:e>"
+        "<m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup>"
+        "<m:r><m:t> = m c</m:t></m:r>"
+        "</m:oMath></m:oMathPara>"
+    )
     body = (
         p(r("Antes del control de contenido."))
         + sdt
+        + math
         + toc
         + p(r("Fecha: ") + '<w:fldSimple w:instr=" DATE \\@ &quot;dd/MM/yyyy&quot; ">'
             + r("01/01/2026") + "</w:fldSimple>")

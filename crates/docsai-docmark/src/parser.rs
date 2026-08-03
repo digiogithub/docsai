@@ -460,7 +460,7 @@ impl<'a> BodyParser<'a> {
             return Ok(ParsedBlock::Section { attrs, blocks });
         }
         if attrs.has_class("raw") {
-            let raw = parse_raw_block(&attrs, &body)?;
+            let raw = parse_raw_block(&attrs, &body, self.base_dir.as_deref(), line)?;
             self.report.raw_blocks_emitted += 1;
             return Ok(ParsedBlock::Normal(Block::Raw(raw)));
         }
@@ -1607,13 +1607,38 @@ fn apply_table_attrs(table: &mut Table, attrs: &Attrs) {
     }
 }
 
-fn parse_raw_block(attrs: &Attrs, body: &str) -> Result<RawFragment, ParseError> {
+fn parse_raw_block(
+    attrs: &Attrs,
+    body: &str,
+    base_dir: Option<&Path>,
+    line: usize,
+) -> Result<RawFragment, ParseError> {
     let format = attrs.get("format").unwrap_or("ooxml").to_string();
     let part = attrs.get("part").unwrap_or("").to_string();
     let id = attrs
         .id_ref()
         .map(RawId::new)
         .unwrap_or_else(|| RawId::new("raw"));
+    // A sidecar reference: the bytes are in a file, and a missing file is an
+    // error. A raw-block holds what nothing else can hold; losing it quietly
+    // would be the one failure this format refuses (spec §7).
+    if let Some(src) = attrs.get("src") {
+        let Some(base) = base_dir else {
+            return Err(ParseError::unexpected(
+                line,
+                format!("raw-block `{src}` lives in a sidecar, which needs a base directory"),
+            ));
+        };
+        let path = base.join(src);
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| ParseError::io(Some(path.clone()), e))?;
+        return Ok(RawFragment {
+            id,
+            format,
+            part,
+            content: content.trim_end_matches('\n').to_string(),
+        });
+    }
     // Body is a fenced code block
     let mut lines = body.lines();
     let first = lines.next().unwrap_or("");
@@ -2094,6 +2119,7 @@ mod tests {
                 fidelity: crate::Fidelity::Full,
                 assets_dir: "assets".into(),
                 source_format: docsai_model::Format::Docx,
+                raw: crate::RawPolicy::Sidecar,
             },
         );
         assert_eq!(out, md, "serialize(parse(md)) must equal md");
@@ -2117,6 +2143,7 @@ mod tests {
                 fidelity: crate::Fidelity::Full,
                 assets_dir: "assets".into(),
                 source_format: docsai_model::Format::Docx,
+                raw: crate::RawPolicy::Sidecar,
             },
         );
         assert_eq!(out, md, "{name}: serialize(parse(md)) must equal md");

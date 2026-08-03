@@ -43,6 +43,9 @@ Antes del control de contenido.
 
 Contenido dentro de un control de contenido.
 
+::: {#raw-0001 .raw format=ooxml part="word/document.xml" src="assets/_raw/raw-0001.xml"}
+:::
+
 [Tabla de contenido generada]{.field field=TOC instr="TOC \\o \"1-3\" \\h"}
 
 Fecha: [01/01/2026]{.field field=DATE instr="DATE \\@ \"dd/MM/yyyy\""}

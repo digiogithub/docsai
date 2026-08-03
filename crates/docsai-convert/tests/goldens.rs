@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
+use docsai_docmark::raw::RawSidecar;
 use docsai_docmark::{Fidelity, Options};
 use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
 
@@ -40,7 +41,10 @@ fn documents(subdir: &str, extension: &str) -> Vec<PathBuf> {
 
 /// Converts a corpus document, with a stable `assets/` prefix so the golden
 /// does not depend on where the test ran.
-fn convert(path: &Path, fidelity: Fidelity) -> (String, ConversionReport, MemoryAssetStore) {
+fn convert(
+    path: &Path,
+    fidelity: Fidelity,
+) -> (String, ConversionReport, MemoryAssetStore, Vec<RawSidecar>) {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut assets = MemoryAssetStore::new();
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -76,10 +80,26 @@ fn convert(path: &Path, fidelity: Fidelity) -> (String, ConversionReport, Memory
         ids: id_policy(fidelity),
         assets_dir: "assets".into(),
         source_format,
+        raw: docsai_docmark::RawPolicy::Sidecar,
     };
     let (markdown, write_report) = docsai_docmark::serialize(&document, &assets, &options);
     report.merge(write_report);
-    (markdown, report, assets)
+    let sidecars = docsai_docmark::raw::raw_sidecars(&document, &options);
+    (markdown, report, assets, sidecars)
+}
+
+/// Where a raw-block sidecar lives beside a corpus document.
+fn sidecar_path(document: &Path, sidecar: &RawSidecar) -> PathBuf {
+    let name = sidecar.path.rsplit('/').next().unwrap_or(&sidecar.path);
+    document.with_file_name("assets").join("_raw").join(name)
+}
+
+fn write_sidecars(document: &Path, sidecars: &[RawSidecar]) {
+    for sidecar in sidecars {
+        let path = sidecar_path(document, sidecar);
+        std::fs::create_dir_all(path.parent().unwrap()).expect("creates the sidecar directory");
+        std::fs::write(&path, format!("{}\n", sidecar.content)).expect("writes the sidecar");
+    }
 }
 
 fn golden_path(document: &Path) -> PathBuf {
@@ -92,11 +112,22 @@ fn assert_goldens(docs: &[PathBuf]) {
     let mut mismatches = Vec::new();
 
     for document in docs {
-        let (markdown, _, _) = convert(document, Fidelity::Full);
+        let (markdown, _, _, sidecars) = convert(document, Fidelity::Full);
         let golden = golden_path(document);
         if updating {
             std::fs::write(&golden, &markdown).expect("writes the golden");
+            write_sidecars(document, &sidecars);
             continue;
+        }
+        // The golden points at these files by name; a round trip that cannot
+        // find them is not a round trip.
+        for sidecar in &sidecars {
+            let path = sidecar_path(document, sidecar);
+            match std::fs::read_to_string(&path) {
+                Ok(content) if content.trim_end_matches('\n') == sidecar.content => {}
+                Ok(_) => mismatches.push(format!("{}: sidecar content differs", path.display())),
+                Err(_) => mismatches.push(format!("{}: sidecar missing", path.display())),
+            }
         }
         match std::fs::read_to_string(&golden) {
             Ok(expected) if expected == markdown => {}
@@ -167,8 +198,8 @@ fn serialisation_is_deterministic() {
         .chain(documents("odt", "odt"))
         .chain(documents("ods", "ods"))
     {
-        let (first, _, _) = convert(&document, Fidelity::Full);
-        let (second, _, _) = convert(&document, Fidelity::Full);
+        let (first, _, _, _) = convert(&document, Fidelity::Full);
+        let (second, _, _, _) = convert(&document, Fidelity::Full);
         assert_eq!(
             first,
             second,
@@ -186,7 +217,7 @@ fn every_document_uses_unix_line_endings_and_no_bom() {
         .chain(documents("odt", "odt"))
         .chain(documents("ods", "ods"))
     {
-        let (markdown, _, _) = convert(&document, Fidelity::Full);
+        let (markdown, _, _, _) = convert(&document, Fidelity::Full);
         assert!(
             !markdown.contains('\r'),
             "{} contains a CR",
@@ -215,7 +246,7 @@ fn plain_fidelity_is_clean_commonmark() {
     options.extension.autolink = true;
 
     for document in documents("docx", "docx") {
-        let (markdown, _, _) = convert(&document, Fidelity::Plain);
+        let (markdown, _, _, _) = convert(&document, Fidelity::Plain);
         let name = document.display();
 
         assert!(
@@ -254,22 +285,27 @@ fn plain_fidelity_is_clean_commonmark() {
 #[test]
 fn standard_fidelity_drops_raw_blocks_and_says_so() {
     let document = corpus_root().join("docx/fields-raw.docx");
-    let (_full, full_report, _) = convert(&document, Fidelity::Full);
-    let (standard, standard_report, _) = convert(&document, Fidelity::Standard);
+    let (full, _, _, sidecars) = convert(&document, Fidelity::Full);
+    let (standard, standard_report, _, _) = convert(&document, Fidelity::Standard);
 
+    // The fixture has to actually carry one, or this test proves nothing.
+    assert!(
+        !sidecars.is_empty(),
+        "fields-raw.docx no longer produces raw-blocks"
+    );
+    assert!(full.contains("{.raw") || full.contains(".raw "));
     assert!(
         !standard.contains("{.raw"),
         "raw-blocks are a full-only feature"
     );
     assert!(!standard.contains("styles:"), "the catalogue is full-only");
-    assert_eq!(standard_report.raw_blocks_emitted, 0);
     // Whatever `full` preserved as raw, `standard` must report as dropped.
     let dropped = standard_report
         .warnings
         .iter()
         .filter(|w| matches!(w, docsai_model::Warning::RawBlockDropped { .. }))
         .count();
-    assert_eq!(dropped as u32, full_report.raw_blocks_emitted);
+    assert_eq!(dropped, sidecars.len());
 }
 
 /// Phase 1 acceptance criterion: *"A real 50+ page docx converts in
@@ -378,6 +414,7 @@ fn serialize_parse_is_identity_on_docx_goldens() {
                 ids: docsai_model::addressing::IdPolicy::Assign,
                 assets_dir: "assets".into(),
                 source_format: Format::Docx,
+                raw: docsai_docmark::RawPolicy::Sidecar,
             },
         );
         assert_eq!(

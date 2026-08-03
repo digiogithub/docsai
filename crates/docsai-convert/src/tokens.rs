@@ -110,6 +110,7 @@ pub fn token_report_path(
         ids: options.id_policy(),
         assets_dir: "assets".into(),
         source_format,
+        raw: options.raw,
     };
     let mut report = token_report(&doc, &assets, &docmark);
     report.path = Some(input.display().to_string());

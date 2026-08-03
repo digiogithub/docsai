@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Raw-block sidecars** (plan v2 Phase 11): at `--fidelity full` the bytes of a raw-block go
+  to `assets/_raw/<id>.xml` and the body keeps a stub, `::: {.raw … src="assets/_raw/r7.xml"}`.
+  `docsai convert --raw inline|sidecar` (default `sidecar`) chooses; `--raw inline` restores the
+  1.0 form. A missing or unreachable sidecar is a typed error, never a silent loss.
+  `docsai_docmark::raw::raw_sidecars` gives a caller the files a serialisation refers to.
+- Corpus fixture `docx/fields-raw.docx` now carries block-level OMML maths, so the raw-block
+  path — and its sidecar — is exercised end to end by the corpus instead of only by unit tests.
 - **DocMark 1.1 — stable node addressing** (plan v2 Phase 10): addressable nodes carry
   `{#n7}` and the front matter declares `next-id`, a monotonic counter that is never
   renumbered on insertion and never reused after deletion. Ids ride in the attribute
