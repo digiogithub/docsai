@@ -105,6 +105,8 @@ docsai convert legacy.doc --use-loffice never      # force native degraded path
 docsai convert legacy.doc --use-loffice require    # fail if LibreOffice is missing
 docsai inspect report.docx                         # metadata, styles, media, stats
 docsai inspect report.docx --json                  # same, machine-readable
+docsai outline report.docx                         # map of addressable nodes + cost
+docsai outline report.docx --depth 1 --json        # top level only, machine-readable
 docsai tokens report.docx                          # what the document costs an LLM
 docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary
@@ -122,6 +124,18 @@ agent can point at a node and keep pointing at it across edits. Ids are never
 renumbered on insertion and never reused after deletion. `--ids preserve` writes
 back only the ids a document already had, `--ids never` reproduces the DocMark 1.0
 shape. The lossy levels default to `never`, and `plain` never carries ids.
+
+Document map (`docsai outline`): the tree of addressable nodes — id, kind, a
+~60-character preview and the measured cost of each — so an agent can decide what
+*not* to read. The tree follows containment (a footnote hangs from its paragraph,
+a nested list from its parent); heading level shows in the preview. `--depth N`
+keeps the first N levels.
+
+```text
+n1 heading 13 # Informe tecnico de seguimiento
+n2 heading 17 ## 1. Estado de alcance del proyecto
+25 nodes · outline 345 tokens · document 9158 tokens (3.8 %)
+```
 
 Token budget (`docsai tokens`): the cost of the document is **measured** with a
 real BPE tokenizer (`o200k_base`, embedded — no network, no Python), never

@@ -115,6 +115,7 @@ impl<'a> Writer<'a> {
 
         // A single-section document has no `::: {.section}` container to hold
         // an id, so it does not take one (see `for_each_addressable`).
+        let mark = self.ids.mark();
         let id = wrap.then(|| self.ids.take(section)).flatten();
         let body = self.render_blocks(&section.blocks, 0);
         if wrap && !self.plain() {
@@ -131,7 +132,8 @@ impl<'a> Writer<'a> {
             }
             attrs.set("orientation", section.page.orientation.as_str());
             let rendered = format!("::: {}\n{}\n:::", attrs.render(), body.trim_end());
-            self.ids.record(id.as_deref(), NodeKind::Section, &rendered);
+            self.ids
+                .record(id.as_deref(), NodeKind::Section, &rendered, mark);
             self.block(&rendered);
         } else {
             self.block(&body);
@@ -183,19 +185,22 @@ impl<'a> Writer<'a> {
     fn render_block(&mut self, block: &Block, depth: usize) -> String {
         match block {
             Block::Paragraph(p) => {
+                let mark = self.ids.mark();
                 let id = paragraph_is_container(p)
                     .then(|| self.ids.take(p))
                     .flatten();
                 let rendered = self.render_paragraph(p, None, &[], id.clone());
                 self.ids
-                    .record(id.as_deref(), NodeKind::Paragraph, &rendered);
+                    .record(id.as_deref(), NodeKind::Paragraph, &rendered, mark);
                 rendered
             }
             Block::Heading(h) => {
                 let hashes = "#".repeat(h.level.clamp(1, 6) as usize);
+                let mark = self.ids.mark();
                 let id = self.ids.take(h);
                 let rendered = self.render_paragraph(&h.paragraph, Some(&hashes), &[], id.clone());
-                self.ids.record(id.as_deref(), NodeKind::Heading, &rendered);
+                self.ids
+                    .record(id.as_deref(), NodeKind::Heading, &rendered, mark);
                 rendered
             }
             Block::List(list) => self.render_list(list, depth),
@@ -350,6 +355,7 @@ impl<'a> Writer<'a> {
 
     fn render_list(&mut self, list: &List, depth: usize) -> String {
         self.report.stats.lists += 1;
+        let list_mark = self.ids.mark();
         let mut list_id = list_is_addressable(list)
             .then(|| self.ids.take(list))
             .flatten();
@@ -378,12 +384,13 @@ impl<'a> Writer<'a> {
             }
             let body = match (pairs.is_empty(), item.blocks.split_first()) {
                 (false, Some((Block::Paragraph(first), rest))) => {
+                    let first_mark = self.ids.mark();
                     let first_id = paragraph_is_container(first)
                         .then(|| self.ids.take(first))
                         .flatten();
                     let head = self.render_paragraph(first, None, &pairs, first_id.clone());
                     self.ids
-                        .record(first_id.as_deref(), NodeKind::Paragraph, &head);
+                        .record(first_id.as_deref(), NodeKind::Paragraph, &head, first_mark);
                     let tail = self.render_blocks(rest, depth + 1);
                     match rest.first() {
                         None => head,
@@ -406,7 +413,8 @@ impl<'a> Writer<'a> {
             }
         }
         let out = out.trim_end().to_string();
-        self.ids.record(traced_id.as_deref(), NodeKind::List, &out);
+        self.ids
+            .record(traced_id.as_deref(), NodeKind::List, &out, list_mark);
         out
     }
 
@@ -419,9 +427,11 @@ impl<'a> Writer<'a> {
         if table.rows.is_empty() {
             return String::new();
         }
+        let mark = self.ids.mark();
         let id = self.ids.take(table);
         let rendered = self.render_table_body(table, id.clone());
-        self.ids.record(id.as_deref(), NodeKind::Table, &rendered);
+        self.ids
+            .record(id.as_deref(), NodeKind::Table, &rendered, mark);
         rendered
     }
 
@@ -534,6 +544,7 @@ impl<'a> Writer<'a> {
         for row in &table.rows {
             let mut row_attrs = Attrs::new();
             row_attrs.class("row");
+            let row_mark = self.ids.mark();
             let row_id = self.ids.take(row);
             if let Some(id) = row_id.clone() {
                 row_attrs.id(id);
@@ -558,8 +569,12 @@ impl<'a> Writer<'a> {
             }
             out.push_str(":::\n");
             let row_markdown = out[row_start..].to_string();
-            self.ids
-                .record(row_id.as_deref(), NodeKind::TableRow, &row_markdown);
+            self.ids.record(
+                row_id.as_deref(),
+                NodeKind::TableRow,
+                &row_markdown,
+                row_mark,
+            );
         }
         out.push_str(":::");
         out
@@ -602,6 +617,7 @@ impl<'a> Writer<'a> {
             }
             Inline::Footnote(note) => {
                 self.report.stats.footnotes += 1;
+                let mark = self.ids.mark();
                 let index = self.footnotes.len() + 1;
                 let body = self.render_blocks(&note.blocks, 0);
                 let mut lines = body.lines();
@@ -620,7 +636,7 @@ impl<'a> Writer<'a> {
                 // A footnote is addressed on its reference but *costs* its
                 // definition, which is what the reader ends up paying for.
                 self.ids
-                    .record(id.as_deref(), NodeKind::Footnote, &definition);
+                    .record(id.as_deref(), NodeKind::Footnote, &definition, mark);
                 self.footnotes.push(definition);
                 format!("[^{index}]{}", attrs.render())
             }
@@ -752,8 +768,10 @@ impl<'a> Writer<'a> {
     // ----------------------------------------------------------------------
 
     fn render_image(&mut self, image: &ImageRef) -> String {
+        let mark = self.ids.mark();
         let (rendered, id) = self.render_image_body(image);
-        self.ids.record(id.as_deref(), NodeKind::Image, &rendered);
+        self.ids
+            .record(id.as_deref(), NodeKind::Image, &rendered, mark);
         rendered
     }
 

@@ -30,6 +30,7 @@ Practical difference between the two folders:
 | [14 — Phase 10 A/B](14-phase-10-addressing-core.md) | `docsai-model::addressing`, ids in the IR, etags, risk-P7 property tests |
 | [15 — Phase 10 C](15-phase-10-docmark-1-1.md) | DocMark 1.1: `{#n7}` emission and parse, `next-id`, `--ids` |
 | [16 — Phase 10 D](16-phase-10-tokens.md) | `docsai tokens`: tokenizer decision, traced fragments, first budget numbers |
+| [17 — Phase 10 E](17-phase-10-outline.md) | `docsai outline`: the containment tree, previews, the 5 % budget |
 
 ## Status in one line
 
@@ -54,6 +55,7 @@ cargo fmt --all -- --check
 python3 corpus/generate.py --check                      # corpus is up to date
 cargo run -p docsai-cli -- formats                      # real support matrix of the binary
 cargo run -p docsai-cli -- inspect corpus/docx/basic-text.docx
-cargo run -p docsai-cli -- tokens corpus/docx/nested-lists.docx  # measured cost (Phase 10)
+cargo run -p docsai-cli -- tokens corpus/docx/long-report.docx   # measured cost (Phase 10)
+cargo run -p docsai-cli -- outline corpus/docx/long-report.docx  # the map an agent reads first
 cargo run -p docsai-cli -- mcp   # stdio MCP server (Phase 7)
 ```

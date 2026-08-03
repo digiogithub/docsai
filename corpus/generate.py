@@ -563,6 +563,74 @@ def docx_nested_lists() -> None:
     )
 
 
+def docx_long_report() -> None:
+    """A document of realistic size, for measuring rather than for parsing.
+
+    Every other corpus document isolates one trait and is a few hundred tokens
+    long — too small to say anything about cost: on a 700-token file the outline
+    is the document. This one is deliberately ordinary and long, so that
+    `docsai outline` can be held to the Phase 10 budget (< 5 % of the document's
+    own tokens) on something an agent would plausibly be handed.
+
+    The prose is templated, never random: the corpus must regenerate byte for
+    byte.
+    """
+    topics = [
+        "alcance del proyecto",
+        "arquitectura de la solucion",
+        "modelo de datos",
+        "flujo de conversion",
+        "gestion de errores",
+        "rendimiento medido",
+        "estrategia de pruebas",
+        "seguridad y permisos",
+        "despliegue y operacion",
+        "formacion del equipo",
+        "riesgos identificados",
+        "plan de trabajo",
+    ]
+    sentences = [
+        "El equipo revisa {topic} en cada iteracion y deja constancia escrita de la decision.",
+        "La documentacion de {topic} se mantiene junto al codigo para que no envejezca por separado.",
+        "Cada cambio en {topic} se acompana de una prueba que falla antes y pasa despues.",
+        "Los tiempos dedicados a {topic} se miden con las mismas herramientas en todos los entornos.",
+        "Cuando {topic} exige una excepcion, la excepcion se escribe y se firma, nunca se asume.",
+        "La revision de {topic} termina con una lista corta de acciones y un responsable por accion.",
+    ]
+    body = p(r("Informe tecnico de seguimiento"),
+             '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>')
+    body += p(r("Este informe recoge el estado de los doce frentes abiertos, "
+                "con el detalle acordado en la reunion de arranque."))
+    for index, topic in enumerate(topics, start=1):
+        body += p(r(f"{index}. Estado de {topic}"),
+                  '<w:pPr><w:pStyle w:val="Heading2"/></w:pPr>')
+        # Eight paragraphs per section: the outline/document ratio is a
+        # function of heading density, and a section of four short paragraphs
+        # is thinner than any real report.
+        for paragraph in range(8):
+            text = " ".join(
+                sentences[(paragraph * 2 + offset) % len(sentences)].format(topic=topic)
+                for offset in range(4)
+            )
+            body += p(r(text))
+        body += p(r(f"Conclusion de {topic}"),
+                  '<w:pPr><w:pStyle w:val="Heading3"/></w:pPr>')
+        body += p(r(f"El frente de {topic} avanza segun lo previsto y no requiere "
+                    "decisiones fuera del equipo en este ciclo."))
+    # The third level is not in DEFAULT_STYLES; without declaring it the
+    # conclusions would carry a style the package never defines.
+    styles = DEFAULT_STYLES.replace(
+        "</w:styles>",
+        '<w:style w:type="paragraph" w:styleId="Heading3">'
+        '<w:name w:val="heading 3"/><w:basedOn w:val="Normal"/>'
+        '<w:pPr><w:outlineLvl w:val="2"/></w:pPr>'
+        '<w:rPr><w:color w:val="1F4D78"/><w:sz w:val="24"/></w:rPr>'
+        "</w:style></w:styles>",
+    )
+    build_docx("long-report.docx", document(body), title="Informe largo",
+               styles=styles)
+
+
 def tc(text: str, tcpr: str = "", width: int = 3000) -> str:
     return (
         f'<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="dxa"/>{tcpr}</w:tcPr>'
@@ -2151,6 +2219,7 @@ GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
     docx_nested_lists,
+    docx_long_report,
     docx_table_simple,
     docx_table_merged,
     docx_images_inline,

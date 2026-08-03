@@ -27,6 +27,11 @@ pub struct NodeFragment {
     pub id: NodeId,
     pub kind: NodeKind,
     pub markdown: String,
+    /// How many fragments this one contains, all of them immediately before it
+    /// in the list. A node is recorded when it finishes, so everything written
+    /// while it was open sits in `[index - descendants, index)` — that
+    /// contiguous block is what turns the flat list back into a tree.
+    pub descendants: usize,
 }
 
 /// Hands out the ids a serialisation run writes.
@@ -84,10 +89,16 @@ impl IdSource {
         self.emitted.then_some(self.addressing.next_id)
     }
 
+    /// Where the trace stands, to be handed back to [`IdSource::record`] when
+    /// the node finishes: everything recorded in between is inside it.
+    pub(crate) fn mark(&self) -> usize {
+        self.trace.as_ref().map_or(0, Vec::len)
+    }
+
     /// Records what `id` wrote. A no-op unless the run is traced, and unless
     /// the node took an id at all — a node without an address cannot be
     /// reported on.
-    pub(crate) fn record(&mut self, id: Option<&str>, kind: NodeKind, markdown: &str) {
+    pub(crate) fn record(&mut self, id: Option<&str>, kind: NodeKind, markdown: &str, mark: usize) {
         let (Some(trace), Some(id)) = (self.trace.as_mut(), id) else {
             return;
         };
@@ -95,6 +106,7 @@ impl IdSource {
             id: NodeId::new(id),
             kind,
             markdown: markdown.to_string(),
+            descendants: trace.len().saturating_sub(mark),
         });
     }
 

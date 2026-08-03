@@ -96,6 +96,26 @@ enum Command {
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
+    /// Map a document: the tree of addressable nodes with a preview and a cost.
+    ///
+    /// The cheap thing to read before deciding what to read: node ids, kinds,
+    /// a short preview and the measured token cost of each.
+    Outline {
+        /// Input document.
+        input: PathBuf,
+        /// Keep only the first N levels of the tree.
+        #[arg(long, value_name = "N")]
+        depth: Option<usize>,
+        /// How much of the source survives: full, standard or plain.
+        #[arg(long, default_value = "full")]
+        fidelity: String,
+        /// Print the outline as JSON on stdout.
+        #[arg(long)]
+        json: bool,
+        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        #[arg(long, default_value = "auto", value_name = "MODE")]
+        use_loffice: String,
+    },
     /// Measure what a document costs an LLM, per document and per node.
     ///
     /// Counted with a real BPE tokenizer (`o200k_base`) over the DocMark that
@@ -195,6 +215,13 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             json,
             use_loffice,
         } => run_tokens(input, fidelity, ids.as_deref(), *top, *json, use_loffice),
+        Command::Outline {
+            input,
+            depth,
+            fidelity,
+            json,
+            use_loffice,
+        } => run_outline(input, *depth, fidelity, *json, use_loffice),
         Command::Roundtrip {
             input,
             output,
@@ -346,6 +373,50 @@ fn run_tokens(
         );
     }
     Ok(EXIT_OK)
+}
+
+fn run_outline(
+    input: &Path,
+    depth: Option<usize>,
+    fidelity: &str,
+    json: bool,
+    use_loffice: &str,
+) -> anyhow::Result<u8> {
+    let options = ConvertOptions {
+        fidelity: parse_fidelity(fidelity)?,
+        use_loffice: parse_use_loffice(use_loffice)?,
+        ..Default::default()
+    };
+    let outline = docsai_convert::outline_path(input, &options, depth)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&outline)?);
+        return Ok(EXIT_OK);
+    }
+    if outline.is_empty() {
+        println!(
+            "{}: no addressable nodes at --fidelity {} (ids live at `full`)",
+            outline.path.as_deref().unwrap_or("<document>"),
+            outline.fidelity
+        );
+        return Ok(EXIT_OK);
+    }
+    print!("{}", outline.render_text());
+    println!(
+        "{} nodes · outline {} tokens · document {} tokens ({:.1} %)",
+        outline.len(),
+        outline.outline_tokens,
+        outline.document_tokens,
+        share(outline.outline_tokens, outline.document_tokens)
+    );
+    Ok(EXIT_OK)
+}
+
+/// Percentage of `total` that `part` represents, `0.0` when there is no total.
+fn share(part: usize, total: usize) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+    part as f64 * 100.0 / total as f64
 }
 
 fn inspect_stdin(json: bool, use_loffice: &str, verbose: bool) -> anyhow::Result<u8> {

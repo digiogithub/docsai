@@ -37,9 +37,10 @@ pub fn write_workbook(
             }
         }
         let start = out.len();
+        let mark = ids.mark();
         let id = write_sheet(&mut out, sheet, assets, options, &mut report, ids);
         let markdown = out[start..].to_string();
-        ids.record(id.as_deref(), NodeKind::Sheet, &markdown);
+        ids.record(id.as_deref(), NodeKind::Sheet, &markdown, mark);
     }
 
     while out.ends_with("\n\n") {
@@ -151,8 +152,9 @@ fn write_sheet(
     if !sheet.images.is_empty() && !plain {
         out.push_str("::: {.sheet-images}\n");
         for image in &sheet.images {
+            let mark = ids.mark();
             let (markdown, id) = render_image(image, assets, options, report, ids);
-            ids.record(id.as_deref(), NodeKind::Image, &markdown);
+            ids.record(id.as_deref(), NodeKind::Image, &markdown, mark);
             out.push_str(&markdown);
             out.push('\n');
             if options.fidelity == Fidelity::Full {

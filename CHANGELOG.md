@@ -25,9 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   embedded: no network, no Python), split into front matter and body, plus the cost of
   every addressed node over the exact DocMark it wrote. Rationale for the tokenizer
   choice in `docs/technical-analysis.md` §4.4.
+- **`docsai outline <in> [--depth N] [--fidelity …] [--json]`** — the tree of addressable
+  nodes with id, kind, a ~60-character preview and the measured token cost of each, plus what
+  the whole document would cost. On the largest corpus document the outline is 3.8 % of the
+  document's own tokens (Phase 10 budget: under 5 %).
+- Corpus fixture `docx/long-report.docx` (~9 000 tokens): the first corpus document sized for
+  measuring rather than for isolating a trait.
 - `docsai_docmark::serialize_traced` and `NodeFragment`: the same output as `serialize`,
-  byte for byte, plus what each addressed node contributed. `docsai-convert::tokens`
-  (`token_report`, `token_report_path`, `TokenReport`, `NodeTokens`) builds on it.
+  byte for byte, plus what each addressed node contributed, with `descendants` recording how
+  many fragments it contains so the flat list rebuilds into a tree. `docsai-convert::tokens`
+  (`token_report`, `token_report_path`) and `docsai-convert::outline` (`outline`,
+  `outline_path`) build on it.
 
 - **Phase 7 MCP server**: `docsai mcp` over stdio (`rmcp`) with tools
   `convert_to_markdown`, `convert_from_markdown`, `inspect_document`, and

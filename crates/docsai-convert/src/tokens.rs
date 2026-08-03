@@ -160,11 +160,18 @@ fn front_matter_end(markdown: &str) -> usize {
     }
 }
 
-/// One line of node text, whitespace collapsed and cut to [`PREVIEW_CHARS`].
-fn preview(markdown: &str) -> String {
+/// One line of the node's text, whitespace collapsed and cut to
+/// [`PREVIEW_CHARS`].
+///
+/// The machinery is stripped first — attribute blocks, fenced-div markers and
+/// table rules. A preview is there to be *recognised* by a reader who already
+/// has the id next to it; repeating `{#n4 .ListParagraph list=L1}` would cost
+/// tokens to say what the id column says better.
+pub(crate) fn preview(markdown: &str) -> String {
+    let stripped = strip_machinery(markdown);
     let mut text = String::new();
     let mut spaced = true;
-    for c in markdown.chars() {
+    for c in stripped.chars() {
         if c.is_whitespace() {
             if !spaced {
                 text.push(' ');
@@ -185,6 +192,37 @@ fn preview(markdown: &str) -> String {
     } else {
         text.to_string()
     }
+}
+
+/// Drops what DocMark writes for machines: `:::` fences, attribute blocks and
+/// the `|---|` rule of a table.
+fn strip_machinery(markdown: &str) -> String {
+    let mut out = String::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(":::") || is_table_rule(trimmed) {
+            continue;
+        }
+        let mut depth = 0usize;
+        for c in line.chars() {
+            match c {
+                '{' => depth += 1,
+                '}' => depth = depth.saturating_sub(1),
+                _ if depth == 0 => out.push(c),
+                _ => {}
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// `| --- | ---: |` and friends, which say nothing about the content.
+fn is_table_rule(line: &str) -> bool {
+    line.starts_with('|')
+        && line
+            .chars()
+            .all(|c| matches!(c, '|' | '-' | ':' | ' ' | '\t'))
 }
 
 #[cfg(test)]
@@ -209,7 +247,12 @@ mod tests {
 
     #[test]
     fn previews_are_one_short_line() {
-        assert_eq!(preview("# Title  {#n1}\n\nmore"), "# Title {#n1} more");
+        assert_eq!(preview("# Title  {#n1}\n\nmore"), "# Title more");
+        assert_eq!(
+            preview("::: {.table}\n| a | b |\n|---|---|\n| 1 | 2 |\n:::"),
+            "| a | b | | 1 | 2 |",
+            "fences and rules are machinery, the cells are the content"
+        );
         let long = "word ".repeat(40);
         let preview = preview(&long);
         assert!(preview.chars().count() <= PREVIEW_CHARS, "{preview}");

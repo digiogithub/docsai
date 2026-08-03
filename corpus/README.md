@@ -65,6 +65,7 @@ without looking is a test that has stopped checking anything.
 | `footnotes.docx` | `footnotes.xml` with two notes, one with inner formatting |
 | `custom-styles.docx` | Custom style, inherited style with direct delta, character style and custom document properties |
 | `fields-raw.docx` | `w:sdt` content control, complex `TOC` field and simple `DATE` field |
+| `long-report.docx` | Not a trait but a **size**: 12 sections of ordinary prose with three heading levels (~9 000 tokens). Every other fixture is too small for a cost measurement to mean anything — on a 700-token file the outline *is* the document. This is what `docsai tokens` / `docsai outline` are held to (Phase 10: the outline must stay under 5 % of the document) |
 
 ## Legacy Word binary (`doc/`)
 

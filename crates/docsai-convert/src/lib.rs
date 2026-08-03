@@ -9,6 +9,7 @@ pub mod assets;
 pub mod batch;
 pub mod inspect;
 pub mod loffice;
+pub mod outline;
 mod pipeline;
 pub mod service;
 pub mod style_map;
@@ -19,6 +20,7 @@ pub use batch::{convert_batch, BatchOutcome, BatchReport};
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions};
 pub use inspect::{inspect_path, InspectReport};
 pub use loffice::UseLoffice;
+pub use outline::{outline, outline_path, Outline, OutlineNode};
 pub use pipeline::{
     convert_bytes, convert_file, is_stdin_path, is_stdout_path, read_document,
     read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
