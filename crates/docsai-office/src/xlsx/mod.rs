@@ -122,6 +122,7 @@ pub(crate) fn read_package(
     }
 
     let mut book = Workbook {
+        addressing: Default::default(),
         meta,
         styles: styles.catalog,
         defined_names,

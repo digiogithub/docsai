@@ -477,11 +477,11 @@ fn write_inlines(inlines: &[Inline], ctx: &mut WriterCtx<'_>, out: &mut String, 
                 write_inlines(content, ctx, out, &merged);
                 out.push_str("</w:hyperlink>");
             }
-            Inline::Footnote(blocks) => {
+            Inline::Footnote(note) => {
                 let id = ctx.next_footnote;
                 ctx.next_footnote += 1;
                 let mut body = String::new();
-                for block in blocks {
+                for block in &note.blocks {
                     write_block(block, ctx, &mut body, None);
                 }
                 if body.is_empty() {
@@ -1549,6 +1549,7 @@ mod tests {
                 blocks: vec![
                     Block::Paragraph(Paragraph::text("Primer parrafo")),
                     Block::Heading(Heading {
+                        id: None,
                         level: 1,
                         paragraph: Paragraph::text("Titulo"),
                     }),
@@ -1604,6 +1605,7 @@ mod tests {
         let mut assets = MemoryAssetStore::new();
         let asset = assets.put(&png).expect("asset");
         let image = ImageRef {
+            id: None,
             asset: asset.clone(),
             geometry: ImageGeometry {
                 display_size: Size::new(Length::from_cm(3.5), Length::from_cm(2.6)),
@@ -1635,6 +1637,7 @@ mod tests {
         };
 
         let footnote_body = vec![Block::Paragraph(Paragraph {
+            id: None,
             format: Default::default(),
             content: vec![
                 Inline::Text("Nota con ".into()),
@@ -1654,11 +1657,12 @@ mod tests {
         let doc = Document::Text(TextDocument {
             sections: vec![Section {
                 blocks: vec![Block::Paragraph(Paragraph {
+                    id: None,
                     format: Default::default(),
                     content: vec![
-                        Inline::Image(image),
+                        Inline::Image(Box::new(image)),
                         Inline::Text(" cuerpo".into()),
-                        Inline::Footnote(footnote_body),
+                        Inline::Footnote(docsai_model::text::Footnote::new(footnote_body)),
                     ],
                 })],
                 ..Default::default()
@@ -1695,8 +1699,8 @@ mod tests {
                             assert_eq!(img.geometry.z_index, Some(2));
                         }
                     }
-                    Inline::Footnote(blocks) => {
-                        for b in blocks {
+                    Inline::Footnote(note) => {
+                        for b in &note.blocks {
                             if let Block::Paragraph(p) = b {
                                 for i in &p.content {
                                     if let Inline::Styled { props, content } = i {

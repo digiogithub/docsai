@@ -8,7 +8,7 @@ use docsai_model::list::ListId;
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{StyleCatalog, StyleId};
 use docsai_model::text::{
-    Block, BreakKind, FieldKind, Heading, Inline, List, ListItem, ParaFormat, Paragraph,
+    Block, BreakKind, FieldKind, Footnote, Heading, Inline, List, ListItem, ParaFormat, Paragraph,
     RawFragment, RunProps, Table, TableCell, TableRow,
 };
 use docsai_model::units::Length;
@@ -204,7 +204,11 @@ fn as_heading_or_paragraph(paragraph: Paragraph, ctx: &Ctx<'_>, st: &mut State<'
     match level {
         Some(level) if (1..=9).contains(&level) && !paragraph.is_empty() => {
             st.report.stats.headings += 1;
-            Block::Heading(Heading { level, paragraph })
+            Block::Heading(Heading {
+                id: None,
+                level,
+                paragraph,
+            })
         }
         _ => Block::Paragraph(paragraph),
     }
@@ -259,6 +263,7 @@ fn build_list(items: &[(i64, u8, Paragraph)], ctx: &Ctx<'_>) -> Block {
     let base = *base_level;
     let def: Option<ListId> = ctx.numbering.list_id(*num_id).cloned();
     let mut list = List {
+        id: None,
         def,
         ordered: ctx.numbering.is_ordered(*num_id, base as usize),
         level: base,
@@ -327,7 +332,14 @@ fn read_paragraph(
     }
 
     let content = read_inlines(p, ctx, st);
-    (Paragraph { format, content }, numbering)
+    (
+        Paragraph {
+            id: None,
+            format,
+            content,
+        },
+        numbering,
+    )
 }
 
 /// A run may emit content *or* field-control markers; the paragraph-level loop
@@ -534,7 +546,7 @@ fn read_run(r: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut Vec<Piece>
                 buffer.push(Inline::Raw(fragment));
             }
             "drawing" => match read_drawing(child, &ctx.drawing(), st.assets, st.report) {
-                Ok(Some(image)) => buffer.push(Inline::Image(image)),
+                Ok(Some(image)) => buffer.push(Inline::Image(Box::new(image))),
                 Ok(None) => {
                     let fragment = st.raw(child, ctx);
                     buffer.push(Inline::Raw(fragment));
@@ -546,7 +558,7 @@ fn read_run(r: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut Vec<Piece>
             },
             "pict" | "object" => {
                 match read_vml_picture(child, &ctx.drawing(), st.assets, st.report) {
-                    Ok(Some(image)) => buffer.push(Inline::Image(image)),
+                    Ok(Some(image)) => buffer.push(Inline::Image(Box::new(image))),
                     Ok(None) => {
                         let fragment = st.raw(child, ctx);
                         buffer.push(Inline::Raw(fragment));
@@ -566,7 +578,9 @@ fn read_run(r: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut Vec<Piece>
                         // style: `FootnoteReference` only makes the marker
                         // superscript, and DocMark draws its own marker.
                         flush!();
-                        out.push(Piece::inline(Inline::Footnote(blocks.clone())));
+                        out.push(Piece::inline(Inline::Footnote(Footnote::new(
+                            blocks.clone(),
+                        ))));
                     }
                     None => st.report.warn(Warning::Degraded {
                         what: format!("footnote {id}"),

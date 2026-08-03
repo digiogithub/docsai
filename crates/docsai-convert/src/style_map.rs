@@ -280,7 +280,13 @@ fn map_paragraph(
         }
         StyleTarget::Heading(level) => {
             paragraph.format.style = None;
-            Some(Block::Heading(Heading { level, paragraph }))
+            // The paragraph's address survives the promotion to a heading.
+            let id = paragraph.id.take();
+            Some(Block::Heading(Heading {
+                id,
+                level,
+                paragraph,
+            }))
         }
         StyleTarget::CodeBlock => paragraph_to_code(paragraph, code_seq),
     }
@@ -389,6 +395,7 @@ BodyText: p
             styles,
             sections: vec![Section {
                 blocks: vec![Block::Paragraph(Paragraph {
+                    id: None,
                     format: docsai_model::text::ParaFormat::styled("Heading1"),
                     content: vec![docsai_model::text::Inline::Text("Title".into())],
                 })],

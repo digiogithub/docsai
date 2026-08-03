@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::addressing::{Addressing, NodeId};
 use crate::image::{ImageRef, RawId};
 use crate::list::{ListCatalog, ListId};
 use crate::style::{FontProps, ParaProps, StyleCatalog, StyleId};
@@ -143,6 +144,9 @@ pub struct HeaderFooter {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct Section {
+    /// Stable address of the section (spec §11.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     pub page: PageGeometry,
     pub headers: Vec<HeaderFooter>,
     pub footers: Vec<HeaderFooter>,
@@ -154,6 +158,8 @@ pub struct Section {
 #[serde(rename_all = "kebab-case", default)]
 pub struct TextDocument {
     pub meta: DocumentMeta,
+    /// The monotonic id counter serialised as `next-id`.
+    pub addressing: Addressing,
     pub styles: StyleCatalog,
     pub list_defs: ListCatalog,
     pub sections: Vec<Section>,
@@ -214,6 +220,9 @@ impl ParaFormat {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct Paragraph {
+    /// Stable address; only containers carry one (spec §11.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     pub format: ParaFormat,
     pub content: Vec<Inline>,
 }
@@ -221,6 +230,7 @@ pub struct Paragraph {
 impl Paragraph {
     pub fn new(content: Vec<Inline>) -> Self {
         Paragraph {
+            id: None,
             format: ParaFormat::default(),
             content,
         }
@@ -250,6 +260,9 @@ impl Paragraph {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Heading {
+    /// Stable address of the heading (spec §11.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     /// 1-based heading depth, as `#` count in Markdown.
     pub level: u8,
     pub paragraph: Paragraph,
@@ -259,6 +272,9 @@ pub struct Heading {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct List {
+    /// Stable address of the list (spec §11.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     /// The definition in [`crate::list::ListCatalog`], when the
     /// list is not the document's default one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,6 +301,9 @@ pub struct ListItem {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct Table {
+    /// Stable address of the table (spec §11.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<StyleId>,
     /// Width of each grid column.
@@ -321,6 +340,9 @@ impl Table {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct TableRow {
+    /// Stable address of the row (spec §11.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     pub cells: Vec<TableCell>,
     /// True for rows repeated as a header on each page (`w:tblHeader`).
     pub is_header: bool,
@@ -390,6 +412,22 @@ pub struct RawFragment {
     pub part: String,
     /// The original markup.
     pub content: String,
+}
+
+/// A footnote: block content plus its own stable address.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct Footnote {
+    /// Stable address of the footnote (spec §11.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
+    pub blocks: Vec<Block>,
+}
+
+impl Footnote {
+    pub fn new(blocks: Vec<Block>) -> Self {
+        Footnote { id: None, blocks }
+    }
 }
 
 /// Character formatting of a run: style reference plus direct deltas.
@@ -494,7 +532,7 @@ pub enum Inline {
         props: RunProps,
     },
     /// A footnote; its content is block-level.
-    Footnote(Vec<Block>),
+    Footnote(Footnote),
     Field {
         kind: FieldKind,
         /// Last known displayed value.
@@ -504,8 +542,9 @@ pub enum Inline {
         instruction: String,
     },
     Break(BreakKind),
-    /// An image flowing with the text.
-    Image(ImageRef),
+    /// An image flowing with the text. Boxed: an `ImageRef` is an order of
+    /// magnitude larger than a text run, and inlines are stored by value.
+    Image(Box<ImageRef>),
     /// Inline-level fidelity hatch.
     Raw(RawFragment),
 }
@@ -603,6 +642,7 @@ mod tests {
         let table = Table {
             rows: vec![
                 TableRow {
+                    id: None,
                     cells: vec![
                         TableCell::text("a"),
                         TableCell {
@@ -613,6 +653,7 @@ mod tests {
                     is_header: true,
                 },
                 TableRow {
+                    id: None,
                     cells: vec![
                         TableCell::text("c"),
                         TableCell::text("d"),
@@ -631,6 +672,7 @@ mod tests {
     fn multi_block_cells_make_a_table_complex() {
         let table = Table {
             rows: vec![TableRow {
+                id: None,
                 cells: vec![TableCell {
                     blocks: vec![
                         Block::Paragraph(Paragraph::text("uno")),

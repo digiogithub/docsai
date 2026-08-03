@@ -295,9 +295,9 @@ fn tally_inline_stats(inlines: &[docsai_model::text::Inline], stats: &mut Conver
             Inline::Link { content, .. } | Inline::Styled { content, .. } => {
                 tally_inline_stats(content, stats);
             }
-            Inline::Footnote(blocks) => {
+            Inline::Footnote(note) => {
                 stats.footnotes = stats.footnotes.saturating_add(1);
-                tally_blocks(blocks, stats);
+                tally_blocks(&note.blocks, stats);
             }
             _ => {}
         }
@@ -351,7 +351,7 @@ fn count_inline_images(
             Inline::Link { content, .. } | Inline::Styled { content, .. } => {
                 count_inline_images(content, counts);
             }
-            Inline::Footnote(blocks) => count_block_images(blocks, counts),
+            Inline::Footnote(note) => count_block_images(&note.blocks, counts),
             _ => {}
         }
     }

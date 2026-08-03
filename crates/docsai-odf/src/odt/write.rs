@@ -357,13 +357,13 @@ fn write_inline(
             write_image(img, ctx, out)?;
             ctx.report.stats.images = ctx.report.stats.images.saturating_add(1);
         }
-        Inline::Footnote(blocks) => {
+        Inline::Footnote(note) => {
             ctx.note_seq += 1;
             let id = ctx.note_seq;
             out.push_str(&format!(
                 r#"<text:note text:id="ftn{id}" text:note-class="footnote"><text:note-citation>{id}</text:note-citation><text:note-body>"#
             ));
-            write_blocks(blocks, ctx, out)?;
+            write_blocks(&note.blocks, ctx, out)?;
             out.push_str("</text:note-body></text:note>");
             ctx.report.stats.footnotes = ctx.report.stats.footnotes.saturating_add(1);
         }

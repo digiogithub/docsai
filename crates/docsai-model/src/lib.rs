@@ -28,6 +28,7 @@
 //! assert!(docsai_model::validate::validate(&doc).is_ok());
 //! ```
 
+pub mod addressing;
 pub mod assets;
 pub mod image;
 pub mod list;
@@ -40,6 +41,7 @@ pub mod validate;
 
 use serde::{Deserialize, Serialize};
 
+pub use addressing::{Addressable, Addressing, Etag, IdPolicy, NodeId, NodeKind};
 pub use assets::{AssetId, AssetInfo, AssetStore, MemoryAssetStore};
 pub use report::{ConversionReport, ConversionStats, Severity, Warning};
 pub use sheet::Workbook;
@@ -75,6 +77,21 @@ impl Document {
         match self {
             Document::Text(d) => &mut d.meta,
             Document::Workbook(w) => &mut w.meta,
+        }
+    }
+
+    /// The document-level id counter (spec §11.1).
+    pub fn addressing(&self) -> &crate::addressing::Addressing {
+        match self {
+            Document::Text(d) => &d.addressing,
+            Document::Workbook(w) => &w.addressing,
+        }
+    }
+
+    pub fn addressing_mut(&mut self) -> &mut crate::addressing::Addressing {
+        match self {
+            Document::Text(d) => &mut d.addressing,
+            Document::Workbook(w) => &mut w.addressing,
         }
     }
 

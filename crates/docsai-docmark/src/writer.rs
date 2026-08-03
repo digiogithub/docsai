@@ -520,10 +520,10 @@ impl<'a> Writer<'a> {
                     format!("{link}{}", attrs.render())
                 }
             }
-            Inline::Footnote(blocks) => {
+            Inline::Footnote(note) => {
                 self.report.stats.footnotes += 1;
                 let index = self.footnotes.len() + 1;
-                let body = self.render_blocks(blocks, 0);
+                let body = self.render_blocks(&note.blocks, 0);
                 let mut lines = body.lines();
                 // The source separates its own marker from the text with a
                 // space; DocMark draws the marker itself.

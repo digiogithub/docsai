@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::addressing::{Addressing, NodeId};
 use crate::image::ImageRef;
 use crate::style::{StyleCatalog, StyleId};
 use crate::text::{DocumentMeta, RawFragment};
@@ -235,6 +236,9 @@ pub struct DefinedName {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct Sheet {
+    /// Stable address of the sheet (spec §11.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     pub name: String,
     /// Sparse cell grid; absent keys are empty cells.
     pub cells: BTreeMap<CellRef, Cell>,
@@ -278,6 +282,8 @@ impl Sheet {
 #[serde(rename_all = "kebab-case", default)]
 pub struct Workbook {
     pub meta: DocumentMeta,
+    /// The monotonic id counter serialised as `next-id`.
+    pub addressing: Addressing,
     pub styles: StyleCatalog,
     pub defined_names: Vec<DefinedName>,
     pub sheets: Vec<Sheet>,

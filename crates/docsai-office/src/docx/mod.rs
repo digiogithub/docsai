@@ -107,6 +107,7 @@ pub(crate) fn read_package(
     }
 
     let document = Document::Text(TextDocument {
+        addressing: Default::default(),
         meta,
         styles,
         list_defs: numbering.catalog,
@@ -435,7 +436,7 @@ mod tests {
         fn collect<'a>(inlines: &'a [Inline], out: &mut Vec<&'a Vec<Block>>) {
             for inline in inlines {
                 match inline {
-                    Inline::Footnote(blocks) => out.push(blocks),
+                    Inline::Footnote(note) => out.push(&note.blocks),
                     Inline::Styled { content, .. } | Inline::Link { content, .. } => {
                         collect(content, out)
                     }

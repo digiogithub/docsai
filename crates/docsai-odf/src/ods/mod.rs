@@ -95,6 +95,7 @@ pub(crate) fn read_package(
 
     Ok((
         Document::Workbook(Workbook {
+            addressing: Default::default(),
             meta,
             styles: styles.catalog,
             defined_names: Vec::new(),

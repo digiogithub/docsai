@@ -104,10 +104,12 @@ pub(crate) fn read_package(
     report.stats.styles = styles.catalog.styles.len() as u32;
 
     let document = Document::Text(TextDocument {
+        addressing: Default::default(),
         meta,
         styles: styles.catalog,
         list_defs: styles.lists,
         sections: vec![Section {
+            id: None,
             page,
             headers,
             footers,

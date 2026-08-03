@@ -107,6 +107,7 @@ pub fn read<R: Read + Seek>(
     let meta = read_summary_meta(&mut comp);
 
     let doc = TextDocument {
+        addressing: Default::default(),
         meta,
         styles: Default::default(),
         list_defs: Default::default(),

@@ -153,7 +153,9 @@ fn walk_inlines(inlines: &[Inline], path: &str, errors: &mut Vec<ValidationError
             Inline::Styled { content, .. } | Inline::Link { content, .. } => {
                 walk_inlines(content, path, errors)
             }
-            Inline::Footnote(blocks) => walk_blocks(blocks, &format!("{path}/footnote"), errors),
+            Inline::Footnote(note) => {
+                walk_blocks(&note.blocks, &format!("{path}/footnote"), errors)
+            }
             _ => {}
         }
     }
@@ -185,7 +187,7 @@ mod tests {
     use crate::assets::AssetId;
     use crate::image::{CellAnchor, ImageGeometry};
     use crate::sheet::{CellRef, Sheet, Workbook};
-    use crate::text::{Paragraph, Section};
+    use crate::text::{Footnote, Paragraph, Section};
     use crate::units::{Length, Size};
 
     fn image_with(anchor: Anchor) -> ImageRef {
@@ -233,7 +235,7 @@ mod tests {
         let doc = Document::Text(TextDocument {
             sections: vec![Section {
                 blocks: vec![Block::Paragraph(Paragraph::new(vec![Inline::Footnote(
-                    vec![Block::Image(image_with(anchor))],
+                    Footnote::new(vec![Block::Image(image_with(anchor))]),
                 )]))],
                 ..Default::default()
             }],

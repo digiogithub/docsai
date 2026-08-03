@@ -26,6 +26,8 @@ Practical difference between the two folders:
 | [09 — Phase 6 CLI & distribution](09-phase-6-cli.md) | inspect, batch, style-map, stdin/stdout, cargo-dist |
 | [10 — Phase 7 MCP](10-phase-7-mcp.md) | `docsai mcp`, four tools, path/base64, limits |
 | [11 — Plan v2 on-ramp](11-plan-v2-onramp.md) | What agent-native + presentations work reuses, what is new, traps that will bite again |
+| [13 — Phase 10 plan](13-phase-10-addressing-plan.md) | Increments A–F of stable addressing and the token budget |
+| [14 — Phase 10 A/B](14-phase-10-addressing-core.md) | `docsai-model::addressing`, ids in the IR, etags, risk-P7 property tests |
 
 ## Status in one line
 

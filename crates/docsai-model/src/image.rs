@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::addressing::NodeId;
 use crate::assets::AssetId;
 use crate::sheet::CellRef;
 use crate::units::{Length, Point, Size};
@@ -31,6 +32,9 @@ impl RawId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ImageRef {
+    /// Stable address of the picture (spec §11.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
     /// Key in the [`AssetStore`](crate::assets::AssetStore): the content hash,
     /// so N appearances of one bitmap share a single stored file.
     pub asset: AssetId,
@@ -59,6 +63,7 @@ pub struct ImageRef {
 impl ImageRef {
     pub fn new(asset: AssetId, geometry: ImageGeometry) -> Self {
         ImageRef {
+            id: None,
             asset,
             geometry,
             alt: String::new(),

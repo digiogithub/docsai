@@ -78,6 +78,7 @@ pub fn parse_workbook(
     report.stats.styles = fm.styles.styles.len() as u32;
 
     Ok(Document::Workbook(Workbook {
+        addressing: Default::default(),
         meta: fm.meta,
         styles: fm.styles,
         defined_names: fm.defined_names,

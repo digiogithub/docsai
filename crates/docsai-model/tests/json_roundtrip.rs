@@ -86,6 +86,7 @@ fn round_trips_a_document_using_every_block_kind() {
     );
 
     let doc = Document::Text(TextDocument {
+        addressing: Default::default(),
         meta: DocumentMeta {
             title: Some("Informe".into()),
             author: Some("Ana".into()),
@@ -99,6 +100,7 @@ fn round_trips_a_document_using_every_block_kind() {
         styles,
         list_defs,
         sections: vec![Section {
+            id: None,
             page: PageGeometry {
                 size: Size::new(Length::from_twips(11906), Length::from_twips(16838)),
                 margins: Margins {
@@ -127,8 +129,10 @@ fn round_trips_a_document_using_every_block_kind() {
             }],
             blocks: vec![
                 Block::Heading(Heading {
+                    id: None,
                     level: 1,
                     paragraph: Paragraph {
+                        id: None,
                         format: ParaFormat::styled("Heading1"),
                         content: vec![Inline::Text("Título".into())],
                     },
@@ -152,8 +156,10 @@ fn round_trips_a_document_using_every_block_kind() {
                         },
                     },
                     Inline::Break(BreakKind::Page),
-                    Inline::Footnote(vec![Block::Paragraph(Paragraph::text("nota"))]),
-                    Inline::Image(image.clone()),
+                    Inline::Footnote(Footnote::new(vec![Block::Paragraph(Paragraph::text(
+                        "nota",
+                    ))])),
+                    Inline::Image(Box::new(image.clone())),
                     Inline::Raw(RawFragment {
                         id: RawId::new("raw-0002"),
                         format: "ooxml".into(),
@@ -162,6 +168,7 @@ fn round_trips_a_document_using_every_block_kind() {
                     }),
                 ])),
                 Block::List(List {
+                    id: None,
                     def: Some(ListId::new("L1")),
                     ordered: true,
                     level: 0,
@@ -169,6 +176,7 @@ fn round_trips_a_document_using_every_block_kind() {
                         blocks: vec![
                             Block::Paragraph(Paragraph::text("uno")),
                             Block::List(List {
+                                id: None,
                                 def: Some(ListId::new("L1")),
                                 ordered: false,
                                 level: 1,
@@ -180,10 +188,12 @@ fn round_trips_a_document_using_every_block_kind() {
                     }],
                 }),
                 Block::Table(Table {
+                    id: None,
                     style: Some(StyleId::new("TableGrid")),
                     col_widths: vec![Length::from_twips(2500), Length::from_twips(2500)],
                     header_row: true,
                     rows: vec![TableRow {
+                        id: None,
                         cells: vec![
                             TableCell {
                                 colspan: 2,
@@ -301,6 +311,7 @@ fn round_trips_a_workbook_with_every_anchor_kind() {
     ];
 
     let doc = Document::Workbook(Workbook {
+        addressing: Default::default(),
         meta: DocumentMeta {
             title: Some("Libro".into()),
             ..Default::default()
@@ -385,6 +396,7 @@ fn arb_block() -> impl Strategy<Value = Block> {
             proptest::option::of("[A-Za-z]{1,10}")
         )
             .prop_map(|(content, style)| Block::Paragraph(Paragraph {
+                id: None,
                 format: ParaFormat {
                     style: style.map(StyleId::new),
                     ..Default::default()
@@ -392,6 +404,7 @@ fn arb_block() -> impl Strategy<Value = Block> {
                 content,
             })),
         (1u8..=6, ".{0,16}").prop_map(|(level, text)| Block::Heading(Heading {
+            id: None,
             level,
             paragraph: Paragraph::text(text),
         })),
@@ -409,16 +422,19 @@ fn arb_block() -> impl Strategy<Value = Block> {
                 proptest::collection::vec(inner.clone(), 1..3)
             )
                 .prop_map(|(ordered, blocks)| Block::List(List {
+                    id: None,
                     def: None,
                     ordered,
                     level: 0,
                     items: vec![ListItem { blocks }],
                 })),
             proptest::collection::vec(inner, 1..3).prop_map(|blocks| Block::Table(Table {
+                id: None,
                 style: None,
                 col_widths: vec![],
                 header_row: false,
                 rows: vec![TableRow {
+                    id: None,
                     cells: vec![TableCell {
                         blocks,
                         ..Default::default()
@@ -439,6 +455,7 @@ proptest! {
         title in proptest::option::of(".{0,20}"),
     ) {
         let doc = Document::Text(TextDocument {
+        addressing: Default::default(),
             meta: DocumentMeta { title, ..Default::default() },
             sections: vec![Section { blocks, ..Default::default() }],
             ..Default::default()
@@ -467,7 +484,8 @@ proptest! {
                 Cell { value: CellValue::Text(t.clone()), ..Default::default() },
             );
         }
-        let doc = Document::Workbook(Workbook { sheets: vec![sheet], ..Default::default() });
+        let doc = Document::Workbook(Workbook {
+        addressing: Default::default(), sheets: vec![sheet], ..Default::default() });
         let json = serde_json::to_string(&doc).unwrap();
         let back: Document = serde_json::from_str(&json).unwrap();
         prop_assert_eq!(&doc, &back);

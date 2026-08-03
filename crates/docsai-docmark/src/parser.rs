@@ -16,9 +16,9 @@ use docsai_model::list::ListId;
 use docsai_model::report::ConversionReport;
 use docsai_model::style::{Align, FontProps, StyleId, Underline, VertAlign};
 use docsai_model::text::{
-    Block, BreakKind, FieldKind, HeaderFooter, HeaderScope, Heading, Inline, List, ListItem,
-    Orientation, ParaFormat, Paragraph, RawFragment, RunProps, Section, Table, TableCell, TableRow,
-    TextBox, TextDocument,
+    Block, BreakKind, FieldKind, Footnote, HeaderFooter, HeaderScope, Heading, Inline, List,
+    ListItem, Orientation, ParaFormat, Paragraph, RawFragment, RunProps, Section, Table, TableCell,
+    TableRow, TextBox, TextDocument,
 };
 use docsai_model::units::{Length, Size};
 use docsai_model::{ConversionReport as Report, Document};
@@ -76,6 +76,7 @@ pub fn parse_with_base(
     let mut sections = Vec::new();
     if nested_sections.is_empty() {
         let mut section = Section {
+            id: None,
             page: fm.page.unwrap_or_default(),
             headers,
             footers,
@@ -103,6 +104,7 @@ pub fn parse_with_base(
         }
         if !body_blocks.is_empty() && sections.is_empty() {
             sections.push(Section {
+                id: None,
                 page: fm.page.unwrap_or_default(),
                 headers,
                 footers,
@@ -115,6 +117,7 @@ pub fn parse_with_base(
     attach_footnotes(&mut sections, &parser.footnotes);
 
     let doc = Document::Text(TextDocument {
+        addressing: Default::default(),
         meta: fm.meta,
         styles: fm.styles,
         list_defs: fm.list_defs,
@@ -270,19 +273,20 @@ fn rewrite_blocks(blocks: &mut [Block], footnotes: &BTreeMap<u32, Vec<Block>>) {
 fn rewrite_inlines(inlines: &mut [Inline], footnotes: &BTreeMap<u32, Vec<Block>>) {
     for inline in inlines.iter_mut() {
         match inline {
-            Inline::Footnote(blocks) => {
+            Inline::Footnote(note) => {
                 // Placeholder: single empty paragraph tagged with index in plain text?
                 // We store index via a temporary Text("\u{0}N") convention during parse.
-                if let Some(Block::Paragraph(p)) = blocks.first() {
-                    if let Some(Inline::Text(t)) = p.content.first() {
-                        if let Some(rest) = t.strip_prefix('\u{1}') {
-                            if let Ok(n) = rest.parse::<u32>() {
-                                if let Some(real) = footnotes.get(&n) {
-                                    *blocks = real.clone();
-                                }
-                            }
-                        }
-                    }
+                let index = match note.blocks.first() {
+                    Some(Block::Paragraph(p)) => match p.content.first() {
+                        Some(Inline::Text(t)) => t
+                            .strip_prefix('\u{1}')
+                            .and_then(|rest| rest.parse::<u32>().ok()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(real) = index.and_then(|n| footnotes.get(&n)) {
+                    note.blocks = real.clone();
                 }
             }
             Inline::Styled { content, .. } | Inline::Link { content, .. } => {
@@ -389,6 +393,7 @@ impl<'a> BodyParser<'a> {
             self.report.stats.headings += 1;
             self.report.stats.paragraphs += 1;
             return Ok(Some(ParsedBlock::Normal(Block::Heading(Heading {
+                id: None,
                 level,
                 paragraph: para,
             }))));
@@ -647,6 +652,7 @@ impl<'a> BodyParser<'a> {
         }
         let ordered = items[0].ordered;
         let mut list = List {
+            id: None,
             def: None,
             ordered,
             level: depth,
@@ -749,6 +755,7 @@ impl<'a> BodyParser<'a> {
             }
             return Ok((
                 Paragraph {
+                    id: None,
                     format,
                     content: Vec::new(),
                 },
@@ -770,6 +777,7 @@ impl<'a> BodyParser<'a> {
         let inlines = self.parse_inlines(content.trim_end())?;
         Ok((
             Paragraph {
+                id: None,
                 format,
                 content: inlines,
             },
@@ -788,7 +796,7 @@ impl<'a> BodyParser<'a> {
         }
         let inlines = self.parse_inlines(text)?;
         match inlines.as_slice() {
-            [Inline::Image(img)] => Ok(Some(img.clone())),
+            [Inline::Image(img)] => Ok(Some((**img).clone())),
             _ => Ok(None),
         }
     }
@@ -955,9 +963,9 @@ fn parse_inlines_inner(text: &str, ctx: &mut BodyParser<'_>) -> Result<Vec<Inlin
                     flush_text(&mut text_buf, &mut out);
                     let n: u32 = inner.parse().unwrap_or(0);
                     // Placeholder footnote; filled later.
-                    out.push(Inline::Footnote(vec![Block::Paragraph(Paragraph::new(
-                        vec![Inline::Text(format!("\u{1}{n}"))],
-                    ))]));
+                    out.push(Inline::Footnote(Footnote::new(vec![Block::Paragraph(
+                        Paragraph::new(vec![Inline::Text(format!("\u{1}{n}"))]),
+                    )])));
                     ctx.report.stats.footnotes += 1;
                     i = end + 1;
                     continue;
@@ -968,7 +976,7 @@ fn parse_inlines_inner(text: &str, ctx: &mut BodyParser<'_>) -> Result<Vec<Inlin
         if c == '!' && i + 1 < chars.len() && chars[i + 1] == '[' {
             if let Some((img, next)) = try_parse_image(&chars, i, ctx)? {
                 flush_text(&mut text_buf, &mut out);
-                out.push(Inline::Image(img));
+                out.push(Inline::Image(Box::new(img)));
                 i = next;
                 continue;
             }
@@ -1899,7 +1907,7 @@ fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
     // Span/link/image attrs attach tightly: `[text]{.underline}`, `![](p){width=1}`.
     // Only peel a trailing `{...}` when whitespace precedes it (or it is the whole line).
     let bytes = text.as_bytes();
-    if !bytes.last().is_some_and(|b| *b == b'}') {
+    if bytes.last().is_none_or(|b| *b != b'}') {
         return (text, None);
     }
     let chars: Vec<char> = text.chars().collect();

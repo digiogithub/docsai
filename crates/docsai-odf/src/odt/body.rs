@@ -5,8 +5,8 @@ use docsai_model::image::RawId;
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{FontProps, ParaProps, StyleId};
 use docsai_model::text::{
-    Block, BreakKind, Heading, Inline, List, ListItem, ParaFormat, Paragraph, RawFragment,
-    RunProps, Table, TableCell, TableRow,
+    Block, BreakKind, Footnote, Heading, Inline, List, ListItem, ParaFormat, Paragraph,
+    RawFragment, RunProps, Table, TableCell, TableRow,
 };
 use docsai_model::units::Length;
 
@@ -123,7 +123,11 @@ fn read_heading(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Block {
         .unwrap_or(1);
     let paragraph = read_paragraph(element, ctx, st);
     st.report.stats.headings += 1;
-    Block::Heading(Heading { level, paragraph })
+    Block::Heading(Heading {
+        id: None,
+        level,
+        paragraph,
+    })
 }
 
 fn read_paragraph(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Paragraph {
@@ -141,6 +145,7 @@ fn read_paragraph(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Parag
     let content = read_inlines(element, ctx, st);
     st.report.stats.paragraphs += 1;
     Paragraph {
+        id: None,
         format: ParaFormat {
             style,
             direct,
@@ -201,7 +206,7 @@ fn read_inlines(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Vec<Inli
                     if let Some(img) =
                         draw::read_frame(e, ctx.package, ctx.part, ctx.styles, st.assets, st.report)
                     {
-                        out.push(Inline::Image(img));
+                        out.push(Inline::Image(Box::new(img)));
                     } else {
                         out.push(Inline::Raw(st.raw(e, ctx)));
                     }
@@ -225,7 +230,7 @@ fn read_inlines(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Vec<Inli
                         .map(|b| read_blocks(b, ctx, st))
                         .unwrap_or_default();
                     st.report.stats.footnotes += 1;
-                    out.push(Inline::Footnote(body));
+                    out.push(Inline::Footnote(Footnote::new(body)));
                 }
                 "page-number" => {
                     out.push(Inline::Field {
@@ -301,6 +306,7 @@ fn read_list(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, level: u8) ->
     }
     st.report.stats.lists += 1;
     List {
+        id: None,
         def,
         ordered,
         level,
@@ -350,6 +356,7 @@ fn read_table(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Table {
 
     st.report.stats.tables += 1;
     Table {
+        id: None,
         style,
         col_widths,
         rows,
@@ -414,7 +421,11 @@ fn read_row(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, is_header: boo
             _ => {}
         }
     }
-    TableRow { cells, is_header }
+    TableRow {
+        id: None,
+        cells,
+        is_header,
+    }
 }
 
 #[allow(dead_code)]
