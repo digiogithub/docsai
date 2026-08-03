@@ -60,6 +60,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Named separately from `cargo test` so a blown token budget reads as a
+      # blown token budget in the checks list, not as "some test failed".
+      - name: Token budget
+        run: cargo test -p docsai-convert --test token_budget
+
       - name: Docs
         run: cargo doc --workspace --no-deps
         env:

@@ -154,6 +154,11 @@ ODF packages use the same IR with automatic-style de-automatization and OpenForm
 preserved. Phase 6 also adds stdin/stdout pipelines, `--out-dir` batch conversion,
 `--style-map`, and `cargo-dist` packaging.
 
+**Phase 10 of plan v2 is closed**: DocMark 1.1 with stable node ids (`{#n7}` + `next-id`,
+`--ids assign|preserve|never`), derived etags, `docsai tokens` and `docsai outline` measured
+with a vendored BPE tokenizer, and the corpus token budget committed as
+`corpus/token-budget.md` and gated in CI.
+
 **Plan v1 (`docs/development-plan.md`, Phases 0–9) is delivered and deprecated.** The active
 plan is **`docs/development-plan-v2.md` (Phases 10–20)**: agent-native primitives first (stable
 node ids + etags, `outline`/`read --select`/`search`, raw-block sidecar, `--fidelity agent`,

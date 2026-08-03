@@ -31,6 +31,7 @@ Practical difference between the two folders:
 | [15 — Phase 10 C](15-phase-10-docmark-1-1.md) | DocMark 1.1: `{#n7}` emission and parse, `next-id`, `--ids` |
 | [16 — Phase 10 D](16-phase-10-tokens.md) | `docsai tokens`: tokenizer decision, traced fragments, first budget numbers |
 | [17 — Phase 10 E](17-phase-10-outline.md) | `docsai outline`: the containment tree, previews, the 5 % budget |
+| [18 — Phase 10 F](18-phase-10-token-gate.md) | The corpus token budget golden, the CI gate, and the phase close |
 
 ## Status in one line
 
@@ -40,6 +41,10 @@ DocMark plus xls read (Phase 3), odt/ods ⇄ DocMark (Phase 4), legacy `.doc`
 read (Phase 5: native degraded + optional LibreOffice → docx), the full CLI
 product surface (Phase 6: `inspect`, batch `--out-dir`, `--style-map`, stdin/stdout,
 `cargo-dist`), and the MCP stdio server (Phase 7: four tools, path/base64).
+
+**Phase 10 of plan v2 is closed**: DocMark 1.1 stable node ids and derived etags, `docsai tokens`
+and `docsai outline` measured with a vendored BPE tokenizer, and the corpus token budget
+(`corpus/token-budget.md`) gated in CI.
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives

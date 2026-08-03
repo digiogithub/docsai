@@ -47,6 +47,15 @@ DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens
 The resulting diff **is reviewed by hand** before confirming: a golden updated
 without looking is a test that has stopped checking anything.
 
+`token-budget.md` is a golden too — what every document here costs an LLM at each
+fidelity level (Phase 10). It is regenerated with the same flag on its own test,
+and an update that inflates the corpus total by more than 5 % is refused unless
+`DOCSAI_ACCEPT_TOKEN_INFLATION=1` says the price is intended:
+
+```bash
+DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test token_budget
+```
+
 ## Text documents (`docx/`)
 
 | File | Trait it isolates |

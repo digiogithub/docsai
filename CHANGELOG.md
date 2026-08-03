@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nodes with id, kind, a ~60-character preview and the measured token cost of each, plus what
   the whole document would cost. On the largest corpus document the outline is 3.8 % of the
   document's own tokens (Phase 10 budget: under 5 %).
+- **Corpus token budget** `corpus/token-budget.md`: what every corpus document costs at each
+  fidelity level, committed as a golden and checked in CI. An update that inflates the corpus
+  total by more than 5 % is refused unless `DOCSAI_ACCEPT_TOKEN_INFLATION=1` says so.
 - Corpus fixture `docx/long-report.docx` (~9 000 tokens): the first corpus document sized for
   measuring rather than for isolating a trait.
 - `docsai_docmark::serialize_traced` and `NodeFragment`: the same output as `serialize`,

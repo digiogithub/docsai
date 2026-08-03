@@ -61,12 +61,23 @@ Tasks:
 Deliverables: DocMark 1.1 (ids + etags), `tokens`, `outline`, token CI gate.
 
 Acceptance criteria:
-- [ ] Property test: ids survive N=10 round trips unchanged, are never reused, and never
+- [x] Property test: ids survive N=10 round trips unchanged, are never reused, and never
       collide across insert/delete sequences (risk P7).
-- [ ] Etag changes iff normalised node content changes (test both directions).
-- [ ] `outline` of the largest corpus document is < 5 % of the tokens of the document itself.
-- [ ] Corpus token report generated in CI and diffable.
-- [ ] Documents written against DocMark 1.0 (no ids) still parse; ids are added on next write.
+      (`crates/docsai-model/tests/addressing.rs`)
+- [x] Etag changes iff normalised node content changes (test both directions).
+      (`etag_tracks_content_and_ignores_formatting`)
+- [x] `outline` of the largest corpus document is < 5 % of the tokens of the document itself.
+      Measured 3.8 % on `corpus/docx/long-report.docx` (345 of 9 158 tokens), the fixture added
+      in 10-E because every other corpus document was too small for the number to mean anything.
+- [x] Corpus token report generated in CI and diffable. (`corpus/token-budget.md`, gated by
+      `crates/docsai-convert/tests/token_budget.rs`; an update inflating the total by > 5 %
+      needs `DOCSAI_ACCEPT_TOKEN_INFLATION=1`.)
+- [x] Documents written against DocMark 1.0 (no ids) still parse; ids are added on next write.
+      (`crates/docsai-docmark/tests/node_ids.rs`)
+
+**Etags are computed but not yet written to the file**: the spec makes emission optional, and
+nothing reads them until Phase 11's `read --select` needs an if-match. `Addressable::etag()` is
+the API and is tested; emitting them is Phase 11's call.
 
 ## Phase 11 — Projections, raw sidecar and `--fidelity agent` (3–4 weeks)
 
