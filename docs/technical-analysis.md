@@ -223,6 +223,29 @@ idempotence.
 | ~~`insta`~~ | **Not used.** Golden files are `.expected.dmk.md` beside the corpus, as prescribed by `AGENTS.md` §6: they are reviewed as normal text in the diff and do not depend on a snapshot format |
 | `cargo-fuzz` | Parser fuzzing (Phase 8) |
 | `cargo-dist` | Multiplatform release packaging |
+| `tiktoken-rs` | Token counting for `docsai tokens`/`outline` and the corpus token gate (Phase 10) — see §4.4 |
+
+### 4.4 Tokenizer (plan v2, Phase 10)
+
+Phase 10 turns document cost into a **measured** number, so the count has to come from a real
+BPE tokenizer, not from `bytes / 4`. Three constraints come from `AGENTS.md`: no network at
+build or run time, no Python, and no heavy dependency without a written reason.
+
+| Crate | Version seen | Vocabulary | Deps | Verdict |
+|---|---|---|---|---|
+| **`tiktoken-rs`** | 0.12 (MIT, MSRV 1.85) | `.tiktoken` files embedded in the crate | `anyhow`, `base64`, `bstr`, `fancy-regex`, `regex`, `rustc-hash` | **Chosen** |
+| `tiktoken` (goliajp) | 3.5 (MIT/Apache-2.0, edition 2024) | zstd-compressed, 11 encodings from 5 vendors | `base64`, `regex`, `rustc-hash`, `ruzstd` | Faster and smaller on disk, but young and single-vendor; no reason to bet the CI gate on it |
+| `bpe-openai` (github/rust-gems) | 0.3 (MIT) | gzipped, rebuilt by a `build.rs` | `bpe`, `either`, `regex-automata`, `rmp-serde`, `serde`, `unicode-normalization` | Linear-time BPE, but a build script that reconstructs the dictionary on every clean build, for a number we compute once per file |
+| `tokenizers` (HuggingFace) | — | `tokenizer.json` **downloaded** | large | Rejected: needs the network, exactly what the plan forbids |
+
+**Decision**: `tiktoken-rs` with the **`o200k_base`** encoding, the one modern OpenAI models use
+and a fair proxy for any current model's cost. What matters for the CI gate is that the number is
+real, deterministic and reproducible offline — not that it matches one vendor's billing exactly.
+The encoding is named in the report (`"encoding": "o200k_base"`) so a future change of tokenizer
+is a visible change in the golden, never a silent one.
+
+Cost accepted: the embedded vocabulary adds a few MB to the binary. `tiktoken-rs` loads each
+encoding lazily through a singleton, so only the one we ask for is built at runtime.
 
 ---
 

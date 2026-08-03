@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docsai-model::addressing`: `NodeId`, `Etag`, `IdPolicy`, the `Addressable` trait and
   the document walkers (`assign_ids`, `for_each_addressable`, `node_ids`). Etags are a
   6-character hash of the node's normalised content, derived on demand and never stored.
+- **`docsai tokens <in> [--fidelity …] [--ids …] [--top N] [--json]`** — the cost of a
+  document measured with a real BPE tokenizer (`tiktoken-rs`, `o200k_base`, vocabulary
+  embedded: no network, no Python), split into front matter and body, plus the cost of
+  every addressed node over the exact DocMark it wrote. Rationale for the tokenizer
+  choice in `docs/technical-analysis.md` §4.4.
+- `docsai_docmark::serialize_traced` and `NodeFragment`: the same output as `serialize`,
+  byte for byte, plus what each addressed node contributed. `docsai-convert::tokens`
+  (`token_report`, `token_report_path`, `TokenReport`, `NodeTokens`) builds on it.
 
 - **Phase 7 MCP server**: `docsai mcp` over stdio (`rmcp`) with tools
   `convert_to_markdown`, `convert_from_markdown`, `inspect_document`, and

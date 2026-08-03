@@ -1,7 +1,7 @@
 //! DocMark 1.1 node ids on the way out and back in (spec §11.1).
 
-use docsai_docmark::{parse, serialize, Fidelity, Options};
-use docsai_model::addressing::{node_ids, IdPolicy};
+use docsai_docmark::{parse, serialize, serialize_traced, Fidelity, Options};
+use docsai_model::addressing::{node_ids, IdPolicy, NodeKind};
 use docsai_model::text::{
     Block, Footnote, Heading, Inline, List, ListItem, Paragraph, Section, TextDocument,
 };
@@ -84,6 +84,42 @@ fn ids_survive_a_round_trip_unchanged() {
 
     let (second, _) = serialize(&parsed, &assets, &opts);
     assert_eq!(first, second, "a second pass must be byte-identical");
+}
+
+#[test]
+fn tracing_reports_what_was_written_and_changes_nothing() {
+    let assets = MemoryAssetStore::new();
+    let opts = options(Fidelity::Full, IdPolicy::Assign);
+    let (plain, _) = serialize(&sample(), &assets, &opts);
+    let (traced, _, fragments) = serialize_traced(&sample(), &assets, &opts);
+
+    assert_eq!(plain, traced, "tracing must not touch the output");
+    assert_eq!(
+        fragments
+            .iter()
+            .map(|f| f.id.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["n1", "n3", "n2", "n4"],
+        "one fragment per addressed node, innermost first: the footnote n3 is\n\
+         finished before the paragraph n2 that contains it"
+    );
+    for fragment in &fragments {
+        assert!(
+            traced.contains(fragment.markdown.trim_end()),
+            "{}: the fragment must be the text that was written, got {:?}",
+            fragment.id.0,
+            fragment.markdown
+        );
+    }
+    let footnote = fragments
+        .iter()
+        .find(|f| f.kind == NodeKind::Footnote)
+        .expect("the sample has a footnote");
+    assert!(
+        footnote.markdown.contains("the note"),
+        "a footnote costs its definition: {:?}",
+        footnote.markdown
+    );
 }
 
 #[test]

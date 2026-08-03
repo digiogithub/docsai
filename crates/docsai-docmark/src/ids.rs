@@ -14,13 +14,28 @@
 //!    cannot be written would be different on every pass.
 
 use docsai_model::addressing::{for_each_addressable, Addressable, Addressing, IdPolicy};
-use docsai_model::Document;
+use docsai_model::{Document, NodeId, NodeKind};
+
+/// The DocMark one addressable node contributed to the output.
+///
+/// This is what makes a node's cost *measurable* instead of estimated: the
+/// fragment is the exact text the node put in the file, so counting its tokens
+/// counts what a model would actually pay for it. Fragments nest — a section's
+/// fragment contains its headings' — so they add up to more than the document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeFragment {
+    pub id: NodeId,
+    pub kind: NodeKind,
+    pub markdown: String,
+}
 
 /// Hands out the ids a serialisation run writes.
 pub(crate) struct IdSource {
     policy: IdPolicy,
     addressing: Addressing,
     emitted: bool,
+    /// Collected only when the caller asked for a traced serialisation.
+    trace: Option<Vec<NodeFragment>>,
 }
 
 impl IdSource {
@@ -36,6 +51,15 @@ impl IdSource {
             policy,
             addressing,
             emitted: false,
+            trace: None,
+        }
+    }
+
+    /// Same, but keeping the DocMark each addressable node writes.
+    pub(crate) fn traced(doc: &Document, policy: IdPolicy) -> Self {
+        IdSource {
+            trace: Some(Vec::new()),
+            ..IdSource::new(doc, policy)
         }
     }
 
@@ -58,6 +82,25 @@ impl IdSource {
     /// carries no id and the document therefore stays DocMark 1.0.
     pub(crate) fn next_id(&self) -> Option<u64> {
         self.emitted.then_some(self.addressing.next_id)
+    }
+
+    /// Records what `id` wrote. A no-op unless the run is traced, and unless
+    /// the node took an id at all — a node without an address cannot be
+    /// reported on.
+    pub(crate) fn record(&mut self, id: Option<&str>, kind: NodeKind, markdown: &str) {
+        let (Some(trace), Some(id)) = (self.trace.as_mut(), id) else {
+            return;
+        };
+        trace.push(NodeFragment {
+            id: NodeId::new(id),
+            kind,
+            markdown: markdown.to_string(),
+        });
+    }
+
+    /// The fragments collected by a traced run, innermost first.
+    pub(crate) fn into_fragments(self) -> Vec<NodeFragment> {
+        self.trace.unwrap_or_default()
     }
 }
 

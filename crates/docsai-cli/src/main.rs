@@ -96,6 +96,29 @@ enum Command {
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
+    /// Measure what a document costs an LLM, per document and per node.
+    ///
+    /// Counted with a real BPE tokenizer (`o200k_base`) over the DocMark that
+    /// would be written, not estimated from the file size.
+    Tokens {
+        /// Input document.
+        input: PathBuf,
+        /// How much of the source survives: full, standard or plain.
+        #[arg(long, default_value = "full")]
+        fidelity: String,
+        /// Node ids in the measured output: `assign`, `preserve` or `never`.
+        #[arg(long, value_name = "MODE")]
+        ids: Option<String>,
+        /// How many of the heaviest nodes to list.
+        #[arg(long, default_value_t = 10, value_name = "N")]
+        top: usize,
+        /// Print the token report as JSON on stdout.
+        #[arg(long)]
+        json: bool,
+        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        #[arg(long, default_value = "auto", value_name = "MODE")]
+        use_loffice: String,
+    },
     /// Show which formats this build can read and write.
     Formats {
         /// Print the matrix as JSON.
@@ -164,6 +187,14 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             json,
             use_loffice,
         } => run_inspect(input, *json, use_loffice, cli.verbose),
+        Command::Tokens {
+            input,
+            fidelity,
+            ids,
+            top,
+            json,
+            use_loffice,
+        } => run_tokens(input, fidelity, ids.as_deref(), *top, *json, use_loffice),
         Command::Roundtrip {
             input,
             output,
@@ -265,6 +296,56 @@ fn run_inspect(input: &Path, json: bool, use_loffice: &str, verbose: bool) -> an
     } else {
         EXIT_OK
     })
+}
+
+fn run_tokens(
+    input: &Path,
+    fidelity: &str,
+    ids: Option<&str>,
+    top: usize,
+    json: bool,
+    use_loffice: &str,
+) -> anyhow::Result<u8> {
+    let options = ConvertOptions {
+        fidelity: parse_fidelity(fidelity)?,
+        ids: parse_ids(ids)?,
+        use_loffice: parse_use_loffice(use_loffice)?,
+        ..Default::default()
+    };
+    let report = docsai_convert::token_report_path(input, &options)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(EXIT_OK);
+    }
+    println!(
+        "{}  {}  fidelity={}  encoding={}",
+        report.path.as_deref().unwrap_or("<document>"),
+        report.source_format,
+        report.fidelity,
+        report.encoding
+    );
+    println!(
+        "  total         {:>7} tokens ({} bytes)",
+        report.total, report.bytes
+    );
+    println!("  front matter  {:>7}", report.front_matter);
+    println!("  body          {:>7}", report.body);
+    if report.nodes.is_empty() {
+        println!("  nodes             none addressed at this fidelity");
+        return Ok(EXIT_OK);
+    }
+    println!("  nodes         {:>7} addressed", report.nodes.len());
+    println!("  heaviest (nested nodes counted more than once):");
+    for node in report.heaviest(top) {
+        println!(
+            "    {:<6} {:<9} {:>6}  {}",
+            node.id.0,
+            node.kind.as_str(),
+            node.tokens,
+            node.preview
+        );
+    }
+    Ok(EXIT_OK)
 }
 
 fn inspect_stdin(json: bool, use_loffice: &str, verbose: bool) -> anyhow::Result<u8> {

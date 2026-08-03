@@ -15,7 +15,7 @@ use docsai_model::text::{
 };
 use docsai_model::units::Length;
 
-use docsai_model::addressing::{list_is_addressable, paragraph_is_container};
+use docsai_model::addressing::{list_is_addressable, paragraph_is_container, NodeKind};
 
 use crate::attrs::Attrs;
 use crate::escape::{escape, TextContext};
@@ -120,7 +120,7 @@ impl<'a> Writer<'a> {
         if wrap && !self.plain() {
             let mut attrs = Attrs::new();
             attrs.class("section");
-            if let Some(id) = id {
+            if let Some(id) = id.clone() {
                 attrs.id(id);
             }
             if section.page.columns > 1 {
@@ -131,6 +131,7 @@ impl<'a> Writer<'a> {
             }
             attrs.set("orientation", section.page.orientation.as_str());
             let rendered = format!("::: {}\n{}\n:::", attrs.render(), body.trim_end());
+            self.ids.record(id.as_deref(), NodeKind::Section, &rendered);
             self.block(&rendered);
         } else {
             self.block(&body);
@@ -185,12 +186,17 @@ impl<'a> Writer<'a> {
                 let id = paragraph_is_container(p)
                     .then(|| self.ids.take(p))
                     .flatten();
-                self.render_paragraph(p, None, &[], id)
+                let rendered = self.render_paragraph(p, None, &[], id.clone());
+                self.ids
+                    .record(id.as_deref(), NodeKind::Paragraph, &rendered);
+                rendered
             }
             Block::Heading(h) => {
                 let hashes = "#".repeat(h.level.clamp(1, 6) as usize);
                 let id = self.ids.take(h);
-                self.render_paragraph(&h.paragraph, Some(&hashes), &[], id)
+                let rendered = self.render_paragraph(&h.paragraph, Some(&hashes), &[], id.clone());
+                self.ids.record(id.as_deref(), NodeKind::Heading, &rendered);
+                rendered
             }
             Block::List(list) => self.render_list(list, depth),
             Block::Table(table) => self.render_table(table),
@@ -347,6 +353,7 @@ impl<'a> Writer<'a> {
         let mut list_id = list_is_addressable(list)
             .then(|| self.ids.take(list))
             .flatten();
+        let traced_id = list_id.clone();
         let mut out = String::new();
         for (index, item) in list.items.iter().enumerate() {
             let marker = if list.ordered {
@@ -374,7 +381,9 @@ impl<'a> Writer<'a> {
                     let first_id = paragraph_is_container(first)
                         .then(|| self.ids.take(first))
                         .flatten();
-                    let head = self.render_paragraph(first, None, &pairs, first_id);
+                    let head = self.render_paragraph(first, None, &pairs, first_id.clone());
+                    self.ids
+                        .record(first_id.as_deref(), NodeKind::Paragraph, &head);
                     let tail = self.render_blocks(rest, depth + 1);
                     match rest.first() {
                         None => head,
@@ -396,7 +405,9 @@ impl<'a> Writer<'a> {
                 }
             }
         }
-        out.trim_end().to_string()
+        let out = out.trim_end().to_string();
+        self.ids.record(traced_id.as_deref(), NodeKind::List, &out);
+        out
     }
 
     // ----------------------------------------------------------------------
@@ -409,6 +420,12 @@ impl<'a> Writer<'a> {
             return String::new();
         }
         let id = self.ids.take(table);
+        let rendered = self.render_table_body(table, id.clone());
+        self.ids.record(id.as_deref(), NodeKind::Table, &rendered);
+        rendered
+    }
+
+    fn render_table_body(&mut self, table: &Table, id: Option<String>) -> String {
         if table.is_complex() && !self.plain() {
             return self.render_complex_table(table, id);
         }
@@ -517,9 +534,11 @@ impl<'a> Writer<'a> {
         for row in &table.rows {
             let mut row_attrs = Attrs::new();
             row_attrs.class("row");
-            if let Some(id) = self.ids.take(row) {
+            let row_id = self.ids.take(row);
+            if let Some(id) = row_id.clone() {
                 row_attrs.id(id);
             }
+            let row_start = out.len();
             out.push_str(&format!("::: {}\n", row_attrs.render()));
             for cell in &row.cells {
                 let mut cell_attrs = Attrs::new();
@@ -538,6 +557,9 @@ impl<'a> Writer<'a> {
                 ));
             }
             out.push_str(":::\n");
+            let row_markdown = out[row_start..].to_string();
+            self.ids
+                .record(row_id.as_deref(), NodeKind::TableRow, &row_markdown);
         }
         out.push_str(":::");
         out
@@ -590,11 +612,16 @@ impl<'a> Writer<'a> {
                 for line in lines {
                     definition.push_str(&format!("\n    {line}"));
                 }
-                self.footnotes.push(definition);
                 let mut attrs = Attrs::new();
-                if let Some(id) = self.ids.take(note) {
+                let id = self.ids.take(note);
+                if let Some(id) = id.clone() {
                     attrs.id(id);
                 }
+                // A footnote is addressed on its reference but *costs* its
+                // definition, which is what the reader ends up paying for.
+                self.ids
+                    .record(id.as_deref(), NodeKind::Footnote, &definition);
+                self.footnotes.push(definition);
                 format!("[^{index}]{}", attrs.render())
             }
             Inline::Field {
@@ -725,6 +752,14 @@ impl<'a> Writer<'a> {
     // ----------------------------------------------------------------------
 
     fn render_image(&mut self, image: &ImageRef) -> String {
+        let (rendered, id) = self.render_image_body(image);
+        self.ids.record(id.as_deref(), NodeKind::Image, &rendered);
+        rendered
+    }
+
+    /// The image and the id it was written with, which is not necessarily the
+    /// one the IR carries: `assign` hands out fresh ids at write time.
+    fn render_image_body(&mut self, image: &ImageRef) -> (String, Option<String>) {
         self.report.stats.images += 1;
         let alt = escape(&image.alt, TextContext::LinkLabel);
         let path = match self.assets.info(&image.asset) {
@@ -736,11 +771,12 @@ impl<'a> Writer<'a> {
         };
 
         if self.plain() {
-            return format!("![{alt}]({path})");
+            return (format!("![{alt}]({path})"), None);
         }
 
         let mut attrs = Attrs::new();
-        if let Some(id) = self.ids.take(image) {
+        let id = self.ids.take(image);
+        if let Some(id) = id.clone() {
             attrs.id(id);
         }
         let geometry = &image.geometry;
@@ -805,7 +841,7 @@ impl<'a> Writer<'a> {
             attrs.set("render", "unsupported");
         }
 
-        format!("![{alt}]({path}){}", attrs.render())
+        (format!("![{alt}]({path}){}", attrs.render()), id)
     }
 
     fn anchor_attrs(&self, attrs: &mut Attrs, anchor: &Anchor) {

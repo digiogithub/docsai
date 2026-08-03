@@ -29,6 +29,14 @@ pub enum NodeKind {
     Sheet,
 }
 
+/// Serialised as the spec's own name for the kind (`row`, not `TableRow`),
+/// which is what `docsai tokens --json` and `outline --json` report.
+impl serde::Serialize for NodeKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 impl NodeKind {
     pub fn as_str(self) -> &'static str {
         match self {

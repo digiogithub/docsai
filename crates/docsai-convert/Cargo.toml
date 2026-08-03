@@ -16,6 +16,7 @@ docsai-office = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+tiktoken-rs = { workspace = true }
 tracing = { workspace = true }
 tempfile = { workspace = true }
 

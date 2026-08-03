@@ -45,6 +45,9 @@ serde = { version = "1", features = ["derive"] }
 # value by 1 ULP, which would silently corrupt spreadsheet numbers.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
+# Token counting for `docsai tokens` (plan v2 Phase 10). Vocabulary embedded in
+# the crate: no network, no Python. Rationale in docs/technical-analysis.md §4.4.
+tiktoken-rs = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

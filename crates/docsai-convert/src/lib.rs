@@ -12,6 +12,7 @@ pub mod loffice;
 mod pipeline;
 pub mod service;
 pub mod style_map;
+pub mod tokens;
 
 pub use assets::DirAssetStore;
 pub use batch::{convert_batch, BatchOutcome, BatchReport};
@@ -29,6 +30,7 @@ pub use service::{
     ToMarkdownResult,
 };
 pub use style_map::{apply_style_map, StyleMap, StyleTarget};
+pub use tokens::{token_report, token_report_path, NodeTokens, TokenReport};
 
 use docsai_model::Format;
 

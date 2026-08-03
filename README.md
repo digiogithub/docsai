@@ -105,6 +105,8 @@ docsai convert legacy.doc --use-loffice never      # force native degraded path
 docsai convert legacy.doc --use-loffice require    # fail if LibreOffice is missing
 docsai inspect report.docx                         # metadata, styles, media, stats
 docsai inspect report.docx --json                  # same, machine-readable
+docsai tokens report.docx                          # what the document costs an LLM
+docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary
 docsai roundtrip report.docx
 docsai mcp                                          # MCP server over stdio (Phase 7)
@@ -120,6 +122,21 @@ agent can point at a node and keep pointing at it across edits. Ids are never
 renumbered on insertion and never reused after deletion. `--ids preserve` writes
 back only the ids a document already had, `--ids never` reproduces the DocMark 1.0
 shape. The lossy levels default to `never`, and `plain` never carries ids.
+
+Token budget (`docsai tokens`): the cost of the document is **measured** with a
+real BPE tokenizer (`o200k_base`, embedded — no network, no Python), never
+estimated from the file size. The report splits front matter from body and lists
+the heaviest addressed nodes, each counted over the exact DocMark it wrote:
+
+```text
+report.docx  docx  fidelity=full  encoding=o200k_base
+  total             701 tokens (2063 bytes)
+  front matter      565
+  body              137
+```
+
+Nested nodes are counted more than once on purpose (a section's cost includes its
+headings'), so the per-node numbers do not sum to the total.
 
 Style maps (`--style-map`, spec §5) are **unidirectional** publication helpers:
 

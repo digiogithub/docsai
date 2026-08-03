@@ -33,6 +33,7 @@ mod writer;
 mod yaml;
 
 pub use error::ParseError;
+pub use ids::NodeFragment;
 pub use parser::{parse, parse_with_base};
 
 use docsai_model::addressing::IdPolicy;
@@ -113,13 +114,47 @@ pub fn serialize(
     assets: &dyn AssetStore,
     options: &Options,
 ) -> (String, ConversionReport) {
+    let (markdown, report, _) = run(doc, assets, options, false);
+    (markdown, report)
+}
+
+/// Serialises and reports what each addressable node wrote.
+///
+/// Same output as [`serialize`], byte for byte — the fragments are a view of
+/// the run, not a different one — plus the DocMark each addressed node
+/// contributed. That is what makes a node's cost measurable (`docsai tokens`)
+/// instead of guessed from its text length.
+///
+/// Fragments come out innermost first — a node is reported when it is
+/// finished, so a footnote arrives before the paragraph containing it — and
+/// nested ones overlap: node costs deliberately add up to more than the
+/// document. Nodes without an id contribute no fragment, so a run under
+/// [`IdPolicy::Never`] (or at `plain`) reports nothing.
+pub fn serialize_traced(
+    doc: &Document,
+    assets: &dyn AssetStore,
+    options: &Options,
+) -> (String, ConversionReport, Vec<NodeFragment>) {
+    run(doc, assets, options, true)
+}
+
+fn run(
+    doc: &Document,
+    assets: &dyn AssetStore,
+    options: &Options,
+    trace: bool,
+) -> (String, ConversionReport, Vec<NodeFragment>) {
     // `plain` is CommonMark and carries no attributes at all (spec §6).
     let policy = if options.fidelity == Fidelity::Plain {
         IdPolicy::Never
     } else {
         options.ids
     };
-    let mut ids = IdSource::new(doc, policy);
+    let mut ids = if trace {
+        IdSource::traced(doc, policy)
+    } else {
+        IdSource::new(doc, policy)
+    };
 
     let (body, report) = match doc {
         Document::Text(text) => {
@@ -144,5 +179,5 @@ pub fn serialize(
         ids.next_id(),
     );
     out.push_str(&body);
-    (out, report)
+    (out, report, ids.into_fragments())
 }

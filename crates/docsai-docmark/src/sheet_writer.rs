@@ -6,6 +6,7 @@ use docsai_model::assets::AssetStore;
 use docsai_model::image::{Anchor, ImageRef};
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::sheet::{Cell, CellRange, CellRef, CellValue, FormulaDialect, Sheet, Workbook};
+use docsai_model::NodeKind;
 
 use crate::attrs::Attrs;
 use crate::escape::{escape, escape_attr_value, is_bare_value, TextContext};
@@ -35,7 +36,10 @@ pub fn write_workbook(
                 out.push('\n');
             }
         }
-        write_sheet(&mut out, sheet, assets, options, &mut report, ids);
+        let start = out.len();
+        let id = write_sheet(&mut out, sheet, assets, options, &mut report, ids);
+        let markdown = out[start..].to_string();
+        ids.record(id.as_deref(), NodeKind::Sheet, &markdown);
     }
 
     while out.ends_with("\n\n") {
@@ -54,9 +58,10 @@ fn write_sheet(
     options: &Options,
     report: &mut ConversionReport,
     ids: &mut IdSource,
-) {
+) -> Option<String> {
     let plain = options.fidelity == Fidelity::Plain;
     let full = options.fidelity == Fidelity::Full;
+    let mut sheet_id = None;
 
     // Heading
     if plain {
@@ -67,7 +72,8 @@ fn write_sheet(
     } else {
         let mut attrs = Attrs::new();
         attrs.class("sheet");
-        if let Some(id) = ids.take(sheet) {
+        sheet_id = ids.take(sheet);
+        if let Some(id) = sheet_id.clone() {
             attrs.id(id);
         }
         if let Some(range) = sheet.used_range() {
@@ -145,7 +151,9 @@ fn write_sheet(
     if !sheet.images.is_empty() && !plain {
         out.push_str("::: {.sheet-images}\n");
         for image in &sheet.images {
-            out.push_str(&render_image(image, assets, options, report, ids));
+            let (markdown, id) = render_image(image, assets, options, report, ids);
+            ids.record(id.as_deref(), NodeKind::Image, &markdown);
+            out.push_str(&markdown);
             out.push('\n');
             if options.fidelity == Fidelity::Full {
                 // blank line between images for readability like the spec
@@ -179,6 +187,8 @@ fn write_sheet(
             });
         }
     }
+
+    sheet_id
 }
 
 fn write_table(out: &mut String, sheet: &Sheet, range: CellRange) {
@@ -402,7 +412,7 @@ fn render_image(
     options: &Options,
     report: &mut ConversionReport,
     ids: &mut IdSource,
-) -> String {
+) -> (String, Option<String>) {
     let info = assets.info(&image.asset);
     let file_name = info
         .map(|i| i.file_name.clone())
@@ -410,7 +420,8 @@ fn render_image(
     let path = format!("{}/{}", options.assets_dir.trim_end_matches('/'), file_name);
     let alt = escape(&image.alt, TextContext::LinkLabel);
     let mut attrs = Attrs::new();
-    if let Some(id) = ids.take(image) {
+    let id = ids.take(image);
+    if let Some(id) = id.clone() {
         attrs.id(id);
     }
 
@@ -496,7 +507,7 @@ fn render_image(
     attrs.set_opt("link", image.link.clone());
     attrs.set_opt("external-src", image.external_src.clone());
 
-    format!("![{alt}]({path}){}", attrs.render())
+    (format!("![{alt}]({path}){}", attrs.render()), id)
 }
 
 fn col_letter(col: u32) -> String {
