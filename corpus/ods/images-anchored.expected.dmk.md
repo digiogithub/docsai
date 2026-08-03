@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: ods
+next-id: 3
 title: "Imagenes ancladas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -12,13 +13,13 @@ workbook:
   active-sheet: "Hoja"
 ---
 
-# Hoja {.sheet cols="A:B"}
+# Hoja {#n1 .sheet cols="A:B"}
 
 |       | A          | B    |
 | ----- | ---------- | ---- |
 | **1** | Con imagen | otra |
 
 ::: {.sheet-images}
-![Pic1](assets/img-40e10599.png){anchor=one-cell from=A1 from-offset="0.1cm,0.1cm" height=1.5cm name=Pic1 width=2cm}
+![Pic1](assets/img-40e10599.png){#n2 anchor=one-cell from=A1 from-offset="0.1cm,0.1cm" height=1.5cm name=Pic1 width=2cm}
 
 :::

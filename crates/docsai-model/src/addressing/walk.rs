@@ -205,18 +205,28 @@ pub fn clear_ids(doc: &mut Document) {
 ///
 /// This is what `outline` and any id lookup use; the mutable twin below is
 /// reserved for assignment. The two traversals must stay in the same order.
+///
+/// **A node is addressable only where DocMark can carry its id.** A section is
+/// addressed only in a multi-section document, where the serializer emits a
+/// `::: {.section}` container, and a table row only inside a complex table,
+/// which is the only shape with a `::: {.row}` of its own. Assigning an id that
+/// cannot be written would make it change on every round trip, which is worse
+/// than not having one.
 pub fn for_each_addressable(doc: &Document, f: &mut dyn FnMut(&dyn Addressable)) {
     match doc {
         Document::Text(text) => {
+            let addressable_sections = text.sections.len() > 1;
             for section in &text.sections {
-                f(section);
-                each_blocks(&section.blocks, f);
+                if addressable_sections {
+                    f(section);
+                }
                 for header in &section.headers {
                     each_blocks(&header.blocks, f);
                 }
                 for footer in &section.footers {
                     each_blocks(&footer.blocks, f);
                 }
+                each_blocks(&section.blocks, f);
             }
         }
         Document::Workbook(book) => {
@@ -255,15 +265,20 @@ fn each_blocks(blocks: &[Block], f: &mut dyn FnMut(&dyn Addressable)) {
                 each_inlines(&h.paragraph.content, f);
             }
             Block::List(list) => {
-                f(list);
+                if list_is_addressable(list) {
+                    f(list);
+                }
                 for item in &list.items {
                     each_blocks(&item.blocks, f);
                 }
             }
             Block::Table(table) => {
                 f(table);
+                let addressable_rows = table.is_complex();
                 for row in &table.rows {
-                    f(row);
+                    if addressable_rows {
+                        f(row);
+                    }
                     for cell in &row.cells {
                         each_blocks(&cell.blocks, f);
                     }
@@ -286,6 +301,10 @@ fn each_inlines(inlines: &[Inline], f: &mut dyn FnMut(&dyn Addressable)) {
                 f(note);
                 each_blocks(&note.blocks, f);
             }
+            // An inline picture is as addressable as a block-level one: it is
+            // the same `ImageRef`, and the serializer gives it the same
+            // attribute block.
+            Inline::Image(image) => f(image.as_ref()),
             _ => {}
         }
     }
@@ -295,15 +314,18 @@ fn each_inlines(inlines: &[Inline], f: &mut dyn FnMut(&dyn Addressable)) {
 fn visit(doc: &mut Document, f: &mut dyn FnMut(&mut dyn Addressable)) {
     match doc {
         Document::Text(text) => {
+            let addressable_sections = text.sections.len() > 1;
             for section in &mut text.sections {
-                f(section);
-                visit_blocks(&mut section.blocks, f);
+                if addressable_sections {
+                    f(section);
+                }
                 for header in &mut section.headers {
                     visit_blocks(&mut header.blocks, f);
                 }
                 for footer in &mut section.footers {
                     visit_blocks(&mut footer.blocks, f);
                 }
+                visit_blocks(&mut section.blocks, f);
             }
         }
         Document::Workbook(book) => {
@@ -331,15 +353,20 @@ fn visit_blocks(blocks: &mut [Block], f: &mut dyn FnMut(&mut dyn Addressable)) {
                 visit_inlines(&mut h.paragraph.content, f);
             }
             Block::List(list) => {
-                f(list);
+                if list_is_addressable(list) {
+                    f(list);
+                }
                 for item in &mut list.items {
                     visit_blocks(&mut item.blocks, f);
                 }
             }
             Block::Table(table) => {
                 f(table);
+                let addressable_rows = table.is_complex();
                 for row in &mut table.rows {
-                    f(row);
+                    if addressable_rows {
+                        f(row);
+                    }
                     for cell in &mut row.cells {
                         visit_blocks(&mut cell.blocks, f);
                     }
@@ -362,9 +389,20 @@ fn visit_inlines(inlines: &mut [Inline], f: &mut dyn FnMut(&mut dyn Addressable)
                 f(note);
                 visit_blocks(&mut note.blocks, f);
             }
+            Inline::Image(image) => f(image.as_mut()),
             _ => {}
         }
     }
+}
+
+/// A list carries its id in the attribute block of its first item, so it needs
+/// that item to start with a paragraph — the same condition that already
+/// governs where the list definition is named (spec §3.3).
+pub fn list_is_addressable(list: &List) -> bool {
+    matches!(
+        list.items.first().and_then(|item| item.blocks.first()),
+        Some(Block::Paragraph(_))
+    )
 }
 
 /// A paragraph is addressable only when it *contains* something an agent can

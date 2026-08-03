@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 3
 title: "Notas al pie"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -47,6 +48,6 @@ styles:
     font: { bold: true }
 ---
 
-Texto con nota[^1]. {.Standard}
+Texto con nota[^1]{#n2}. {#n1 .Standard}
 
 [^1]: Primera nota al pie. {.Standard}

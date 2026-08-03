@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 3
 title: "Estilos basicos"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -39,11 +40,11 @@ styles:
     name: "Table Grid"
 ---
 
-# Titulo de nivel 1 {.Heading1}
+# Titulo de nivel 1 {#n1 .Heading1}
 
 **negrita** *cursiva* ~~tachado~~ [subrayado]{.underline}
 
-## Titulo de nivel 2 {.Heading2}
+## Titulo de nivel 2 {#n2 .Heading2}
 
 [rojo]{color=#FF0000} [resaltado]{highlight=yellow} [Arial 14]{font=Arial size=14pt} x[2]{.sup} H[2]{.sub}O
 

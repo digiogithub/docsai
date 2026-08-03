@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: xlsx
+next-id: 2
 title: "Celdas combinadas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -16,7 +17,7 @@ styles:
     font: { name: "Calibri", size: 11pt, color: "#FFFFFF", bold: true }
 ---
 
-# Combinadas {.sheet col-widths="18.5,," cols="A:C"}
+# Combinadas {#n1 .sheet col-widths="18.5,," cols="A:C"}
 
 |       | A                  | B   | C     |
 | ----- | ------------------ | --- | ----- |

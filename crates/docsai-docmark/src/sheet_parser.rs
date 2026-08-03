@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use docsai_model::addressing::NodeId;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{
     Anchor, CellAnchor, CropRect, Flip, ImageGeometry, ImageRef, RawId, SimpleBorder,
@@ -78,7 +79,7 @@ pub fn parse_workbook(
     report.stats.styles = fm.styles.styles.len() as u32;
 
     Ok(Document::Workbook(Workbook {
-        addressing: Default::default(),
+        addressing: fm.addressing,
         meta: fm.meta,
         styles: fm.styles,
         defined_names: fm.defined_names,
@@ -139,6 +140,7 @@ fn parse_sheet(
 ) -> Result<Sheet, ParseError> {
     let (name, attrs) = parse_heading(&section.heading, section.heading_line)?;
     let mut sheet = Sheet::new(name);
+    sheet.id = attrs.id_ref().map(NodeId::new);
 
     if let Some(frozen) = attrs.get("frozen") {
         if let Some(cell) = CellRef::parse_a1(frozen) {
@@ -730,6 +732,7 @@ fn parse_image_line(
     }
 
     let mut image = ImageRef::new(asset_id, geometry);
+    image.id = attrs.id_ref().map(NodeId::new);
     image.alt = alt;
     image.title = attrs.get("title").map(str::to_string);
     image.name = attrs.get("name").map(str::to_string);

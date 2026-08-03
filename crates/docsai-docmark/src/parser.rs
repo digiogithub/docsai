@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use docsai_model::addressing::{observe_ids, NodeId};
 use docsai_model::assets::AssetStore;
 use docsai_model::image::RawId;
 use docsai_model::image::{
@@ -51,7 +52,7 @@ pub fn parse_with_base(
     };
 
     if crate::sheet_parser::looks_like_workbook(&fm, body) {
-        let doc = crate::sheet_parser::parse_workbook(
+        let mut doc = crate::sheet_parser::parse_workbook(
             body,
             body_line,
             fm,
@@ -59,6 +60,7 @@ pub fn parse_with_base(
             assets,
             &mut report,
         )?;
+        observe_ids(&mut doc);
         return Ok((doc, report));
     }
 
@@ -116,13 +118,16 @@ pub fn parse_with_base(
     // Attach footnote definitions collected from the body.
     attach_footnotes(&mut sections, &parser.footnotes);
 
-    let doc = Document::Text(TextDocument {
-        addressing: Default::default(),
+    let mut doc = Document::Text(TextDocument {
+        addressing: fm.addressing,
         meta: fm.meta,
         styles: fm.styles,
         list_defs: fm.list_defs,
         sections,
     });
+    // A hand-written id can sit above `next-id`; the counter must dominate
+    // every id in the document before anything is allocated again.
+    observe_ids(&mut doc);
     report.stats.styles = match &doc {
         Document::Text(t) => t.styles.styles.len() as u32,
         Document::Workbook(w) => w.styles.styles.len() as u32,
@@ -203,6 +208,7 @@ fn partition_structure(
 }
 
 fn apply_section_attrs(section: &mut Section, attrs: &Attrs) {
+    section.id = attrs.id_ref().map(NodeId::new);
     if let Some(cols) = attrs.get("columns").and_then(|v| v.parse().ok()) {
         section.page.columns = cols;
     }
@@ -389,11 +395,13 @@ impl<'a> BodyParser<'a> {
         // Heading
         if let Some(rest) = strip_heading(trimmed) {
             let (level, content) = rest;
-            let (para, _) = self.parse_paragraph_line(content, true)?;
+            let (mut para, _) = self.parse_paragraph_line(content, true)?;
+            // The `{#id}` on a heading line addresses the heading itself.
+            let id = para.id.take();
             self.report.stats.headings += 1;
             self.report.stats.paragraphs += 1;
             return Ok(Some(ParsedBlock::Normal(Block::Heading(Heading {
-                id: None,
+                id,
                 level,
                 paragraph: para,
             }))));
@@ -523,7 +531,10 @@ impl<'a> BodyParser<'a> {
             if !inner_attrs.has_class("row") {
                 continue;
             }
-            let mut row = TableRow::default();
+            let mut row = TableRow {
+                id: inner_attrs.id_ref().map(NodeId::new),
+                ..Default::default()
+            };
             let mut cell_src = inner_body.trim();
             while !cell_src.is_empty() {
                 cell_src = cell_src.trim_start_matches('\n').trim_start();
@@ -662,11 +673,14 @@ impl<'a> BodyParser<'a> {
             let mut blocks = Vec::new();
             // First line is paragraph content (may include attrs)
             let first = item.lines.first().map(String::as_str).unwrap_or("");
-            let (para, list_id) = self.parse_paragraph_line(first, false)?;
+            let (para, extras) = self.parse_paragraph_line(first, false)?;
             if list.def.is_none() {
-                if let Some(id) = list_id {
-                    list.def = Some(ListId::new(id));
+                if let Some(def) = extras.list_def {
+                    list.def = Some(ListId::new(def));
                 }
+            }
+            if list.id.is_none() {
+                list.id = extras.list_id.map(NodeId::new);
             }
             // Nested content
             let rest = if item.lines.len() > 1 {
@@ -742,32 +756,36 @@ impl<'a> BodyParser<'a> {
         &mut self,
         text: &str,
         is_heading: bool,
-    ) -> Result<(Paragraph, Option<String>), ParseError> {
+    ) -> Result<(Paragraph, ParaExtras), ParseError> {
         let text = text.trim_end();
         // empty marker
         if text == "[]{.empty}" || text.starts_with("[]{.empty}") {
             let rest = text.trim_start_matches("[]{.empty}").trim_start();
             let mut format = ParaFormat::default();
-            let mut list_id = None;
+            let mut extras = ParaExtras::default();
+            let mut id = None;
             if let Some(attrs) = Attrs::parse(rest) {
-                list_id = attrs.get("list").map(str::to_string);
+                extras = ParaExtras::from_attrs(&attrs);
+                id = attrs.id_ref().map(NodeId::new);
                 format = paragraph_format_from_attrs(&attrs, is_heading);
             }
             return Ok((
                 Paragraph {
-                    id: None,
+                    id,
                     format,
                     content: Vec::new(),
                 },
-                list_id,
+                extras,
             ));
         }
 
         let (content, attrs) = split_trailing_attrs(text);
-        let mut list_id = None;
+        let mut extras = ParaExtras::default();
+        let mut id = None;
         let mut format = ParaFormat::default();
         if let Some(attrs) = attrs {
-            list_id = attrs.get("list").map(str::to_string);
+            extras = ParaExtras::from_attrs(&attrs);
+            id = attrs.id_ref().map(NodeId::new);
             format = paragraph_format_from_attrs(&attrs, is_heading);
         }
         // Content may still end with `{.empty}` form already handled.
@@ -777,11 +795,11 @@ impl<'a> BodyParser<'a> {
         let inlines = self.parse_inlines(content.trim_end())?;
         Ok((
             Paragraph {
-                id: None,
+                id,
                 format,
                 content: inlines,
             },
-            list_id,
+            extras,
         ))
     }
 
@@ -911,6 +929,7 @@ impl<'a> BodyParser<'a> {
         });
 
         let mut image = ImageRef::new(id, geometry);
+        image.id = attrs.id_ref().map(NodeId::new);
         image.alt = alt;
         image.title = attrs.get("title").map(str::to_string);
         image.name = attrs.get("name").map(str::to_string);
@@ -962,12 +981,27 @@ fn parse_inlines_inner(text: &str, ctx: &mut BodyParser<'_>) -> Result<Vec<Inlin
                 if inner.chars().all(|ch| ch.is_ascii_digit()) {
                     flush_text(&mut text_buf, &mut out);
                     let n: u32 = inner.parse().unwrap_or(0);
+                    let mut next = end + 1;
+                    // The reference is where a footnote carries its address.
+                    let mut id = None;
+                    if next < chars.len() && chars[next] == '{' {
+                        if let Some(aend) = find_closing_brace(&chars, next + 1) {
+                            let raw: String = chars[next..=aend].iter().collect();
+                            if let Some(attrs) = Attrs::parse(&raw) {
+                                id = attrs.id_ref().map(NodeId::new);
+                                next = aend + 1;
+                            }
+                        }
+                    }
                     // Placeholder footnote; filled later.
-                    out.push(Inline::Footnote(Footnote::new(vec![Block::Paragraph(
-                        Paragraph::new(vec![Inline::Text(format!("\u{1}{n}"))]),
-                    )])));
+                    let mut note =
+                        Footnote::new(vec![Block::Paragraph(Paragraph::new(vec![Inline::Text(
+                            format!("\u{1}{n}"),
+                        )]))]);
+                    note.id = id;
+                    out.push(Inline::Footnote(note));
                     ctx.report.stats.footnotes += 1;
-                    i = end + 1;
+                    i = next;
                     continue;
                 }
             }
@@ -1305,6 +1339,24 @@ fn find_closing_delim(chars: &[char], start: usize, delim: &str) -> Option<usize
 // Attr → IR helpers
 // ---------------------------------------------------------------------------
 
+/// What a paragraph's attribute block says about the *container* around it: a
+/// list names its definition and its id there, because a Markdown list has no
+/// attribute slot of its own (spec §3.3, §11.1).
+#[derive(Debug, Default)]
+struct ParaExtras {
+    list_def: Option<String>,
+    list_id: Option<String>,
+}
+
+impl ParaExtras {
+    fn from_attrs(attrs: &Attrs) -> Self {
+        ParaExtras {
+            list_def: attrs.get("list").map(str::to_string),
+            list_id: attrs.get("list-id").map(str::to_string),
+        }
+    }
+}
+
 fn paragraph_format_from_attrs(attrs: &Attrs, is_heading: bool) -> ParaFormat {
     let mut format = ParaFormat::default();
     // Style = first class that is not a known structural class
@@ -1540,6 +1592,7 @@ fn parse_scope(v: Option<&str>) -> HeaderScope {
 }
 
 fn apply_table_attrs(table: &mut Table, attrs: &Attrs) {
+    table.id = attrs.id_ref().map(NodeId::new);
     if let Some(style) = attrs.get("style") {
         table.style = Some(StyleId::new(style));
     }
@@ -2037,6 +2090,7 @@ mod tests {
             &doc,
             &assets,
             &crate::Options {
+                ids: docsai_model::addressing::IdPolicy::Assign,
                 fidelity: crate::Fidelity::Full,
                 assets_dir: "assets".into(),
                 source_format: docsai_model::Format::Docx,
@@ -2059,6 +2113,7 @@ mod tests {
             &doc,
             &assets,
             &crate::Options {
+                ids: docsai_model::addressing::IdPolicy::Assign,
                 fidelity: crate::Fidelity::Full,
                 assets_dir: "assets".into(),
                 source_format: docsai_model::Format::Docx,

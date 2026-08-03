@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: ods
+next-id: 2
 title: "Tipos de valor"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -12,7 +13,7 @@ workbook:
   active-sheet: "Hoja1"
 ---
 
-# Hoja1 {.sheet cols="A:D"}
+# Hoja1 {#n1 .sheet cols="A:D"}
 
 |       | A     | B    | C     | D          |
 | ----- | ----- | ---- | ----- | ---------- |

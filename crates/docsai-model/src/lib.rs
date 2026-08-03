@@ -49,8 +49,12 @@ pub use style::{StyleCatalog, StyleId};
 pub use text::{DocumentMeta, TextDocument};
 pub use units::Length;
 
-/// Version of the DocMark specification this model targets.
+/// Version of the DocMark specification a document without node ids declares.
 pub const DOCMARK_VERSION: &str = "1.0";
+
+/// Version declared once a document carries node ids (spec §11.1). The bump is
+/// additive: a 1.0 document parses unchanged, and ids appear on the next write.
+pub const DOCMARK_VERSION_ADDRESSED: &str = "1.1";
 
 /// The two shapes a document can take.
 ///

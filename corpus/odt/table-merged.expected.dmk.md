@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 2
 title: "Tabla combinada"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -49,7 +50,7 @@ styles:
 
 Tabla con celdas combinadas: {.Standard}
 
-::: {.table col-widths="0px,0px,0px" header-row=false}
+::: {#n1 .table col-widths="0px,0px,0px" header-row=false}
 |                |     |     |     |
 | -------------- | --- | --- | --- |
 | AB {colspan=2} |     |     | C   |

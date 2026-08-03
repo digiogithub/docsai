@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: xlsx
+next-id: 5
 title: "Imagenes ancladas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -16,7 +17,7 @@ styles:
     font: { name: "Calibri", size: 11pt, color: "#FFFFFF", bold: true }
 ---
 
-# Hoja {.sheet cols="A:A"}
+# Hoja {#n1 .sheet cols="A:A"}
 
 |       | A                 |
 | ----- | ----------------- |
@@ -28,10 +29,10 @@ styles:
 :::
 
 ::: {.sheet-images}
-![Logo de la empresa](assets/img-40e10599.png){anchor=two-cell from=B2 from-offset="12px,3px" move-with-cells=true name=Logo size-with-cells=false to=D8 to-offset="0px,0px"}
+![Logo de la empresa](assets/img-40e10599.png){#n2 anchor=two-cell from=B2 from-offset="12px,3px" move-with-cells=true name=Logo size-with-cells=false to=D8 to-offset="0px,0px"}
 
-![Firma](assets/img-7fcbd432.gif){anchor=one-cell from=F20 from-offset="0px,0px" height=60px name=Firma width=180px}
+![Firma](assets/img-7fcbd432.gif){#n3 anchor=one-cell from=F20 from-offset="0px,0px" height=60px name=Firma width=180px}
 
-![Marca de agua](assets/img-40e10599.png){anchor=absolute height=7.5cm name="Marca de agua" width=10cm x=5cm y=8cm}
+![Marca de agua](assets/img-40e10599.png){#n4 anchor=absolute height=7.5cm name="Marca de agua" width=10cm x=5cm y=8cm}
 
 :::

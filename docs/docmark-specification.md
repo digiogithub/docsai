@@ -437,13 +437,49 @@ addressing metadata but stays valid CommonMark — principle §0.1 holds.
 
 ### 11.1 DocMark 1.1 — addressing, sidecar, `agent` fidelity
 
-- **Node ids**: addressable nodes carry `{#<id>}` using the existing attribute syntax. Ids come
-  from a **monotonic counter in the front matter** (`next-id: 128`), are **never renumbered on
-  insertion and never reused after deletion**. Emitted for: section, heading, list, table, table
-  row, image, footnote, sheet, raw block, and (from 1.2) slide, placeholder, shape, notes.
-  Runs and inline nodes are addressed by relative path (`s4.b2:3`), never by id.
+**Node ids and `next-id` are implemented** (plan v2 Phase 10) and normative as described below;
+the remaining bullets stay a sketch until Phase 11 implements them.
+
+#### Node ids (normative)
+
+- An id is an **opaque token**, written with the existing attribute syntax: `{#n7}`. Ids handed
+  out by docsai are `n` followed by the counter value; ids written by hand are preserved verbatim
+  as long as they match the attribute token rules (ASCII alphanumerics, `-`, `_`, `.`).
+  The positional forms used elsewhere in this document (`s4`, `s4.b2`) are **selectors**, not
+  ids: an id that encodes a position cannot survive an insertion.
+- Ids come from a **monotonic counter in the front matter** (`next-id: 128`), are **never
+  renumbered on insertion and never reused after deletion**. A reader raises the counter above
+  every id it finds, including hand-written ones, before allocating anything.
+- A document that carries at least one id declares `docmark: "1.1"` and a `next-id`; one that
+  carries none stays `docmark: "1.0"`, so the version always describes what was actually written.
+- Ids are written **where the format has an attribute block to hold them**, and only there:
+
+  | Node | Where the id lives |
+  |---|---|
+  | heading | its own attribute block — `## Q3 {#n4 .Heading2}` |
+  | paragraph | its trailing attribute block, and **only when it is a container** (it holds a footnote, an image or a raw fragment); ordinary prose is reached by relative path |
+  | list | `list-id=` in the first item's attribute block, beside `list=` (§3.3) |
+  | table | the `::: {.table}` container, which an id forces even when nothing else needs it |
+  | table row | the `::: {.row}` of a complex table (§3.4); rows of a GFM table have no attribute slot and are reached by relative path |
+  | image | its attribute block — `![alt](p){#n6 width=…}` |
+  | footnote | the **reference**, `[^1]{#n9}`, which is where the note sits in the flow |
+  | sheet | the sheet heading's attribute block (§4) |
+  | section | the `::: {.section}` container, so only in a multi-section document |
+  | raw block | its existing `{#r7}` (§7), unchanged |
+
+  A node that cannot be written keeps no id at all: an id that is dropped on every write would
+  change on every round trip, which is worse than not having one.
+- Runs and other inline nodes are addressed by relative path (`s4.b2:3`), never by id.
+- **Policy**: `--ids assign|preserve|never`. `assign` fills the gaps, `preserve` writes back only
+  what the document already had, `never` reproduces the 1.0 shape byte for byte. The default is
+  `assign` at `--fidelity full` and `never` at the lossy levels, which stay readable; `plain` is
+  CommonMark and never carries ids whatever is asked for.
+
+#### The rest of 1.1 (not yet implemented)
+
 - **Etags**: optional 6-character content hash, `{#s4.b2 etag=a3f9c1}`, over the *normalised*
-  node content, so formatting-only changes do not churn it. Used as an edit precondition.
+  node content, so formatting-only changes do not churn it. Used as an edit precondition. The
+  hash is **derived from the node, never stored in it**, so it cannot go stale behind an edit.
 - **Raw-block sidecar**: `::: {.raw format=ooxml id=r7}` with no inline payload; the payload
   lives in `assets/_raw/r7.xml`. Body-inline raw blocks (§7) remain valid and are the default
   for `--raw inline`.

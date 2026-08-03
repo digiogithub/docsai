@@ -9,20 +9,38 @@ use docsai_model::sheet::Workbook;
 use docsai_model::style::{DocDefaults, FontProps, ParaProps, Style, StyleCatalog, Underline};
 use docsai_model::text::{DocumentMeta, PageGeometry};
 use docsai_model::units::Length;
-use docsai_model::{Document, Format, DOCMARK_VERSION};
+use docsai_model::{Document, Format, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED};
 
 use crate::units::{len, pt};
 use crate::Fidelity;
 
 /// Writes the front matter block, delimiters included, ending in a blank line.
-pub fn write(out: &mut String, doc: &Document, source: Format, fidelity: Fidelity) {
+///
+/// `next_id` is `Some` when the body carried node ids, which is what makes the
+/// document DocMark 1.1 rather than 1.0 (spec §11.1). The declared version
+/// tracks what was actually written, so a document without ids keeps parsing
+/// under a 1.0 reader.
+pub fn write(
+    out: &mut String,
+    doc: &Document,
+    source: Format,
+    fidelity: Fidelity,
+    next_id: Option<u64>,
+) {
     if fidelity == Fidelity::Plain {
         return; // plain output is CommonMark only (spec §6)
     }
 
     out.push_str("---\n");
-    scalar(out, "docmark", &quoted(DOCMARK_VERSION));
+    let version = match next_id {
+        Some(_) => DOCMARK_VERSION_ADDRESSED,
+        None => DOCMARK_VERSION,
+    };
+    scalar(out, "docmark", &quoted(version));
     scalar(out, "source-format", source.as_str());
+    if let Some(next_id) = next_id {
+        scalar(out, "next-id", &next_id.to_string());
+    }
     write_meta(out, doc.meta());
 
     match doc {
@@ -360,7 +378,7 @@ mod tests {
 
     fn render(doc: &Document) -> String {
         let mut out = String::new();
-        write(&mut out, doc, Format::Docx, Fidelity::Full);
+        write(&mut out, doc, Format::Docx, Fidelity::Full, None);
         out
     }
 
@@ -450,7 +468,7 @@ mod tests {
     fn plain_fidelity_has_no_front_matter() {
         let doc = Document::Text(TextDocument::default());
         let mut out = String::new();
-        write(&mut out, &doc, Format::Docx, Fidelity::Plain);
+        write(&mut out, &doc, Format::Docx, Fidelity::Plain, None);
         assert!(out.is_empty());
     }
 
@@ -463,7 +481,7 @@ mod tests {
             ..Default::default()
         });
         let mut out = String::new();
-        write(&mut out, &doc, Format::Docx, Fidelity::Standard);
+        write(&mut out, &doc, Format::Docx, Fidelity::Standard, None);
         assert!(!out.contains("styles:"));
         assert!(out.contains("docmark:"));
     }

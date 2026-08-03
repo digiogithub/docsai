@@ -97,6 +97,7 @@ docsai convert - --to docmark < report.docx        # stdin → stdout pipeline
 docsai convert report.docx --fidelity plain        # clean CommonMark, for LLM/RAG
 docsai convert report.docx -o out.md --json        # conversion report as JSON
 docsai convert *.docx --out-dir md/                # batch (parallel) into a folder
+docsai convert report.docx --ids never             # DocMark 1.0 output, no node ids
 docsai convert report.docx --style-map map.yaml    # publication mode (spec §5)
 docsai convert sheet.xlsx --max-cells 100000       # refuse oversized workbooks
 docsai convert legacy.doc -o legacy.dmk.md         # .doc: LO if installed, else native text
@@ -112,6 +113,13 @@ docsai mcp                                          # MCP server over stdio (Pha
 Fidelity levels (`--fidelity`, spec §6): `full` (default, round-trip grade),
 `standard` (rich Markdown without catalogues or raw-blocks) and `plain` (pure
 CommonMark+GFM).
+
+Node ids (`--ids`, spec §11.1): at `--fidelity full` the output is **DocMark 1.1**
+— addressable nodes carry `{#n7}` and the front matter declares `next-id`, so an
+agent can point at a node and keep pointing at it across edits. Ids are never
+renumbered on insertion and never reused after deletion. `--ids preserve` writes
+back only the ids a document already had, `--ids never` reproduces the DocMark 1.0
+shape. The lossy levels default to `never`, and `plain` never carries ids.
 
 Style maps (`--style-map`, spec §5) are **unidirectional** publication helpers:
 

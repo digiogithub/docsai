@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: xlsx
+next-id: 2
 title: "Formulas compartidas y de matriz"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -12,7 +13,7 @@ workbook:
   active-sheet: "Compartidas"
 ---
 
-# Compartidas {.sheet cols="A:C"}
+# Compartidas {#n1 .sheet cols="A:C"}
 
 |       | A    | B   | C   |
 | ----- | ---- | --- | --- |

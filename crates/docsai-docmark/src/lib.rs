@@ -24,6 +24,7 @@ mod error;
 pub mod escape;
 mod frontmatter;
 mod frontmatter_parse;
+mod ids;
 mod parser;
 mod sheet_parser;
 mod sheet_writer;
@@ -34,8 +35,11 @@ mod yaml;
 pub use error::ParseError;
 pub use parser::{parse, parse_with_base};
 
+use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format};
+
+use crate::ids::IdSource;
 
 /// How much of the IR reaches the output (spec §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -79,6 +83,9 @@ impl std::fmt::Display for Fidelity {
 #[derive(Debug, Clone)]
 pub struct Options {
     pub fidelity: Fidelity,
+    /// What happens to node ids (spec §11.1). `plain` output never carries
+    /// them whatever this says: it is CommonMark only.
+    pub ids: IdPolicy,
     /// Directory the image links point at, relative to the `.dmk.md` file.
     pub assets_dir: String,
     /// The format the document came from, recorded in the front matter.
@@ -89,6 +96,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             fidelity: Fidelity::Full,
+            ids: IdPolicy::Assign,
             assets_dir: "assets".into(),
             source_format: Format::Docx,
         }
@@ -96,27 +104,45 @@ impl Default for Options {
 }
 
 /// Serialises a document to DocMark.
+///
+/// The body is rendered first: it is what allocates node ids, and the front
+/// matter has to declare the resulting `next-id` (and the format version the
+/// ids imply).
 pub fn serialize(
     doc: &Document,
     assets: &dyn AssetStore,
     options: &Options,
 ) -> (String, ConversionReport) {
-    let mut out = String::new();
-    frontmatter::write(&mut out, doc, options.source_format, options.fidelity);
+    // `plain` is CommonMark and carries no attributes at all (spec §6).
+    let policy = if options.fidelity == Fidelity::Plain {
+        IdPolicy::Never
+    } else {
+        options.ids
+    };
+    let mut ids = IdSource::new(doc, policy);
 
-    match doc {
+    let (body, report) = match doc {
         Document::Text(text) => {
-            let writer = writer::Writer::new(options, &text.styles, assets);
+            let writer = writer::Writer::new(options, &text.styles, assets, &mut ids);
             let (body, mut report) = writer.finish(text);
-            out.push_str(&body);
             report.stats.styles = text.styles.styles.len() as u32;
-            (out, report)
+            (body, report)
         }
         Document::Workbook(book) => {
-            let (body, mut report) = sheet_writer::write_workbook(book, assets, options);
-            out.push_str(&body);
+            let (body, mut report) = sheet_writer::write_workbook(book, assets, options, &mut ids);
             report.stats.styles = book.styles.styles.len() as u32;
-            (out, report)
+            (body, report)
         }
-    }
+    };
+
+    let mut out = String::new();
+    frontmatter::write(
+        &mut out,
+        doc,
+        options.source_format,
+        options.fidelity,
+        ids.next_id(),
+    );
+    out.push_str(&body);
+    (out, report)
 }

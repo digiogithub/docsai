@@ -14,6 +14,15 @@ use std::path::{Path, PathBuf};
 use docsai_docmark::{Fidelity, Options};
 use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
 
+/// Same rule the CLI applies: ids at `full`, nothing at the lossy levels.
+fn id_policy(fidelity: Fidelity) -> docsai_model::addressing::IdPolicy {
+    use docsai_model::addressing::IdPolicy;
+    match fidelity {
+        Fidelity::Full => IdPolicy::Assign,
+        _ => IdPolicy::Never,
+    }
+}
+
 fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
 }
@@ -64,6 +73,7 @@ fn convert(path: &Path, fidelity: Fidelity) -> (String, ConversionReport, Memory
 
     let options = Options {
         fidelity,
+        ids: id_policy(fidelity),
         assets_dir: "assets".into(),
         source_format,
     };
@@ -365,6 +375,7 @@ fn serialize_parse_is_identity_on_docx_goldens() {
             &assets,
             &Options {
                 fidelity: Fidelity::Full,
+                ids: docsai_model::addressing::IdPolicy::Assign,
                 assets_dir: "assets".into(),
                 source_format: Format::Docx,
             },

@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 7
 title: "Imagenes transformadas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -41,12 +42,12 @@ styles:
 
 Imagen rotada 45 grados:
 
-![Rotada](assets/img-40e10599.png){anchor=floating height=3cm name=Rotada native-size=120x90 relative-to=margin relative-to-v=paragraph rotation=45 width=4cm wrap=square x=0px y=0px z-index=251658240}
+![Rotada](assets/img-40e10599.png){#n2 anchor=floating height=3cm name=Rotada native-size=120x90 relative-to=margin relative-to-v=paragraph rotation=45 width=4cm wrap=square x=0px y=0px z-index=251658240} {#n1}
 
 Imagen recortada con borde:
 
-![Recortada](assets/img-40e10599.png){border="1pt solid #000000" crop="10%,5%,20%,0%" height=2.25cm name=Recortada native-size=120x90 width=3cm}
+![Recortada](assets/img-40e10599.png){#n4 border="1pt solid #000000" crop="10%,5%,20%,0%" height=2.25cm name=Recortada native-size=120x90 width=3cm} {#n3}
 
 Imagen volteada y escalada al 50 %:
 
-![Volteada](assets/img-8cbae2d9.png){anchor=floating flip=hv height=1.5cm name=Volteada native-size=64x64 relative-to=margin relative-to-v=paragraph width=2cm wrap=square x=0px y=0px z-index=251658240}
+![Volteada](assets/img-8cbae2d9.png){#n6 anchor=floating flip=hv height=1.5cm name=Volteada native-size=64x64 relative-to=margin relative-to-v=paragraph width=2cm wrap=square x=0px y=0px z-index=251658240} {#n5}

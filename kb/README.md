@@ -28,6 +28,7 @@ Practical difference between the two folders:
 | [11 — Plan v2 on-ramp](11-plan-v2-onramp.md) | What agent-native + presentations work reuses, what is new, traps that will bite again |
 | [13 — Phase 10 plan](13-phase-10-addressing-plan.md) | Increments A–F of stable addressing and the token budget |
 | [14 — Phase 10 A/B](14-phase-10-addressing-core.md) | `docsai-model::addressing`, ids in the IR, etags, risk-P7 property tests |
+| [15 — Phase 10 C](15-phase-10-docmark-1-1.md) | DocMark 1.1: `{#n7}` emission and parse, `next-id`, `--ids` |
 
 ## Status in one line
 

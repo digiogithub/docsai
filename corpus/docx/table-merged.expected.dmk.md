@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 2
 title: "Tabla combinada"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -41,7 +42,7 @@ styles:
 
 Tabla con combinaciones:
 
-::: {.table col-widths="125pt,125pt,100pt,100pt" header-row=false style=TableGrid}
+::: {#n1 .table col-widths="125pt,125pt,100pt,100pt" header-row=false style=TableGrid}
 |                   |                        |     |       |
 | ----------------- | ---------------------- | --- | ----- |
 | Region            | Trimestres {colspan=2} |     | Total |

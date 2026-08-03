@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 2
 title: "Tabla simple"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -49,7 +50,7 @@ styles:
 
 Tabla simple: {.Standard}
 
-::: {.table col-widths="0px,0px,0px"}
+::: {#n1 .table col-widths="0px,0px,0px"}
 | A   | B   | C   |
 | --- | --- | --- |
 | 1   | 2   | 3   |

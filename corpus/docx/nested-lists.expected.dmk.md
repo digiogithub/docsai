@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 6
 title: "Listas anidadas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -55,16 +56,16 @@ list-definitions:
 
 Lista numerada anidada:
 
-1. Primer punto {.ListParagraph list=L1}
-   1. Sub-punto a {.ListParagraph list=L1}
-      1. Sub-sub-punto i {.ListParagraph list=L1}
+1. Primer punto {.ListParagraph list=L1 list-id=n1}
+   1. Sub-punto a {.ListParagraph list=L1 list-id=n2}
+      1. Sub-sub-punto i {.ListParagraph list=L1 list-id=n3}
    2. Sub-punto b {.ListParagraph}
 2. Segundo punto {.ListParagraph}
 
 Lista de vinetas:
 
-- Vineta uno {.ListParagraph list=L2}
-  - Vineta anidada {.ListParagraph list=L2}
+- Vineta uno {.ListParagraph list=L2 list-id=n4}
+  - Vineta anidada {.ListParagraph list=L2 list-id=n5}
 - Vineta dos {.ListParagraph}
 
 Parrafo posterior fuera de la lista.

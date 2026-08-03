@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 3
 title: "Imagenes transformadas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -47,4 +48,4 @@ styles:
     font: { bold: true }
 ---
 
-![Transformed](assets/img-8cbae2d9.png){crop="13.33%,10%,13.33%,10%" flip=h height=3cm name=Transformed rotation=15 width=3cm} {.Standard}
+![Transformed](assets/img-8cbae2d9.png){#n2 crop="13.33%,10%,13.33%,10%" flip=h height=3cm name=Transformed rotation=15 width=3cm} {#n1 .Standard}

@@ -5,6 +5,7 @@ use std::io::{Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use docsai_docmark::{Fidelity, Options as DocMarkOptions};
+use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
 
@@ -25,6 +26,10 @@ pub struct ConvertOptions {
     pub style_map: Option<crate::style_map::StyleMap>,
     /// Safety cap on workbook cells; `None` means unlimited.
     pub max_cells: Option<u64>,
+    /// What happens to node ids (DocMark 1.1, spec §11.1). `None` takes the
+    /// per-fidelity default: `assign` at `full`, `never` otherwise, because
+    /// the lossy levels are meant to stay readable.
+    pub ids: Option<IdPolicy>,
 }
 
 impl Default for ConvertOptions {
@@ -36,7 +41,18 @@ impl Default for ConvertOptions {
             use_loffice: crate::UseLoffice::Auto,
             style_map: None,
             max_cells: None,
+            ids: None,
         }
+    }
+}
+
+impl ConvertOptions {
+    /// The id policy this conversion applies.
+    pub fn id_policy(&self) -> IdPolicy {
+        self.ids.unwrap_or(match self.fidelity {
+            Fidelity::Full => IdPolicy::Assign,
+            _ => IdPolicy::Never,
+        })
     }
 }
 
@@ -363,6 +379,7 @@ fn write_document(
         Format::DocMark => {
             let docmark_options = DocMarkOptions {
                 fidelity: options.fidelity,
+                ids: options.id_policy(),
                 assets_dir: relative_assets_dir(assets_dir, file_output),
                 source_format,
             };
@@ -410,6 +427,7 @@ fn write_document(
                 store,
                 &DocMarkOptions {
                     fidelity: options.fidelity,
+                    ids: options.id_policy(),
                     assets_dir: relative_assets_dir(assets_dir, Some(output)),
                     source_format,
                 },
@@ -526,6 +544,7 @@ pub fn roundtrip_file(
         &store1,
         &DocMarkOptions {
             fidelity: Fidelity::Full,
+            ids: IdPolicy::Assign,
             assets_dir: "assets".into(),
             source_format,
         },
@@ -570,6 +589,7 @@ pub fn roundtrip_file(
         &store3,
         &DocMarkOptions {
             fidelity: Fidelity::Full,
+            ids: IdPolicy::Assign,
             assets_dir: "assets".into(),
             source_format: office_format,
         },

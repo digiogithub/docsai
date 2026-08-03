@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use docsai_model::addressing::Addressing;
 use docsai_model::list::{ListCatalog, ListDef, ListId, ListLevel, NumFormat};
 use docsai_model::sheet::DefinedName;
 use docsai_model::style::{
@@ -24,6 +25,9 @@ pub struct FrontMatter {
     pub list_defs: ListCatalog,
     pub active_sheet: Option<String>,
     pub defined_names: Vec<DefinedName>,
+    /// The monotonic id counter (`next-id`, spec §11.1). Absent in a 1.0
+    /// document, where the writer starts the counter from scratch.
+    pub addressing: Addressing,
 }
 
 impl Default for FrontMatter {
@@ -36,6 +40,7 @@ impl Default for FrontMatter {
             list_defs: ListCatalog::default(),
             active_sheet: None,
             defined_names: Vec::new(),
+            addressing: Addressing::default(),
         }
     }
 }
@@ -70,6 +75,12 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
                     format!("unsupported docmark version `{version}`"),
                 ));
             }
+        }
+    }
+
+    if let Some(next) = map.get("next-id").and_then(|v| v.as_str()) {
+        if let Ok(next_id) = next.trim().parse::<u64>() {
+            fm.addressing.next_id = next_id.max(1);
         }
     }
 

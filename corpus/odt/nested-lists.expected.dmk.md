@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 5
 title: "Listas anidadas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -66,11 +67,11 @@ list-definitions:
 
 Listas anidadas: {.Standard}
 
-- Uno {.Standard list=L3}
-  - Uno-A {.Standard list=L3}
+- Uno {.Standard list=L3 list-id=n1}
+  - Uno-A {.Standard list=L3 list-id=n2}
   - Uno-B {.Standard}
 - Dos {.Standard}
 
-1. Primero {.Standard list=L4}
-   1. Primero-a {.Standard list=L4}
+1. Primero {.Standard list=L4 list-id=n3}
+   1. Primero-a {.Standard list=L4 list-id=n4}
 2. Segundo {.Standard}

@@ -9,6 +9,7 @@ use docsai_model::sheet::{Cell, CellRange, CellRef, CellValue, FormulaDialect, S
 
 use crate::attrs::Attrs;
 use crate::escape::{escape, escape_attr_value, is_bare_value, TextContext};
+use crate::ids::IdSource;
 use crate::units::{len, number, percent};
 use crate::{Fidelity, Options};
 
@@ -17,6 +18,7 @@ pub fn write_workbook(
     book: &Workbook,
     assets: &dyn AssetStore,
     options: &Options,
+    ids: &mut IdSource,
 ) -> (String, ConversionReport) {
     let mut out = String::new();
     let mut report = ConversionReport::new();
@@ -33,7 +35,7 @@ pub fn write_workbook(
                 out.push('\n');
             }
         }
-        write_sheet(&mut out, sheet, assets, options, &mut report);
+        write_sheet(&mut out, sheet, assets, options, &mut report, ids);
     }
 
     while out.ends_with("\n\n") {
@@ -51,6 +53,7 @@ fn write_sheet(
     assets: &dyn AssetStore,
     options: &Options,
     report: &mut ConversionReport,
+    ids: &mut IdSource,
 ) {
     let plain = options.fidelity == Fidelity::Plain;
     let full = options.fidelity == Fidelity::Full;
@@ -64,6 +67,9 @@ fn write_sheet(
     } else {
         let mut attrs = Attrs::new();
         attrs.class("sheet");
+        if let Some(id) = ids.take(sheet) {
+            attrs.id(id);
+        }
         if let Some(range) = sheet.used_range() {
             attrs.set(
                 "cols",
@@ -139,7 +145,7 @@ fn write_sheet(
     if !sheet.images.is_empty() && !plain {
         out.push_str("::: {.sheet-images}\n");
         for image in &sheet.images {
-            out.push_str(&render_image(image, assets, options, report));
+            out.push_str(&render_image(image, assets, options, report, ids));
             out.push('\n');
             if options.fidelity == Fidelity::Full {
                 // blank line between images for readability like the spec
@@ -395,6 +401,7 @@ fn render_image(
     assets: &dyn AssetStore,
     options: &Options,
     report: &mut ConversionReport,
+    ids: &mut IdSource,
 ) -> String {
     let info = assets.info(&image.asset);
     let file_name = info
@@ -403,6 +410,9 @@ fn render_image(
     let path = format!("{}/{}", options.assets_dir.trim_end_matches('/'), file_name);
     let alt = escape(&image.alt, TextContext::LinkLabel);
     let mut attrs = Attrs::new();
+    if let Some(id) = ids.take(image) {
+        attrs.id(id);
+    }
 
     // Always set anchor for sheet images.
     match &image.geometry.anchor {

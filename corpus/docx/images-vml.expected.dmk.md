@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 3
 title: "Imagen VML"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -39,4 +40,4 @@ styles:
     name: "Table Grid"
 ---
 
-![Imagen VML heredada](assets/img-8cbae2d9.png){anchor=floating height=90px name=_x0000_s1026 native-size=64x64 relative-to=margin relative-to-v=paragraph title=Heredada width=120px wrap=square wrap-side=right x=10pt y=5pt z-index=1}Parrafo con imagen VML heredada.
+![Imagen VML heredada](assets/img-8cbae2d9.png){#n2 anchor=floating height=90px name=_x0000_s1026 native-size=64x64 relative-to=margin relative-to-v=paragraph title=Heredada width=120px wrap=square wrap-side=right x=10pt y=5pt z-index=1}Parrafo con imagen VML heredada. {#n1}

@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 3
 title: "Imagenes en linea"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -47,4 +48,4 @@ styles:
     font: { bold: true }
 ---
 
-Antes ![Blue](assets/img-40e10599.png){height=2.25cm name=Blue width=3cm} despues. {.Standard}
+Antes ![Blue](assets/img-40e10599.png){#n2 height=2.25cm name=Blue width=3cm} despues. {#n1 .Standard}

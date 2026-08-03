@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 2
 title: "Tabla simple"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -41,7 +42,7 @@ styles:
 
 Tabla regular:
 
-::: {.table col-widths="200px,200px,200px" header-row=false style=TableGrid}
+::: {#n1 .table col-widths="200px,200px,200px" header-row=false style=TableGrid}
 |          |     |     |
 | -------- | --- | --- |
 | Concepto | T1  | T2  |

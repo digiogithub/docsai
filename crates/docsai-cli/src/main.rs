@@ -9,6 +9,7 @@ use docsai_convert::{
     convert_batch, convert_file, inspect_path, ConvertOptions, Fidelity, StyleMap, UseLoffice,
     SUPPORT,
 };
+use docsai_model::addressing::IdPolicy;
 use docsai_model::Format;
 
 /// Exit codes (architecture §5).
@@ -61,6 +62,10 @@ enum Command {
         /// How much of the source survives: full, standard or plain.
         #[arg(long, default_value = "full")]
         fidelity: String,
+        /// Node ids in the output: `assign`, `preserve` or `never`.
+        /// Defaults to `assign` at `--fidelity full` and `never` otherwise.
+        #[arg(long, value_name = "MODE")]
+        ids: Option<String>,
         /// Where to extract media. Defaults to `assets/` next to the output.
         #[arg(long, value_name = "DIR")]
         assets_dir: Option<PathBuf>,
@@ -220,6 +225,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             out_dir,
             to,
             fidelity,
+            ids,
             assets_dir,
             style_map,
             max_cells,
@@ -232,6 +238,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             out_dir.as_ref(),
             to.as_deref(),
             fidelity,
+            ids.as_deref(),
             assets_dir.clone(),
             style_map.as_ref(),
             *max_cells,
@@ -377,6 +384,16 @@ fn report_has_severe(report: &docsai_convert::InspectReport) -> bool {
         .any(|w| w.severity() == docsai_model::Severity::Severe)
 }
 
+/// `--ids`; `None` leaves the per-fidelity default to `ConvertOptions`.
+fn parse_ids(value: Option<&str>) -> anyhow::Result<Option<IdPolicy>> {
+    match value {
+        None => Ok(None),
+        Some(value) => IdPolicy::parse(value).map(Some).ok_or_else(|| {
+            anyhow::anyhow!("unknown --ids `{value}`; use assign, preserve or never")
+        }),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_convert(
     inputs: &[PathBuf],
@@ -384,6 +401,7 @@ fn run_convert(
     out_dir: Option<&PathBuf>,
     to: Option<&str>,
     fidelity: &str,
+    ids: Option<&str>,
     assets_dir: Option<PathBuf>,
     style_map: Option<&PathBuf>,
     max_cells: Option<u64>,
@@ -393,6 +411,7 @@ fn run_convert(
     verbose: bool,
 ) -> anyhow::Result<u8> {
     let fidelity = parse_fidelity(fidelity)?;
+    let ids = parse_ids(ids)?;
     let use_loffice = parse_use_loffice(use_loffice)?;
     let target = match to {
         Some(name) => Some(Format::parse(name).ok_or_else(|| {
@@ -406,6 +425,7 @@ fn run_convert(
     };
     let options = ConvertOptions {
         fidelity,
+        ids,
         assets_dir,
         target,
         use_loffice,

@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: xlsx
+next-id: 2
 title: "Formulas basicas"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -18,7 +19,7 @@ styles:
     font: { name: "Calibri", size: 11pt, color: "#FFFFFF", bold: true }
 ---
 
-# Datos {.sheet cols="A:C"}
+# Datos {#n1 .sheet cols="A:C"}
 
 |       | A            | B   | C   |
 | ----- | ------------ | --- | --- |

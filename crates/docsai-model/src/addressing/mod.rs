@@ -25,8 +25,8 @@
 pub mod walk;
 
 pub use walk::{
-    assign_ids, clear_ids, for_each_addressable, node_ids, observe_ids, paragraph_is_container,
-    Addressable, NodeKind,
+    assign_ids, clear_ids, for_each_addressable, list_is_addressable, node_ids, observe_ids,
+    paragraph_is_container, Addressable, NodeKind,
 };
 
 use serde::{Deserialize, Serialize};

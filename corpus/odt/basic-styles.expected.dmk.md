@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 3
 title: "Estilos basicos"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -47,9 +48,9 @@ styles:
     font: { bold: true }
 ---
 
-# Titulo principal {.Heading_20_1}
+# Titulo principal {#n1 .Heading_20_1}
 
-## Subtitulo {.Heading_20_2}
+## Subtitulo {#n2 .Heading_20_2}
 
 Texto con **negrita**, [italica]{.Emphasis} y [**ambas**]{.Emphasis}. {.Standard}
 

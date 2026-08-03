@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 5
 title: "Notas al pie"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -43,9 +44,9 @@ styles:
     name: "Table Grid"
 ---
 
-Texto con nota[^1] y sigue.
+Texto con nota[^1]{#n2} y sigue. {#n1}
 
-Otro parrafo con segunda nota[^2].
+Otro parrafo con segunda nota[^2]{#n4}. {#n3}
 
 [^1]: Primera nota al pie.
 

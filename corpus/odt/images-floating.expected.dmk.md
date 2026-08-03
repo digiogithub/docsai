@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: odt
+next-id: 5
 title: "Imagenes flotantes"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -47,6 +48,6 @@ styles:
     font: { bold: true }
 ---
 
-![FloatPara](assets/img-40e10599.png){anchor=floating height=3cm name=FloatPara relative-to=paragraph width=4cm wrap=square x=1cm y=0.5cm z-index=1}Texto que fluye junto a la imagen flotante anclada al parrafo. {.Standard}
+![FloatPara](assets/img-40e10599.png){#n2 anchor=floating height=3cm name=FloatPara relative-to=paragraph width=4cm wrap=square x=1cm y=0.5cm z-index=1}Texto que fluye junto a la imagen flotante anclada al parrafo. {#n1 .Standard}
 
-![BehindPage](assets/img-8cbae2d9.png){anchor=behind height=3cm name=BehindPage relative-to=page width=3cm wrap=through x=2cm y=5cm z-index=0}Texto sobre imagen detras de la pagina. {.Standard}
+![BehindPage](assets/img-8cbae2d9.png){#n4 anchor=behind height=3cm name=BehindPage relative-to=page width=3cm wrap=through x=2cm y=5cm z-index=0}Texto sobre imagen detras de la pagina. {#n3 .Standard}

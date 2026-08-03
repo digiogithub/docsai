@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 7
 title: "Imagenes flotantes"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -39,8 +40,8 @@ styles:
     name: "Table Grid"
 ---
 
-![Logo flotante cuadrado](assets/img-40e10599.png){anchor=floating height=2.6cm name=Logo native-size=120x90 relative-to=margin relative-to-v=paragraph width=3.5cm wrap=square wrap-side=right x=1.2cm y=0.5cm z-index=2}Texto que rodea a la imagen flotante anclada al margen.
+![Logo flotante cuadrado](assets/img-40e10599.png){#n2 anchor=floating height=2.6cm name=Logo native-size=120x90 relative-to=margin relative-to-v=paragraph width=3.5cm wrap=square wrap-side=right x=1.2cm y=0.5cm z-index=2}Texto que rodea a la imagen flotante anclada al margen. {#n1}
 
-![Banner centrado](assets/img-8cbae2d9.png){align-h=center align-v=top anchor=floating height=4cm name=Banner native-size=64x64 relative-to=page width=6cm wrap=top-bottom z-index=3}Parrafo con imagen anclada a la pagina y alineacion simbolica.
+![Banner centrado](assets/img-8cbae2d9.png){#n4 align-h=center align-v=top anchor=floating height=4cm name=Banner native-size=64x64 relative-to=page width=6cm wrap=top-bottom z-index=3}Parrafo con imagen anclada a la pagina y alineacion simbolica. {#n3}
 
-![Marca de agua](assets/img-40e10599.png){anchor=behind height=7.5cm name="Marca de agua" native-size=120x90 relative-to=page width=10cm wrap=none x=2cm y=8cm z-index=1}Parrafo sobre la marca de agua detras del texto.
+![Marca de agua](assets/img-40e10599.png){#n6 anchor=behind height=7.5cm name="Marca de agua" native-size=120x90 relative-to=page width=10cm wrap=none x=2cm y=8cm z-index=1}Parrafo sobre la marca de agua detras del texto. {#n5}

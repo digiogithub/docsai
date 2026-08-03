@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: docx
+next-id: 7
 title: "Imagenes en linea"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -41,10 +42,10 @@ styles:
 
 Imagen en linea a tamano nativo:
 
-![Diagrama de ventas](assets/img-40e10599.png){height=90px name=Diagrama native-size=120x90 title="Figura 1" width=120px}
+![Diagrama de ventas](assets/img-40e10599.png){#n2 height=90px name=Diagrama native-size=120x90 title="Figura 1" width=120px} {#n1}
 
-Imagen GIF en medio ![Icono verde](assets/img-7fcbd432.gif){height=32px name=Icono native-size=48x32 width=48px} del parrafo.
+Imagen GIF en medio ![Icono verde](assets/img-7fcbd432.gif){#n4 height=32px name=Icono native-size=48x32 width=48px} del parrafo. {#n3}
 
 Imagen EMF vectorial (no renderizable):
 
-![Logo vectorial](assets/img-a03c5ab4.emf){height=2cm name=LogoEMF render=unsupported width=4cm}
+![Logo vectorial](assets/img-a03c5ab4.emf){#n6 height=2cm name=LogoEMF render=unsupported width=4cm} {#n5}

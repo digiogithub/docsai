@@ -1,6 +1,7 @@
 ---
-docmark: "1.0"
+docmark: "1.1"
 source-format: xlsx
+next-id: 2
 title: "Tipos de valor"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -16,7 +17,7 @@ styles:
     font: { name: "Calibri", size: 11pt, color: "#FFFFFF", bold: true }
 ---
 
-# Tipos {.sheet cols="A:B"}
+# Tipos {#n1 .sheet cols="A:B"}
 
 |       | A        | B          |
 | ----- | -------- | ---------- |

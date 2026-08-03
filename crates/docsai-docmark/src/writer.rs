@@ -15,8 +15,11 @@ use docsai_model::text::{
 };
 use docsai_model::units::Length;
 
+use docsai_model::addressing::{list_is_addressable, paragraph_is_container};
+
 use crate::attrs::Attrs;
 use crate::escape::{escape, TextContext};
+use crate::ids::IdSource;
 use crate::units::{len, number, percent, pt};
 use crate::{Fidelity, Options};
 
@@ -29,10 +32,17 @@ pub struct Writer<'a> {
     report: ConversionReport,
     /// Rendered footnote definitions, emitted at the very end.
     footnotes: Vec<String>,
+    /// Node ids for this run (spec §11.1).
+    ids: &'a mut IdSource,
 }
 
 impl<'a> Writer<'a> {
-    pub fn new(options: &'a Options, styles: &'a StyleCatalog, assets: &'a dyn AssetStore) -> Self {
+    pub fn new(
+        options: &'a Options,
+        styles: &'a StyleCatalog,
+        assets: &'a dyn AssetStore,
+        ids: &'a mut IdSource,
+    ) -> Self {
         Writer {
             out: String::new(),
             options,
@@ -40,6 +50,7 @@ impl<'a> Writer<'a> {
             assets,
             report: ConversionReport::new(),
             footnotes: Vec::new(),
+            ids,
         }
     }
 
@@ -102,10 +113,16 @@ impl<'a> Writer<'a> {
             }
         }
 
+        // A single-section document has no `::: {.section}` container to hold
+        // an id, so it does not take one (see `for_each_addressable`).
+        let id = wrap.then(|| self.ids.take(section)).flatten();
         let body = self.render_blocks(&section.blocks, 0);
         if wrap && !self.plain() {
             let mut attrs = Attrs::new();
             attrs.class("section");
+            if let Some(id) = id {
+                attrs.id(id);
+            }
             if section.page.columns > 1 {
                 attrs.set("columns", section.page.columns.to_string());
             }
@@ -164,10 +181,16 @@ impl<'a> Writer<'a> {
 
     fn render_block(&mut self, block: &Block, depth: usize) -> String {
         match block {
-            Block::Paragraph(p) => self.render_paragraph(p, None, None),
+            Block::Paragraph(p) => {
+                let id = paragraph_is_container(p)
+                    .then(|| self.ids.take(p))
+                    .flatten();
+                self.render_paragraph(p, None, &[], id)
+            }
             Block::Heading(h) => {
                 let hashes = "#".repeat(h.level.clamp(1, 6) as usize);
-                self.render_paragraph(&h.paragraph, Some(&hashes), None)
+                let id = self.ids.take(h);
+                self.render_paragraph(&h.paragraph, Some(&hashes), &[], id)
             }
             Block::List(list) => self.render_list(list, depth),
             Block::Table(table) => self.render_table(table),
@@ -230,14 +253,16 @@ impl<'a> Writer<'a> {
 
     /// Renders a paragraph.
     ///
-    /// `prefix` turns it into a heading; `extra` merges one more pair into its
-    /// attribute block, which is how a list item names its definition without
-    /// growing a second `{...}` (spec §3.3).
+    /// `prefix` turns it into a heading; `extra` merges more pairs into its
+    /// attribute block, which is how a list names its definition and its id
+    /// without growing a second `{...}` (spec §3.3); `id` is the node's own
+    /// address.
     fn render_paragraph(
         &mut self,
         paragraph: &Paragraph,
         prefix: Option<&str>,
-        extra: Option<(&str, &str)>,
+        extra: &[(&str, String)],
+        id: Option<String>,
     ) -> String {
         self.report.stats.paragraphs += 1;
         let content = self.render_inlines(&paragraph.content, TextContext::Block);
@@ -246,8 +271,13 @@ impl<'a> Writer<'a> {
         } else {
             self.paragraph_attrs(paragraph, prefix.is_some())
         };
-        if let Some((key, value)) = extra.filter(|_| !self.plain()) {
-            attrs.set(key, value);
+        if !self.plain() {
+            if let Some(id) = id {
+                attrs.id(id);
+            }
+            for (key, value) in extra {
+                attrs.set(*key, value);
+            }
         }
 
         let body = content.trim_end_matches(' ');
@@ -314,6 +344,9 @@ impl<'a> Writer<'a> {
 
     fn render_list(&mut self, list: &List, depth: usize) -> String {
         self.report.stats.lists += 1;
+        let mut list_id = list_is_addressable(list)
+            .then(|| self.ids.take(list))
+            .flatten();
         let mut out = String::new();
         for (index, item) in list.items.iter().enumerate() {
             let marker = if list.ordered {
@@ -325,10 +358,23 @@ impl<'a> Writer<'a> {
             // The list definition is named once, on the first item, inside
             // that item's own attribute block.
             let names_definition = index == 0 && !self.plain();
-            let definition = list.def.as_ref().map(|d| d.as_str());
-            let body = match (names_definition, definition, item.blocks.split_first()) {
-                (true, Some(def), Some((Block::Paragraph(first), rest))) => {
-                    let head = self.render_paragraph(first, None, Some(("list", def)));
+            let mut pairs: Vec<(&str, String)> = Vec::new();
+            if names_definition {
+                if let Some(def) = list.def.as_ref() {
+                    pairs.push(("list", def.as_str().to_string()));
+                }
+                if let Some(id) = list_id.take() {
+                    // The list's own address rides on its first item, the only
+                    // attribute block a Markdown list offers.
+                    pairs.push(("list-id", id));
+                }
+            }
+            let body = match (pairs.is_empty(), item.blocks.split_first()) {
+                (false, Some((Block::Paragraph(first), rest))) => {
+                    let first_id = paragraph_is_container(first)
+                        .then(|| self.ids.take(first))
+                        .flatten();
+                    let head = self.render_paragraph(first, None, &pairs, first_id);
                     let tail = self.render_blocks(rest, depth + 1);
                     match rest.first() {
                         None => head,
@@ -362,8 +408,9 @@ impl<'a> Writer<'a> {
         if table.rows.is_empty() {
             return String::new();
         }
+        let id = self.ids.take(table);
         if table.is_complex() && !self.plain() {
-            return self.render_complex_table(table);
+            return self.render_complex_table(table, id);
         }
 
         let width = table.width().max(1);
@@ -418,6 +465,9 @@ impl<'a> Writer<'a> {
         if !has_header {
             attrs.set("header-row", "false");
         }
+        if let Some(id) = id {
+            attrs.id(id);
+        }
         if attrs.is_empty() {
             return out.trim_end().to_string();
         }
@@ -454,15 +504,23 @@ impl<'a> Writer<'a> {
     }
 
     /// Tables GFM cannot hold (multi-paragraph or nested content, spec §3.4).
-    fn render_complex_table(&mut self, table: &Table) -> String {
+    fn render_complex_table(&mut self, table: &Table, id: Option<String>) -> String {
         let mut attrs = Attrs::new();
         attrs.class("table").set("complex", "true");
         if let Some(style) = &table.style {
             attrs.set("style", style.as_str());
         }
+        if let Some(id) = id {
+            attrs.id(id);
+        }
         let mut out = format!("::: {}\n", attrs.render());
         for row in &table.rows {
-            out.push_str("::: {.row}\n");
+            let mut row_attrs = Attrs::new();
+            row_attrs.class("row");
+            if let Some(id) = self.ids.take(row) {
+                row_attrs.id(id);
+            }
+            out.push_str(&format!("::: {}\n", row_attrs.render()));
             for cell in &row.cells {
                 let mut cell_attrs = Attrs::new();
                 cell_attrs.class("cell");
@@ -533,7 +591,11 @@ impl<'a> Writer<'a> {
                     definition.push_str(&format!("\n    {line}"));
                 }
                 self.footnotes.push(definition);
-                format!("[^{index}]")
+                let mut attrs = Attrs::new();
+                if let Some(id) = self.ids.take(note) {
+                    attrs.id(id);
+                }
+                format!("[^{index}]{}", attrs.render())
             }
             Inline::Field {
                 kind,
@@ -678,6 +740,9 @@ impl<'a> Writer<'a> {
         }
 
         let mut attrs = Attrs::new();
+        if let Some(id) = self.ids.take(image) {
+            attrs.id(id);
+        }
         let geometry = &image.geometry;
 
         // `width`/`height` are mandatory except on two-cell sheet anchors,

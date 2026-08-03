@@ -115,6 +115,7 @@ fn convert_to_markdown_inline(
 
     let docmark_options = DocMarkOptions {
         fidelity: options.fidelity,
+        ids: options.id_policy(),
         assets_dir: "assets".into(),
         source_format,
     };
@@ -145,6 +146,7 @@ fn convert_to_markdown_files(
 
     let docmark_options = DocMarkOptions {
         fidelity: options.fidelity,
+        ids: options.id_policy(),
         assets_dir: "assets".into(),
         source_format,
     };
