@@ -3,6 +3,136 @@
 This file is the operational reference for anyone or any AI agent working
 on the `docsai` repository. Read it fully before touching code.
 
+## MANDATORY operating rules for AI agents
+
+These rules are **MANDATORY**, not best-effort guidance. Every AI agent working in this
+repository **MUST** follow all of them on every task, even small or one-line changes. When a
+habit or a shortcut conflicts with a rule, the rule wins.
+
+The rules assume you have the project's agent tool suite: the knowledge base (the `kb/`
+directory, served through the KB and memory tools below), a code-indexing / remembrance
+subsystem, web search, the Context7 library-docs tools, and a headless browser. The tool names
+below are exact; if one is unavailable in your environment, fall back to the closest equivalent
+and say so explicitly.
+
+### MANDATORY 1 — Gather context before starting any task
+
+Before writing code, designing, fixing, or planning anything that builds on prior work, you
+**MUST** recover the relevant context first. Never start from a blank slate when prior knowledge
+exists. In order:
+
+1. **Knowledge base first.** Search with `kb_search_documents` (or `hybrid_search_remembrances`
+   when you also want indexed sessions and code in the same query). This returns both the stored
+   documentation in `kb/` and everything saved via the memory subsystem (`remember`) in one
+   semantic + full-text query. Search **without** a `tags` filter for broad context recovery; only
+   add `tags` when you deliberately want to narrow to one document type.
+2. **Follow the graph, do not only search.** KB documents link each other with `[[wiki links]]`:
+   `kb_search_documents` reports how connected each hit is and lists the neighbours of the best
+   one, `kb_get_document` returns a hit's outgoing links and backlinks, and `kb_related_documents`
+   hops through them — a document's own links beat a second guess at the query. Calling
+   `kb_related_documents` with no `file_path` lists the concepts the KB references but never
+   documents. The on-disk knowledge base in `kb/` (start at `kb/README.md`, as §2 item 5 requires)
+   is the same content this search surfaces.
+3. **Then the code index.** Use the code-remembrance tools to understand structure and prior
+   decisions in the codebase before editing: `code_get_symbols_overview` (file/package shape),
+   `code_find_symbol` (locate a specific function/type), `code_hybrid_search` (semantic search
+   across the codebase and related indexed projects), and `code_search_pattern` (literal or regex
+   matches). Prefer these over blind file reads when locating code.
+4. **Recall only when you know the key.** Use `recall` only when you already know roughly which
+   short fact/key you are after. Do not use it as a substitute for the KB search above.
+
+If, after searching, no relevant context exists, state that briefly and proceed.
+
+### MANDATORY 2 — External research when the answer is not in the repo
+
+When the task needs knowledge that is not in the repository or the KB, you **MUST** research it
+instead of guessing:
+
+- **Library / framework / API usage** → use the Context7 tools: first `c7_resolve_library_id`
+  to resolve the library name to its ID, then `c7_get_library_docs` for current,
+  version-accurate documentation and usage patterns. Prefer Context7 over memory for any
+  third-party API surface. When you choose or replace a dependency, record the reason where
+  `docs/technical-analysis.md` / `docs/technical-analysis-presentations.md` require it (§2 item 4).
+- **General/unknown facts, current events, error messages, release notes** → use web search and
+  `fetch` the most relevant sources. Cross-check more than one source for anything load-bearing.
+- **Frontend / web-UI work** (rendering, layout, DOM, console errors, visual verification) → use
+  the browser tools: `browser_navigate`, `browser_get_content`, `browser_evaluate`,
+  `browser_click`, `browser_fill`, `browser_screenshot`, `browser_console_logs`, and
+  `browser_network`. Verify UI behavior by actually driving the page, not by assuming. (docsai
+  ships no web UI today; still apply these tools if a task touches one.)
+
+### MANDATORY 3 — Plan before non-trivial work
+
+For anything larger than a trivial change you **MUST** produce a written plan before implementing:
+
+- Break the work into **phases**, each independently testable.
+- First identify the matching phase in `docs/development-plan-v2.md` (§2 item 1) and, per §7 rule 1,
+  do not advance future phases.
+- Save the plan with `kb_add_document` under a clear `file_path` following the existing
+  `kb/NN-<slug>.md` naming (e.g. `kb/12-my-topic-plan.md`) so it survives the session and can be
+  recovered later with `kb_search_documents`.
+- If you are unsure whether a plan already exists, search for it first and confirm with the user
+  before diverging from it.
+- Keep the plan updated as phases complete.
+
+### MANDATORY 4 — Implement in small, verified increments
+
+- Write code in small, testable increments. After each increment, run the build and tests
+  (§4: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy`,
+  `cargo fmt --all -- --check`) to confirm the change works before moving on.
+- Match the surrounding code: naming, style, comment density, and idioms, following the
+  conventions in §5.
+- Add or update tests for new behavior, placed where the project expects them (§6).
+- Never report something as done unless you verified it (tests passed, build succeeded, or the
+  behavior was observed). If a step was skipped or a test failed, say so plainly with the evidence.
+
+### MANDATORY 5 — Document every change in the knowledge base
+
+Every time you modify, implement, fix, or refactor anything — even a one-line change — you
+**MUST** record a summary with `kb_add_document` once the change is done. This keeps the living
+documentation in `kb/` current and is **not optional**.
+
+The summary **MUST** capture at least:
+
+- **What changed** — a concise description of the behavior/code change.
+- **Files & symbols touched** — the concrete paths and functions/types.
+- **Why** — the motivation or the bug being fixed.
+- **How it was verified** — tests run, build status, manual checks.
+
+Store it under a clear `file_path` (`kb/<slug>.md`, following the existing `NN-<slug>.md`
+convention; use `kb/03-technical-decisions.md` for a non-obvious decision, per §2 item 5). If a
+related document already exists, **update it** instead of creating a duplicate.
+
+**Link what the document builds on.** Write `[[concept]]` (or `[[concept|label]]`) in the body to
+point at the plan, feature or fix the change continues — a full path (`[[kb/03-technical-decisions.md]]`)
+or a bare name (`[[foo]]`) both work. These links are indexed as a navigable graph, which is what
+keeps the knowledge base connected instead of a pile of loose files. Linking a document that does
+not exist yet is **correct and useful**: it records a concept worth documenting later, and
+`kb_related_documents` lists those pending concepts.
+
+> Plan-mode note: while a harness "plan mode" is active you may only edit the plan file, so defer
+> the `kb_add_document` write until the plan is approved and writes are allowed again — but do not
+> skip it.
+
+### MANDATORY 6 — Choosing the right memory tool
+
+- **`remember` / `recall`** — ONLY for short, durable facts identified by a known key (e.g.
+  `project.test_command`, `user.preferred_lang`). Call `remember` to upsert; call `recall` when
+  you know roughly what key you want. Never use `remember` for long or structured content.
+- **`kb_add_document` / `kb_search_documents`** — for any extensive or ordered information:
+  plans, analyses, design notes, multi-step decisions, references. This is also what MANDATORY 1's
+  pre-task search uses.
+
+### MANDATORY 7 — General conduct
+
+- Use **English** for code, comments, and documentation (the hard rule in §5).
+- Parallelize independent work when possible, but never at the cost of losing context. When
+  delegating to sub-agents, give them clear, self-contained instructions and the context they
+  need.
+- For actions that are hard to reverse or outward-facing (pushing, merging, publishing, changing
+  shared state), confirm first unless durably authorized — see §7 rule 7 (push only to the branch
+  you are told, never to `main`).
+
 ## 1. What this project is
 
 `docsai` is a cross-platform Rust binary (Windows/Linux/macOS) that converts
@@ -24,15 +154,23 @@ ODF packages use the same IR with automatic-style de-automatization and OpenForm
 preserved. Phase 6 also adds stdin/stdout pipelines, `--out-dir` batch conversion,
 `--style-map`, and `cargo-dist` packaging.
 
-Next up is **Phase 8**: hardening (fuzzing, adversarial suite, benchmarks, audit).
+**Plan v1 (`docs/development-plan.md`, Phases 0–9) is delivered and deprecated.** The active
+plan is **`docs/development-plan-v2.md` (Phases 10–20)**: agent-native primitives first (stable
+node ids + etags, `outline`/`read --select`/`search`, raw-block sidecar, `--fidelity agent`,
+measured token budget), then presentations (`.pptx` ⇄ DocMark, charts, `.odp`, legacy `.ppt`),
+then patch editing (`apply_edits`), then hardening — which absorbs the open items of v1 Phases
+8–9 (fuzzing, adversarial suite, benchmarks, audit).
+
+Next up is **Phase 10**: stable addressing and token budget.
 
 ## 2. Documents you must read before implementing
 
 Mandatory reading order:
 
-1. `docs/development-plan.md` — the phased plan. **Identify which phase the
-   project is in before writing anything.** Do not implement items from future
-   phases.
+1. `docs/development-plan-v2.md` — **the active phased plan** (Phases 10–20). **Identify
+   which phase the project is in before writing anything.** Do not implement items from
+   future phases. `docs/development-plan.md` is plan v1: delivered, deprecated, historical
+   reference only — never open new work against it.
 2. `docs/architecture.md` — workspace structure, IR model, contracts between
    crates.
 3. `docs/docmark-specification.md` — the extended Markdown format. It is a
@@ -41,11 +179,14 @@ Mandatory reading order:
 4. `docs/technical-analysis.md` — why each library was chosen. Do not replace a
    key dependency (calamine, docx-rs, rmcp, comrak…) without leaving a written
    record of the reason in that document.
+   `docs/technical-analysis-presentations.md` — same role for presentations
+   (`.pptx`/`.ppt`/`.odp`) and for the agent context-cost decisions of plan v2.
 5. `kb/` — knowledge base of what is **already built**: summary of closed
    phases, real code structure, technical decisions with their rationale, and
    considerations for the phase you are about to tackle. Start with
    `kb/README.md`. If your change alters the structure or takes a non-obvious
-   technical decision, update it in the same PR.
+   technical decision, update it in the same PR. Before starting a task, recovering
+   this context is **mandatory** — see MANDATORY 1 in the section above.
 
 ## 3. Repository structure (target)
 
@@ -144,7 +285,9 @@ CI (GitHub Actions) runs the matrix `{ubuntu-latest, windows-latest, macos-lates
    pure-Rust? what does it add to binary size? Leave the justification in the PR.
 5. **Document when you finish.** If your change alters visible behavior (CLI,
    format, MCP tools), update README.md and the corresponding document under
-   `docs/` in the same PR.
+   `docs/` in the same PR. Recording the change in the knowledge base with
+   `kb_add_document` is mandatory for every change, not just visible ones —
+   see MANDATORY 5 in the section above.
 6. **Verify against the three mental platforms.** Paths with `std::path` (never
    concatenate with `/`), line endings (the DocMark serializer always emits
    `\n`; the parser accepts `\r\n`), and no POSIX tool dependencies in production

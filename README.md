@@ -9,8 +9,13 @@
 > `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
 > Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
 > and `cargo-dist` release packaging. Phase 7 adds the MCP stdio server
-> (`docsai mcp`) with four tools. See
-> [`docs/development-plan.md`](docs/development-plan.md).
+> (`docsai mcp`) with four tools. That plan
+> ([`docs/development-plan.md`](docs/development-plan.md)) is **delivered and superseded**.
+>
+> **Next: [development plan v2](docs/development-plan-v2.md)** — agent-native docsai
+> (stable node ids, `outline`/`read --select`/`search`, `--fidelity agent`, measured token
+> budget, patch editing) and presentations (`.pptx` ⇄ DocMark, `.odp` ⇄ DocMark, `.ppt`
+> read). Analysis: [`docs/technical-analysis-presentations.md`](docs/technical-analysis-presentations.md).
 
 ```bash
 cargo run -p docsai-cli -- convert report.docx -o report.dmk.md
@@ -32,6 +37,9 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
+| PowerPoint OOXML | `.pptx` | 🕓 v2 P13 | 🕓 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved |
+| PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
+| OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
 
 `docsai formats` prints this same matrix for what the binary can actually do.
@@ -157,9 +165,11 @@ Details in [`docs/architecture.md`](docs/architecture.md) §6 and [`kb/10-phase-
 | Document | Contents |
 |---|---|
 | [`docs/technical-analysis.md`](docs/technical-analysis.md) | Format analysis, evaluated Rust libraries, prior open-source projects (Pandoc, MarkItDown, Docling, mammoth…), decisions and risks |
-| [`docs/docmark-specification.md`](docs/docmark-specification.md) | DocMark format specification (extended Markdown) v1.0-draft |
+| [`docs/technical-analysis-presentations.md`](docs/technical-analysis-presentations.md) | Presentations (`.pptx`/`.ppt`/`.odp`) and agent context economics: format anatomy, crate evaluation, token-cost analysis, risks |
+| [`docs/docmark-specification.md`](docs/docmark-specification.md) | DocMark format specification (extended Markdown) v1.0, plus the committed 1.1 / 1.2 bumps |
 | [`docs/architecture.md`](docs/architecture.md) | Software architecture: crate workspace, intermediate document model (IR), CLI, MCP server |
-| [`docs/development-plan.md`](docs/development-plan.md) | Detailed development plan in 9 phases, with deliverables, acceptance criteria, estimates and testing strategy |
+| [`docs/development-plan-v2.md`](docs/development-plan-v2.md) | **Current plan** (Phases 10–20): agent-native primitives and presentations |
+| [`docs/development-plan.md`](docs/development-plan.md) | Plan v1 (Phases 0–9), delivered and superseded — historical record |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep-a-changelog release notes |
 | [`AGENTS.md`](AGENTS.md) | Operational guide for developers and AI agents working in this repository |
 | [`corpus/README.md`](corpus/README.md) | The test corpus: what each document isolates and how it is regenerated |
@@ -185,6 +195,7 @@ Golden files live next to the corpus (`corpus/docx/*.expected.dmk.md`). To updat
 3. **Measurable fidelity**: format loss is not estimated, it is measured — the `roundtrip` command and the round-trip test suite are part of the product.
 4. **Markdown readable first, complete second**: extended metadata degrades gracefully; a normal Markdown viewer shows a useful document even if it ignores the attributes.
 5. **User data is never lost silently**: what cannot be represented is kept in raw blocks or reported as an explicit warning.
+6. **Context cost is measured, not estimated** (plan v2): tokens per document and tool calls per task are tracked in CI like any other budget, because the primary consumer of this tool is an AI agent with a finite context window.
 
 ## License
 

@@ -1,4 +1,16 @@
-# Development plan
+# Development plan v1 — delivered, superseded
+
+> **Status: DELIVERED AND DEPRECATED.** Phases 0–7 are closed in tree; the open items of
+> Phases 8–9 are carried over into [`development-plan-v2.md`](development-plan-v2.md)
+> (Phase 20), which is now the source of truth for what to build next. This document is kept
+> as the historical record of how the current code came to be — do **not** open new work
+> against it.
+>
+> Plan v2 exists because the binding constraint moved: v1 optimised **fidelity**, and the
+> product is now driven by AI agents over MCP, where the cost that matters is **context per
+> task**. v2 adds the agent-native primitives (stable ids, projections, patch editing, measured
+> token budget) and the presentation family (`.pptx`/`.ppt`/`.odp`) that v1 deferred to its
+> post-1.0 backlog. Analysis: [`technical-analysis-presentations.md`](technical-analysis-presentations.md).
 
 Phased plan to implement `docsai`. Each phase has an objective, tasks, deliverables,
 acceptance criteria, and an indicative estimate (in person-weeks for a senior Rust
@@ -312,6 +324,9 @@ Acceptance criteria:
 
 ## Phase 8 — Hardening and quality (2–3 weeks, partially continuous)
 
+> **Superseded**: the open items below are carried over into plan v2 Phase 20, extended to the
+> new parsers (pptx, ppt) and the new attack surface (skeletons, sidecar raw blocks).
+
 **Objective**: production robustness.
 
 Tasks:
@@ -339,7 +354,11 @@ Acceptance criteria:
 
 **v1.0 close**: freeze stable CLI and DocMark 1.0 format, release notes, announcement.
 
-Prioritized post-1.0 backlog (not committed):
+> **Superseded**: this backlog is replaced by plan v2. PowerPoint is no longer "read-only,
+> someday" — it is Phases 12–16 and 19, bidirectional. `apply_edits` is Phase 17. The items not
+> promoted into v2 phases live in the v2 post-2.0 backlog.
+
+Prioritized post-1.0 backlog (not committed, historical):
 - OOXML ⇄ OpenFormula formula dialect translation (risk R5).
 - PowerPoint (`.pptx`/`.odp`) → read-only DocMark.
 - WMF/EMF → PNG/SVG conversion (`emf` crate / custom library or fallback).

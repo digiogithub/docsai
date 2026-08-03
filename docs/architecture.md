@@ -44,6 +44,9 @@ Notes:
 
 ## 3. The intermediate model (IR) — `docsai-model`
 
+> Plan v2 adds a **third root** (`Document::Presentation`) and a node addressing layer
+> (`NodeId` + etag). See §9.
+
 Two roots:
 
 ```rust
@@ -199,6 +202,9 @@ pub struct ConversionReport {
 
 ## 5. CLI (`docsai-cli`)
 
+> Plan v2 adds `outline`, `read --select`, `search`, `tokens` and `edit`, plus the
+> `--fidelity agent` level. See §9.
+
 ```
 docsai convert <in> [-o <out>] [--to <fmt>] [--fidelity full|standard|plain]
                [--assets-dir <dir>] [--style-map <yaml>] [--max-cells N]
@@ -250,3 +256,115 @@ Decisions:
 - 100k-cell xlsx: < 3 s and < 500 MB RAM (avoid cloning sharedStrings; use `Cow`).
 - Readers stream where the crate allows (calamine is lazy per sheet).
 - Benchmarks with `criterion` on the corpus from Phase 8; regressions > 20% block PRs.
+- Plan v2 budget: 40-slide pptx → DocMark < 1 s (plan v2 Phase 13).
+
+---
+
+## 9. Planned in development plan v2
+
+Everything in §1–§8 describes what is built (Phases 0–7 of plan v1). This section records the
+architectural deltas committed by [`development-plan-v2.md`](development-plan-v2.md); it is not
+implemented yet. Rationale in
+[`technical-analysis-presentations.md`](technical-analysis-presentations.md).
+
+### 9.1 Third IR root: presentations
+
+```rust
+pub enum Document {
+    Text(TextDocument),
+    Workbook(Workbook),
+    Presentation(Presentation),      // v2
+}
+
+pub struct Presentation {
+    pub meta: DocumentMeta,
+    pub styles: StyleCatalog,
+    pub layouts: LayoutCatalog,      // slide layouts + masters, as reference targets
+    pub slides: Vec<Slide>,
+    pub skeleton: Option<SkeletonRef>, // opaque non-slide package parts (§9.4)
+}
+
+pub struct Slide {
+    pub id: NodeId,
+    pub layout_ref: LayoutId,
+    pub shapes: Vec<Shape>,          // reading order, with original spTree index preserved
+    pub notes: Option<Vec<Block>>,
+    pub raw: Vec<RawId>,             // transition/timing subtrees, sidecar-stored
+}
+
+pub enum Shape {
+    Placeholder { ph_type: PhType, idx: Option<u32>, body: Vec<Block>, delta: ShapeProps },
+    TextBox { body: Vec<Block>, geometry: ShapeGeometry },
+    Picture(ImageRef),               // reuses the existing image model unchanged
+    Table(Table),
+    Chart(ChartRef),                 // series data + embedded workbook + raw chart XML
+    Group(Vec<Shape>),
+    RawStub { kind: RawShapeKind, geometry: ShapeGeometry, raw: RawId },
+}
+```
+
+Rules, consistent with §3:
+- **The placeholder cascade is stored as reference + delta**, never flattened: a placeholder
+  keeps its `layout_ref` and only the properties that differ from the resolved layout/master/
+  theme chain.
+- `ShapeGeometry` reuses `Length`/EMU and the existing `ImageGeometry` primitives; DrawingML in
+  `.pptx` is the same model already implemented for `.docx`/`.xlsx`.
+- Reading order is a **policy** (placeholders by type, then top-left), and the original z-order
+  index travels as data so the round trip is reversible.
+- No new crate: `.pptx`/`.ppt` live in `docsai-office::pptx`, `.odp` in `docsai-odf::odp`. The
+  crate dependency rules of `AGENTS.md` §3 are unchanged.
+
+### 9.2 Node addressing (`NodeId` + etag)
+
+Addressable nodes (slide, section, heading, list, table, row, image, sheet, footnote, raw block)
+carry a persistent `NodeId`, allocated from a monotonic counter stored in the DocMark front
+matter (`next-id`) and **never renumbered or reused**. Each carries a 6-character `etag` over
+normalised content, enabling optimistic concurrency for editing. Runs and other fine-grained
+nodes are addressed by relative path (`s4.b2:3`), not by id — an id per run is noise nobody pays
+for willingly.
+
+### 9.3 Fourth fidelity level: `agent`
+
+`full` / `standard` / `plain` are axes of information loss. `agent` is an axis of *editable
+surface*: everything an agent may safely modify is text; everything else is a one-line stub with
+id and etag, with the payload in the raw sidecar (`assets/_raw/`) or the skeleton. Round-trip
+fidelity is unchanged, because the non-editable truth lives in the preserved package.
+
+### 9.4 Preserved package skeleton
+
+For presentations, the reader stores the non-slide parts of the original package opaquely
+through the existing `AssetStore` (content-hash dedupe applies), and the writer re-injects
+regenerated slides into that skeleton rather than rebuilding masters, layouts and theme. This is
+the raw-block hatch lifted to package level, and it is the mitigation for the "PowerPoint offers
+to repair this file" failure mode.
+
+### 9.5 CLI surface v2
+
+```
+docsai outline <in> [--depth N] [--json]
+docsai read <in> --select <selector>          # s4 | s7-s9 | #id | type:notes | text:foo
+docsai search <in> <query> [--json]
+docsai tokens <in> [--fidelity …] [--json]
+docsai edit <in> --ops <ops.json> [--dry-run]
+docsai convert … --fidelity full|standard|plain|agent [--raw inline|sidecar]
+                 [--ids assign|preserve|never] [--thumbnails]
+```
+
+### 9.6 MCP surface v2
+
+| Tool | Purpose |
+|---|---|
+| `outline_document` | id tree with type, preview and **token cost per node** — lets an agent plan before reading |
+| `read_selection` | valid self-contained DocMark for a selector, not the whole document |
+| `search_document` | ids + context for a query |
+| `apply_edits` | transactional patch operations against ids, with `dry_run`, etag preconditions, and the applied diff + new etags in the response |
+| `validate_docmark` | typed errors with node id and suggested fix |
+
+Plus: `include_images=none|refs|thumbnails|full` (default moves from `inline-base64` to `refs`),
+a contextual DocMark cheat-sheet exposed as an MCP resource, and a content-hash LRU cache in
+`docsai-convert`.
+
+The protocol stays **stateless**: ids live inside the document, not in server-side state, and
+the cache is a pure optimisation that can be disabled without changing any output. No sessions,
+no locks, no server-held document handles — that boundary is a deliberate decision, not an
+omission.

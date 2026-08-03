@@ -8,6 +8,12 @@ loss**.
 Status: **frozen (v1.0)** at the close of Phase 0. Any later change bumps the version declared
 in the front matter and requires documenting the migration (`AGENTS.md` §2).
 
+Two version bumps are already committed by
+[`development-plan-v2.md`](development-plan-v2.md) and sketched in §11 of this document:
+**1.1** (node ids and etags, raw-block sidecar, `agent` fidelity level — plan v2 Phases 10–11)
+and **1.2** (the presentation profile, "DocMark-P" — plan v2 Phase 14). Both are additive: a
+document written against 1.0 stays valid.
+
 Annex A (complex tables) is resolved in §3.4. Draft TODOs are closed; additions made explicit by
 the Phase 1 implementation are marked in the text and collected in §10.
 
@@ -414,3 +420,82 @@ are additions: no document written against the draft becomes invalid.
 **Extensions not yet implemented** (the spec defines them; Phase 1 does not emit them): paragraph
 `border`, `::: {.textbox}` (text boxes travel as raw-block), and everything in §4
 (spreadsheets), which arrives in Phase 3.
+
+---
+
+## 11. Committed future versions (1.1 and 1.2)
+
+Normative sketch of the two bumps scheduled by
+[`development-plan-v2.md`](development-plan-v2.md). The exact syntax is finalised in the phase
+that implements it (1.1 in Phases 10–11, 1.2 in Phase 14); what is fixed here is the intent and
+the compatibility contract. Rationale:
+[`technical-analysis-presentations.md`](technical-analysis-presentations.md) §6.
+
+**Compatibility contract for both bumps**: additive only. A 1.0 document parses under 1.1/1.2
+unchanged; ids are assigned on the next write. A 1.1/1.2 document read by a 1.0 parser loses
+addressing metadata but stays valid CommonMark — principle §0.1 holds.
+
+### 11.1 DocMark 1.1 — addressing, sidecar, `agent` fidelity
+
+- **Node ids**: addressable nodes carry `{#<id>}` using the existing attribute syntax. Ids come
+  from a **monotonic counter in the front matter** (`next-id: 128`), are **never renumbered on
+  insertion and never reused after deletion**. Emitted for: section, heading, list, table, table
+  row, image, footnote, sheet, raw block, and (from 1.2) slide, placeholder, shape, notes.
+  Runs and inline nodes are addressed by relative path (`s4.b2:3`), never by id.
+- **Etags**: optional 6-character content hash, `{#s4.b2 etag=a3f9c1}`, over the *normalised*
+  node content, so formatting-only changes do not churn it. Used as an edit precondition.
+- **Raw-block sidecar**: `::: {.raw format=ooxml id=r7}` with no inline payload; the payload
+  lives in `assets/_raw/r7.xml`. Body-inline raw blocks (§7) remain valid and are the default
+  for `--raw inline`.
+- **Attribute-set dictionary**: repeated attribute patterns interned in the front matter and
+  referenced as a class (`{.g1}`), with deterministic naming so §8 idempotence still holds.
+- **Fidelity level `agent`** added to §6: editable content as text, everything else collapsed to
+  a one-line stub carrying id and etag.
+
+### 11.2 DocMark 1.2 — the presentation profile (DocMark-P)
+
+Third document class, alongside text documents (§3) and spreadsheets (§4). Design rule,
+enforced by test: **`--fidelity standard` must remain hand-editable by a human**, and a plain
+Markdown viewer must show, per slide, title + bullets + images and nothing else.
+
+````markdown
+---
+docmark: "1.2"
+source-format: pptx
+next-id: 128
+layouts:
+  L1: { name: "Title and Content", master: M1 }
+skeleton: assets/_skeleton/deck-9f3a21c8.pptx
+---
+
+## Q3 results {#s4 .slide layout=L1}
+
+::: {.ph type=title idx=0 #s4.title}
+Q3 results
+:::
+
+::: {.ph type=body idx=1 #s4.body}
+- Revenue up 12 % {#s4.b1}
+- Churn flat {#s4.b2}
+:::
+
+::: {.shape geom=rect #s4.sh3 raw=r7 pos="3in,2in" size="2in,1in"}
+:::
+
+::: {.notes #s4.notes}
+Open with the churn number, it is the one they ask about.
+:::
+````
+
+- `::: {.slide}` is the primary structural unit; `layout=` references the front-matter layout
+  catalogue, and **only deltas against the resolved layout/master/theme are serialized**.
+- `::: {.ph type=… idx=…}` for semantic placeholders; `::: {.shape …}` with explicit geometry
+  for free shapes. A shape with no Markdown representation is a **visible stub** with a `raw=`
+  reference — present so an agent knows not to delete it, cheap because the payload is in the
+  sidecar.
+- `::: {.notes}` for speaker notes.
+- `skeleton:` references the preserved non-slide package parts (architecture §9.4). Absent for
+  documents authored from scratch, in which case the writer uses the embedded default template
+  and selects a layout from the content shape.
+- Geometry is serialized in readable units (`pos`, `size` in in/cm/pt) and compared in
+  round-trip with a documented tolerance; `emu` remains the exact escape hatch (§2).

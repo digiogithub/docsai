@@ -7,6 +7,14 @@ taken with their risks.
 
 Analysis date: August 2026.
 
+Scope note: this document analyses **flow documents and grids**, which is what plan v1
+(Phases 0–9) built. Presentations (`.pptx`/`.ppt`/`.odp`) and the agent context-cost axis are
+analysed in [`technical-analysis-presentations.md`](technical-analysis-presentations.md), which
+backs [`development-plan-v2.md`](development-plan-v2.md). Nothing here is retracted by it; the
+decisions below (IR pivot, custom readers over `zip` + `quick-xml`, raw-block hatch, `AssetStore`
+with content hashing, optional LibreOffice fallback) are exactly what makes the presentation
+work affordable.
+
 ---
 
 ## 1. Input/output formats

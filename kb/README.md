@@ -25,6 +25,7 @@ Practical difference between the two folders:
 | [08 — Phase 5 legacy DOC](08-phase-5-legacy-doc.md) | `.doc` native degraded read + LibreOffice fallback |
 | [09 — Phase 6 CLI & distribution](09-phase-6-cli.md) | inspect, batch, style-map, stdin/stdout, cargo-dist |
 | [10 — Phase 7 MCP](10-phase-7-mcp.md) | `docsai mcp`, four tools, path/base64, limits |
+| [11 — Plan v2 on-ramp](11-plan-v2-onramp.md) | What agent-native + presentations work reuses, what is new, traps that will bite again |
 
 ## Status in one line
 
@@ -34,6 +35,11 @@ DocMark plus xls read (Phase 3), odt/ods ⇄ DocMark (Phase 4), legacy `.doc`
 read (Phase 5: native degraded + optional LibreOffice → docx), the full CLI
 product surface (Phase 6: `inspect`, batch `--out-dir`, `--style-map`, stdin/stdout,
 `cargo-dist`), and the MCP stdio server (Phase 7: four tools, path/base64).
+
+**Plan v1 is delivered and deprecated.** Active plan:
+[`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives
+(Phases 10–11), presentations (12–16, 18–19), patch editing (17), hardening + v2.0 (20).
+Start at [`11-plan-v2-onramp.md`](11-plan-v2-onramp.md) before touching any of it.
 
 ## Quick checks
 
