@@ -4,6 +4,7 @@
 //! determinism, and the schema is small and fully known. Doing it here also
 //! keeps a YAML serializer out of the dependency tree.
 
+use docsai_model::addressing::{for_each_addressable, Etag, NodeId};
 use docsai_model::list::{ListCatalog, NumFormat};
 use docsai_model::sheet::Workbook;
 use docsai_model::style::{DocDefaults, FontProps, ParaProps, Style, StyleCatalog, Underline};
@@ -49,6 +50,12 @@ pub fn write(
     if let Some(next_id) = next_id {
         scalar(out, "next-id", &next_id.to_string());
     }
+    if doc.addressing().partial {
+        // A selection re-writes itself as a selection: the flag and the etags
+        // are what tell the next reader that the document it holds is a piece
+        // of a bigger one (spec §2.1).
+        write_partial(out, &etags_of(doc));
+    }
     write_meta(out, doc.meta());
 
     match doc {
@@ -73,6 +80,74 @@ pub fn write(
     write_attr_sets(out, dict);
 
     out.push_str("---\n\n");
+}
+
+/// The front matter of a *selection* (spec §2.1): the minimum a partial
+/// document needs to parse and to be written back.
+///
+/// Deliberately shorter than [`write`]: no metadata, no page geometry, no style
+/// or list catalogue, no attribute-set dictionary. Those describe the document
+/// the selection came from, and a caller that declined to read the document has
+/// not asked for them; the selection references them by name and the source
+/// stays the authority. What is here is exactly what cannot be left out — the
+/// version, where the document came from, the id counter (so a node added to
+/// the selection can never collide with one in the source), the `partial` flag
+/// and the etags an if-match write-back needs.
+pub fn selection_front_matter(options: &Options, next_id: u64, etags: &[(NodeId, Etag)]) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    scalar(&mut out, "docmark", &quoted(DOCMARK_VERSION_ADDRESSED));
+    scalar(&mut out, "source-format", options.source_format.as_str());
+    if options.fidelity == Fidelity::Agent {
+        scalar(&mut out, "fidelity", "agent");
+    }
+    scalar(&mut out, "next-id", &next_id.to_string());
+    write_partial(&mut out, etags);
+    out.push_str("---\n\n");
+    out
+}
+
+/// The `partial: true` flag and the etag map, in the one order both writers
+/// use.
+fn write_partial(out: &mut String, etags: &[(NodeId, Etag)]) {
+    scalar(out, "partial", "true");
+    if etags.is_empty() {
+        return;
+    }
+    out.push_str("etags:\n");
+    for (id, etag) in etags {
+        out.push_str(&format!("  {}: {}\n", yaml_key(&id.0), quoted(&etag.0)));
+    }
+}
+
+/// Every addressed node of `doc` with the hash of its content, in id order.
+///
+/// Recomputed on every write rather than stored: an etag *is* the content, so
+/// keeping one would only create a second thing to get out of date. An agent
+/// that edits a node and re-writes the selection sees the etag change, which is
+/// the behaviour an if-match precondition needs.
+fn etags_of(doc: &Document) -> Vec<(NodeId, Etag)> {
+    let mut etags = Vec::new();
+    for_each_addressable(doc, &mut |node| {
+        if let Some(id) = node.node_id() {
+            etags.push((id.clone(), node.etag()));
+        }
+    });
+    sort_by_id(&mut etags);
+    etags
+}
+
+/// Id order: by the counter the id encodes, so `n9` comes before `n10`.
+pub(crate) fn sort_by_id(etags: &mut [(NodeId, Etag)]) {
+    etags.sort_by(|(a, _), (b, _)| {
+        let key = |id: &NodeId| {
+            id.0.strip_prefix('n')
+                .and_then(|n| n.parse::<u64>().ok())
+                .map(|n| (0, n, String::new()))
+                .unwrap_or((1, 0, id.0.clone()))
+        };
+        key(a).cmp(&key(b))
+    });
 }
 
 /// The attribute-set dictionary (spec §3.7).

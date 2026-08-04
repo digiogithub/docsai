@@ -109,6 +109,8 @@ docsai inspect report.docx                         # metadata, styles, media, st
 docsai inspect report.docx --json                  # same, machine-readable
 docsai outline report.docx                         # map of addressable nodes + cost
 docsai outline report.docx --depth 1 --json        # top level only, machine-readable
+docsai read report.docx --select s7-s9             # just those nodes, as DocMark
+docsai read report.docx --select '#n7,text:riesgo' # by id, or by what it says
 docsai tokens report.docx                          # what the document costs an LLM
 docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary
@@ -168,6 +170,34 @@ keeps the first N levels.
 n1 heading 13 # Informe tecnico de seguimiento
 n2 heading 17 ## 1. Estado de alcance del proyecto
 25 nodes · outline 345 tokens · document 9158 tokens (3.8 %)
+```
+
+Partial reads (`docsai read --select`, spec §2.1): `outline` says where the
+paragraph is; this hands it over and nothing else, as **valid self-contained
+DocMark**. Selectors are `s4` and `s7-s9` (positions in the order `outline`
+prints them), `#n7`, `type:heading` and `text:foo`; comma-separated terms are
+unioned and the output always comes back in document order. The body is what the
+whole document wrote for those nodes, byte for byte, and the front matter is the
+minimum needed to parse and re-write it — no metadata, no page geometry, no
+catalogues. It declares `partial: true` and an etag per node, so an edit can be
+written back with a precondition and nobody mistakes a fragment for the document:
+writing one back whole is a **severe warning**, every time.
+
+```text
+$ docsai read report.docx --select s2-s3
+---
+docmark: "1.1"
+source-format: docx
+next-id: 26
+partial: true
+etags:
+  n2: "5e8876"
+  n3: "8eb3e5"
+---
+
+## \1. Estado de alcance del proyecto {#n2}
+
+### Conclusion de alcance del proyecto {#n3}
 ```
 
 Token budget (`docsai tokens`): the cost of the document is **measured** with a

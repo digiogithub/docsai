@@ -84,10 +84,24 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
         }
     }
 
-    if let Some(next) = map.get("next-id").and_then(|v| v.as_str()) {
-        if let Ok(next_id) = next.trim().parse::<u64>() {
-            fm.addressing.next_id = next_id.max(1);
+    // Read as a number, not as text: `next-id: 26` parses to `Value::Number`,
+    // and asking for a string here silently dropped the counter. Nothing showed
+    // it until a *partial* document arrived, because a whole one always has
+    // `next-id == highest id + 1`, which `observe_ids` reconstructs anyway. A
+    // selection is the first document where the counter is deliberately ahead
+    // of its own ids — that is what keeps a node added to it from colliding
+    // with one left behind in the source.
+    if let Some(next) = map.get("next-id").and_then(|v| v.as_f64()) {
+        if next.is_finite() && next >= 1.0 {
+            fm.addressing.next_id = next as u64;
         }
+    }
+
+    // `etags:` is read past on purpose: an etag is derived from the content
+    // sitting right below it, so storing one could only make it wrong. The
+    // writer recomputes the map.
+    if let Some(partial) = map.get("partial").and_then(|v| v.as_bool()) {
+        fm.addressing.partial = partial;
     }
 
     if let Some(v) = map.get("source-format").and_then(|v| v.as_str()) {

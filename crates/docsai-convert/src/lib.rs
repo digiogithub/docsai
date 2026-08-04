@@ -11,6 +11,7 @@ pub mod inspect;
 pub mod loffice;
 pub mod outline;
 mod pipeline;
+pub mod select;
 pub mod service;
 pub mod style_map;
 pub mod tokens;
@@ -26,6 +27,7 @@ pub use pipeline::{
     read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
     Outcome, RoundtripOutcome,
 };
+pub use select::{select, select_path, SelectedNode, Selection, Selector, SelectorError};
 pub use service::{
     convert_from_markdown, convert_to_markdown, inspect_bytes, inspect_input, mime_type_for,
     parse_fidelity, validate_output_path, AssetBytes, AssetMode, FromMarkdownResult, SourceInput,

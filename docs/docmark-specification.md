@@ -103,6 +103,43 @@ Rules:
   (`{.Heading1}`); the inverse writer uses it to regenerate `styles.xml` / ODF `styles.xml`.
 - Unknown fields are preserved (parsers must not reject them): forward-compatible.
 
+### 2.1 Partial documents (selections)
+
+A **selection** is a document made of some of another document's addressed nodes — what
+`docsai read --select` writes. It is a normal DocMark document in every respect: it parses, it
+re-writes to itself, and nothing in the body says it is partial. Two front-matter keys do:
+
+```yaml
+---
+docmark: "1.1"
+source-format: docx
+next-id: 26                     # the *source* document's counter, not the selection's
+partial: true                   # this is part of a larger document
+etags:                          # content hash per addressed node, in id order
+  n3: "8eb3e5"
+  n4: "36576c"
+---
+```
+
+Rules:
+- `partial: true` means **writing this document back whole deletes everything it does not
+  contain**. A writer must say so; `docsai` raises a `partial-document` warning on every
+  serialisation of one. It is the only warning a well-formed selection produces.
+- `next-id` is the **source document's** counter, deliberately ahead of the ids present. That is
+  what keeps a node inserted into a selection from colliding with a node left behind.
+- `etags` is **derived, never stored**: a writer recomputes the map from the nodes it is writing,
+  so an edited node's etag changes with it. It is written only for a partial document — a whole
+  one carries its content already, and a hash of it would be a second copy to keep in step.
+- The front matter of a selection is the **minimum**: no metadata, no page geometry, no style or
+  list catalogue, no `attribute-sets`. Those describe the document the selection came from, which
+  remains the authority; a caller that declined to read the document did not ask for them either.
+  A class the selection does not define is inert (§3.7), so the body still parses.
+- A selection therefore carries **no attribute-set dictionary**: every attribute is written where
+  it is used, so the file depends on nothing outside itself.
+- A footnote is not selectable on its own: it is addressed at its reference, inside a block, and
+  its text is written at the foot of the document. A selection containing a reference **must**
+  carry the matching definition.
+
 ## 3. Text blocks
 
 ### 3.1 Headings and paragraphs
@@ -600,15 +637,15 @@ the remaining bullets stay a sketch until Phase 11 implements them.
 - **Readable units** (§2): a length is written in the unit of what it measures, zero carries no
   unit, and `--precision` sets how many decimals a readable unit may use. Still exact: the
   round-trip tolerance is zero.
+- **Partial documents** (§2.1): `partial: true` and the `etags:` map, written by
+  `docsai read --select`. This is where the etag finally reaches a file — derived on every write,
+  never stored, and only for a selection.
 
 #### The rest of 1.1 (not yet implemented)
 
-- **Etags**: optional 6-character content hash, `{#s4.b2 etag=a3f9c1}`, over the *normalised*
-  node content, so formatting-only changes do not churn it. Used as an edit precondition. The
-  hash is **derived from the node, never stored in it**, so it cannot go stale behind an edit.
-- **Etags in the output**: `agent` addresses every node `full` addresses, but the etag is still
-  computed and never written; the stub carries the id alone until `read --select` needs an
-  if-match precondition.
+- **Etags on a whole document**: a complete document still writes none. It carries its content,
+  so a hash of it would be a second copy to keep in step; the map exists for a *selection*, which
+  is what an if-match write-back is sent against.
 
 ### 11.2 DocMark 1.2 — the presentation profile (DocMark-P)
 

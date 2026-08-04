@@ -35,12 +35,13 @@ mod writer;
 mod yaml;
 
 pub use error::ParseError;
+pub use frontmatter::selection_front_matter;
 pub use ids::NodeFragment;
 pub use parser::{parse, parse_with_base};
 
 use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
-use docsai_model::{ConversionReport, Document, Format};
+use docsai_model::{ConversionReport, Document, Format, Warning};
 
 use std::collections::BTreeSet;
 
@@ -159,6 +160,12 @@ pub struct Options {
     /// (spec §2). Raising it buys readable units for lengths that two decimals
     /// cannot name exactly; it never rounds, so it never costs accuracy.
     pub precision: u8,
+    /// Whether repeated attribute patterns may be interned into the front
+    /// matter (spec §3.7). A *selection* turns it off: a partial read must
+    /// depend on nothing outside itself, and a handful of nodes repeat nothing
+    /// worth a name. Turning it off never changes meaning — only whether the
+    /// pairs are written where they are used or once at the top.
+    pub dictionary: bool,
 }
 
 impl Default for Options {
@@ -170,6 +177,7 @@ impl Default for Options {
             source_format: Format::Docx,
             raw: RawPolicy::default(),
             precision: docsai_model::units::DEFAULT_PRECISION,
+            dictionary: true,
         }
     }
 }
@@ -241,6 +249,18 @@ fn run(
         }
     }
 
+    if doc.addressing().partial {
+        // Not a defect of this document: a warning about what writing it back
+        // over its source would do (spec §2.1).
+        let mut nodes = 0usize;
+        docsai_model::addressing::for_each_addressable(doc, &mut |node| {
+            if node.node_id().is_some() {
+                nodes += 1;
+            }
+        });
+        report.warn(Warning::PartialDocument { nodes });
+    }
+
     let mut out = String::new();
     frontmatter::write(&mut out, doc, options, ids.next_id(), &dict);
     out.push_str(&body);
@@ -283,7 +303,7 @@ fn render_body(
 /// (`sheet_writer::collect_cell_meta`), so a dictionary over it would be a
 /// second answer to a question already answered.
 fn dictionary_applies(doc: &Document, options: &Options) -> bool {
-    doc.is_text() && options.fidelity.formatting()
+    options.dictionary && doc.is_text() && options.fidelity.formatting()
 }
 
 /// Every class name the document already means something by. A generated

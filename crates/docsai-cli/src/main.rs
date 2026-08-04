@@ -124,6 +124,31 @@ enum Command {
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
+    /// Read part of a document: the selected nodes as self-contained DocMark.
+    ///
+    /// What `outline` is for: it says where the paragraph is, this returns it
+    /// and nothing else. The output declares `partial: true` and carries an
+    /// etag per node, so an edit can be written back with a precondition.
+    Read {
+        /// Input document.
+        input: PathBuf,
+        /// What to read: `s4`, `s7-s9`, `#n7`, `type:heading`, `text:revenue`.
+        /// Comma-separated terms are unioned; the output is in document order.
+        #[arg(long, value_name = "SELECTOR")]
+        select: String,
+        /// How much of the source survives: `full` or `agent`.
+        #[arg(long, default_value = "full")]
+        fidelity: String,
+        /// Output file; without it the selection goes to stdout.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Print the selection and what it cost as JSON on stdout.
+        #[arg(long)]
+        json: bool,
+        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        #[arg(long, default_value = "auto", value_name = "MODE")]
+        use_loffice: String,
+    },
     /// Measure what a document costs an LLM, per document and per node.
     ///
     /// Counted with a real BPE tokenizer (`o200k_base`) over the DocMark that
@@ -230,6 +255,21 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             json,
             use_loffice,
         } => run_outline(input, *depth, fidelity, *json, use_loffice),
+        Command::Read {
+            input,
+            select,
+            fidelity,
+            output,
+            json,
+            use_loffice,
+        } => run_read(
+            input,
+            select,
+            fidelity,
+            output.as_deref(),
+            *json,
+            use_loffice,
+        ),
         Command::Roundtrip {
             input,
             output,
@@ -420,6 +460,59 @@ fn run_outline(
         outline.document_tokens,
         share(outline.outline_tokens, outline.document_tokens)
     );
+    Ok(EXIT_OK)
+}
+
+fn run_read(
+    input: &Path,
+    selector: &str,
+    fidelity: &str,
+    output: Option<&Path>,
+    json: bool,
+    use_loffice: &str,
+) -> anyhow::Result<u8> {
+    let fidelity = parse_fidelity(fidelity)?;
+    if !fidelity.addresses() {
+        anyhow::bail!(
+            "--fidelity {fidelity} does not address nodes, so there is nothing to select from; \
+             node ids live at `full` and `agent`"
+        );
+    }
+    let selector: docsai_convert::Selector =
+        selector.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let options = ConvertOptions {
+        fidelity,
+        use_loffice: parse_use_loffice(use_loffice)?,
+        ..Default::default()
+    };
+    let selection = docsai_convert::select_path(input, &options, &selector)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&selection)?);
+        return Ok(EXIT_OK);
+    }
+    if selection.is_empty() {
+        eprintln!(
+            "docsai: `{}` matched no node in {}; run `docsai outline` to see what there is",
+            selection.selector,
+            input.display()
+        );
+        return Ok(EXIT_OK);
+    }
+    match output {
+        Some(path) if path != Path::new("-") => {
+            std::fs::write(path, &selection.docmark)?;
+            eprintln!(
+                "docsai: {} node(s) → {} · {} of {} tokens ({:.1} %)",
+                selection.nodes.len(),
+                path.display(),
+                selection.tokens,
+                selection.document_tokens,
+                share(selection.tokens, selection.document_tokens)
+            );
+        }
+        _ => print!("{}", selection.docmark),
+    }
     Ok(EXIT_OK)
 }
 

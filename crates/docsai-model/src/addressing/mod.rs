@@ -177,11 +177,20 @@ impl std::fmt::Display for IdPolicy {
 pub struct Addressing {
     /// The next counter value to hand out.
     pub next_id: u64,
+    /// This document is a *selection* taken from a larger one (`partial: true`
+    /// in the front matter, spec §2.1). It carries the ids and the counter of
+    /// the document it came from, so an edit made here can be written back
+    /// node by node — but writing it back *whole* would delete everything it
+    /// does not contain, which is why serialising one warns.
+    pub partial: bool,
 }
 
 impl Default for Addressing {
     fn default() -> Self {
-        Addressing { next_id: 1 }
+        Addressing {
+            next_id: 1,
+            partial: false,
+        }
     }
 }
 

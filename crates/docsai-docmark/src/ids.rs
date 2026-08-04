@@ -13,7 +13,9 @@
 //!    ([`for_each_addressable`] enforces the same set), because an id that
 //!    cannot be written would be different on every pass.
 
-use docsai_model::addressing::{for_each_addressable, Addressable, Addressing, IdPolicy};
+use std::collections::HashMap;
+
+use docsai_model::addressing::{for_each_addressable, Addressable, Addressing, Etag, IdPolicy};
 use docsai_model::{Document, NodeId, NodeKind};
 
 /// The DocMark one addressable node contributed to the output.
@@ -27,6 +29,11 @@ pub struct NodeFragment {
     pub id: NodeId,
     pub kind: NodeKind,
     pub markdown: String,
+    /// What the node's *content* hashes to (spec §11.2). Derived from the IR,
+    /// not from the text above: it survives reflowing and changes when the
+    /// content does, which is what makes it usable as an if-match precondition
+    /// when an agent sends an edited selection back.
+    pub etag: Etag,
     /// How many fragments this one contains, all of them immediately before it
     /// in the list. A node is recorded when it finishes, so everything written
     /// while it was open sits in `[index - descendants, index)` — that
@@ -41,6 +48,13 @@ pub(crate) struct IdSource {
     emitted: bool,
     /// Collected only when the caller asked for a traced serialisation.
     trace: Option<Vec<NodeFragment>>,
+    /// The etag of every node that took an id, by id.
+    ///
+    /// Kept here because the two ends of a node are two different calls:
+    /// [`IdSource::take`] sees the node, [`IdSource::record`] sees the text it
+    /// wrote. Going through the id rather than through call order means the
+    /// pairing cannot drift when a writer grows a new nesting level.
+    etags: HashMap<String, Etag>,
 }
 
 impl IdSource {
@@ -57,6 +71,7 @@ impl IdSource {
             addressing,
             emitted: false,
             trace: None,
+            etags: HashMap::new(),
         }
     }
 
@@ -80,6 +95,11 @@ impl IdSource {
             None => return None,
         };
         self.emitted = true;
+        // Only a traced run ever reads these, and hashing every node of an
+        // untraced one would be work nobody asked for.
+        if self.trace.is_some() {
+            self.etags.insert(id.0.clone(), node.etag());
+        }
         Some(id.0)
     }
 
@@ -99,13 +119,18 @@ impl IdSource {
     /// the node took an id at all — a node without an address cannot be
     /// reported on.
     pub(crate) fn record(&mut self, id: Option<&str>, kind: NodeKind, markdown: &str, mark: usize) {
-        let (Some(trace), Some(id)) = (self.trace.as_mut(), id) else {
+        let (true, Some(id)) = (self.trace.is_some(), id) else {
             return;
         };
+        // An id that took part always has an etag; the fallback keeps the
+        // invariant local instead of turning it into a panic.
+        let etag = self.etags.get(id).cloned().unwrap_or_else(|| Etag::new(""));
+        let trace = self.trace.as_mut().expect("checked above");
         trace.push(NodeFragment {
             id: NodeId::new(id),
             kind,
             markdown: markdown.to_string(),
+            etag,
             descendants: trace.len().saturating_sub(mark),
         });
     }

@@ -127,8 +127,20 @@ Acceptance criteria:
       tolerance is documented as **zero** and tested over every Word twip value. Accepting a
       tolerance would have bought nothing and cost the round-trip identity the whole project
       rests on.
-- [ ] `read --select` output re-parses standalone, and re-writing it produces no warnings other
-      than the documented "partial document" one.
+- [x] `read --select` output re-parses standalone, and re-writing it produces no warnings other
+      than the documented "partial document" one (11-F). Checked in the strong form — not on a
+      few documents but on **every** corpus document that addresses anything (26 of them), by
+      parsing the selection and comparing the re-serialisation byte for byte. One documented
+      exception, pinned in the test: `odt/table-merged.odt` re-writes to the same *body* but a
+      different etag, because the ODF reader gives that table rows of three cells while its
+      DocMark pads every row to four, so re-parsing produces four. The text is identical either
+      way — which is why the goldens never showed it — and the defect belongs to the ODF table
+      round trip, not to the selection. Two decisions were taken along the way and are recorded
+      in the spec: a **footnote cannot be selected on its own** (it is addressed at its reference
+      and written at the foot of the document), and a selected block that refers to one always
+      carries its definition. `type:notes` from task 6's list has no kind to match until the
+      presentation profile adds one (Phase 14), so `type:` validates against the kinds that exist
+      and says which they are.
 - [x] Delta emission does not change any golden's semantics: the 12 goldens that moved lost only
       implied classes (`.Heading1`, `.Standard`) and one style value equal to its parent's;
       round-trip identity, idempotence and the fidelity metric are unchanged. Corpus

@@ -38,6 +38,7 @@ Practical difference between the two folders:
 | [22 — Phase 11 C](22-phase-11-delta-emission.md) | Delta emission against the whole cascade, and the fixture that made it measurable |
 | [23 — Phase 11 D](23-phase-11-attr-dictionary.md) | Repeated attribute patterns interned as `{.g1}`, and why expansion happens before interpretation |
 | [24 — Phase 11 E](24-phase-11-readable-units.md) | Units chosen by what a length measures, `--precision`, and the tolerance that turned out to be zero |
+| [25 — Phase 11 F](25-phase-11-read-select.md) | `read --select`: a selection that stands on its own, the minimum front matter, and where the etag finally gets written |
 
 ## Status in one line
 
@@ -74,5 +75,6 @@ cargo run -p docsai-cli -- formats                      # real support matrix of
 cargo run -p docsai-cli -- inspect corpus/docx/basic-text.docx
 cargo run -p docsai-cli -- tokens corpus/docx/long-report.docx   # measured cost (Phase 10)
 cargo run -p docsai-cli -- outline corpus/docx/long-report.docx  # the map an agent reads first
+cargo run -p docsai-cli -- read corpus/docx/long-report.docx --select s2-s3  # part of it (Phase 11)
 cargo run -p docsai-cli -- mcp   # stdio MCP server (Phase 7)
 ```

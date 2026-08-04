@@ -45,6 +45,10 @@ pub enum Warning {
     RevisionsAccepted { count: u32 },
     /// A raw-block could not be re-injected because the target dialect differs.
     RawBlockDropped { id: String, format: String },
+    /// The document is a selection of another (`partial: true`, spec §2.1).
+    /// Nothing is wrong with it — but whoever writes it back over the document
+    /// it came from, rather than node by node, deletes the rest of it.
+    PartialDocument { nodes: usize },
 }
 
 impl Warning {
@@ -56,6 +60,9 @@ impl Warning {
             Warning::AssetIssue { .. } | Warning::RawBlockDropped { .. } => Severity::Severe,
             Warning::ExternalImageNotFetched { .. } => Severity::Minor,
             Warning::MacrosIgnored { .. } | Warning::RevisionsAccepted { .. } => Severity::Info,
+            // Severe on purpose: the loss is not in this document, it is in
+            // the one a careless write would overwrite with it.
+            Warning::PartialDocument { .. } => Severity::Severe,
         }
     }
 
@@ -82,6 +89,10 @@ impl Warning {
             Warning::RawBlockDropped { id, format } => {
                 format!("raw-block {id} dropped: source dialect is {format}")
             }
+            Warning::PartialDocument { nodes } => format!(
+                "partial document: a selection of {nodes} addressed node(s); \
+                 writing it back whole loses everything it does not contain"
+            ),
         }
     }
 }

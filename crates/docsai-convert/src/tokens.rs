@@ -112,6 +112,7 @@ pub fn token_report_path(
         source_format,
         raw: options.raw,
         precision: options.precision,
+        dictionary: true,
     };
     let mut report = token_report(&doc, &assets, &docmark);
     report.path = Some(input.display().to_string());
@@ -198,7 +199,7 @@ pub(crate) fn preview(markdown: &str) -> String {
 
 /// Drops what DocMark writes for machines: `:::` fences, attribute blocks and
 /// the `|---|` rule of a table.
-fn strip_machinery(markdown: &str) -> String {
+pub(crate) fn strip_machinery(markdown: &str) -> String {
     let mut out = String::new();
     for line in markdown.lines() {
         let trimmed = line.trim_start();

@@ -394,6 +394,7 @@ fn write_document(
                 source_format,
                 raw: options.raw,
                 precision: options.precision,
+                dictionary: true,
             };
             let (markdown, write_report) =
                 docsai_docmark::serialize(&document, store, &docmark_options);
@@ -449,6 +450,7 @@ fn write_document(
                     // a file on disk: a `src=` here would point at nothing.
                     raw: RawPolicy::Inline,
                     precision: options.precision,
+                    dictionary: true,
                 },
             );
 
@@ -570,6 +572,7 @@ pub fn roundtrip_file(
             // there is no directory for a sidecar to live in.
             raw: RawPolicy::Inline,
             precision: docsai_model::units::DEFAULT_PRECISION,
+            dictionary: true,
         },
     );
     report.merge(r1);
@@ -617,6 +620,7 @@ pub fn roundtrip_file(
             source_format: office_format,
             raw: RawPolicy::Inline,
             precision: docsai_model::units::DEFAULT_PRECISION,
+            dictionary: true,
         },
     );
     report.merge(r5);

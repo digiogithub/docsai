@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docsai read <in> --select <selector>`** (plan v2 Phase 11, DocMark spec §2.1): part of a
+  document as valid, self-contained DocMark. Selector terms are `s4` and `s7-s9` (positions in
+  the order `docsai outline` prints, 1-based, inclusive), `#n7`, `type:heading` and `text:foo`;
+  comma-separated terms are unioned and the output is always in document order. The body is the
+  bytes the whole document wrote for those nodes, so nothing is re-derived; the front matter is
+  the minimum needed to parse and re-write it — version, source format, the *source document's*
+  `next-id`, `partial: true` and an `etags:` map — and deliberately carries no metadata, page
+  geometry, catalogue or attribute-set dictionary. A footnote is not selectable on its own, and a
+  selected block that refers to one always carries its definition. Two headings of a 9 000-token
+  report cost 26 tokens.
+- **Etags in the output**, at last (spec §2.1, §11.1): Phase 10 computed them and wrote none. A
+  selection now carries one per addressed node, recomputed on every write rather than stored, so
+  an edited node's etag moves with it and an if-match write-back has something to check.
+- `Warning::PartialDocument`: raised on every serialisation of a document with `partial: true`.
+  Severe on purpose — the loss is not in that document, it is in the one a careless whole-file
+  write would replace with it.
+- `docsai_docmark::Options::dictionary`, and `selection_front_matter`. A selection turns the
+  attribute-set dictionary off so it depends on nothing outside itself.
 - **Readable units** (plan v2 Phase 11, DocMark spec §2): a length is now written in the unit of
   **what it measures** rather than in whichever unit happened to divide it exactly — points for
   layout and typography (indents, margins, column widths, list levels), pixels for drawings and
