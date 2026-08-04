@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Delta emission against the whole inheritance chain** (plan v2 Phase 11): a run is now
+  resolved against its **paragraph's** style before its own, which is the middle of the OOXML
+  cascade and the level the serializer used to skip — text typed after applying a style carries
+  that style's run properties again in `w:rPr`, and all of it was being written out. A style in
+  the catalogue emits only what its `based-on` chain does not already say; the default paragraph
+  style is no longer named on a paragraph; a heading omits the class its `#` level already names
+  (and the parser puts it back). Every omission is reversible: a value equal to the inherited one
+  resolves to the inherited one.
+- Corpus fixture `docx/redundant-formatting.docx`, which carries that redundancy on purpose —
+  600 → 528 tokens with the change, and the existing corpus 24 883 → 24 667 (−0.9 %), small only
+  because generated fixtures were already clean.
 - **`--fidelity agent`** (plan v2 Phase 11), a fourth level and the first that is a *projection*
   rather than a conversion: text, structure, node ids and raw stubs, without the style and list
   catalogues, indents, spacing, page geometry, image geometry or column widths. A sheet keeps its

@@ -37,7 +37,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -48,6 +48,6 @@ styles:
     font: { bold: true }
 ---
 
-![FloatPara](assets/img-40e10599.png){#n2 anchor=floating height=3cm name=FloatPara relative-to=paragraph width=4cm wrap=square x=1cm y=0.5cm z-index=1}Texto que fluye junto a la imagen flotante anclada al parrafo. {#n1 .Standard}
+![FloatPara](assets/img-40e10599.png){#n2 anchor=floating height=3cm name=FloatPara relative-to=paragraph width=4cm wrap=square x=1cm y=0.5cm z-index=1}Texto que fluye junto a la imagen flotante anclada al parrafo. {#n1}
 
-![BehindPage](assets/img-8cbae2d9.png){#n4 anchor=behind height=3cm name=BehindPage relative-to=page width=3cm wrap=through x=2cm y=5cm z-index=0}Texto sobre imagen detras de la pagina. {#n3 .Standard}
+![BehindPage](assets/img-8cbae2d9.png){#n4 anchor=behind height=3cm name=BehindPage relative-to=page width=3cm wrap=through x=2cm y=5cm z-index=0}Texto sobre imagen detras de la pagina. {#n3}

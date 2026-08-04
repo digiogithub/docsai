@@ -938,6 +938,60 @@ def docx_custom_styles() -> None:
     )
 
 
+REDUNDANT_STYLES = DEFAULT_STYLES.replace(
+    "</w:styles>",
+    """<w:style w:type="paragraph" w:styleId="Resaltado">
+    <w:name w:val="Resaltado"/><w:basedOn w:val="Normal"/>
+    <w:pPr><w:jc w:val="center"/><w:spacing w:before="120"/></w:pPr>
+    <w:rPr><w:color w:val="C00000"/><w:sz w:val="28"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="ResaltadoHijo">
+    <w:name w:val="Resaltado hijo"/><w:basedOn w:val="Resaltado"/>
+    <w:pPr><w:jc w:val="center"/></w:pPr>
+    <w:rPr><w:color w:val="C00000"/><w:sz w:val="28"/><w:b/></w:rPr>
+  </w:style></w:styles>""",
+)
+
+
+def docx_redundant_formatting() -> None:
+    """Formatting the inheritance chain already implies, at every level.
+
+    Word writes this constantly: text typed after applying a style carries the
+    style's own run properties again in `w:rPr`, and a derived style repeats
+    what it inherits. None of it should reach the DocMark (spec 3.1).
+    """
+    style_rpr = '<w:rPr><w:color w:val="C00000"/><w:sz w:val="28"/></w:rPr>'
+    body = (
+        # A heading whose style the `#` level already names.
+        p(r("Titulo con estilo implicito"), '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>')
+        # Runs repeating what the paragraph style says.
+        + p(
+            r("Todo esto ya lo dice el estilo.", style_rpr),
+            '<w:pPr><w:pStyle w:val="Resaltado"/></w:pPr>',
+        )
+        # Paragraph properties repeating what the paragraph style says.
+        + p(
+            r("Y esto lo dice dos veces.", style_rpr),
+            '<w:pPr><w:pStyle w:val="Resaltado"/><w:jc w:val="center"/>'
+            '<w:spacing w:before="120"/></w:pPr>',
+        )
+        # Inherited through two levels, plus one real delta (italic).
+        + p(
+            r("Heredado dos niveles", '<w:rPr><w:color w:val="C00000"/><w:sz w:val="28"/>'
+              "<w:b/><w:i/></w:rPr>")
+            + r(" y una diferencia real.", '<w:rPr><w:color w:val="C00000"/><w:sz w:val="28"/>'
+                "<w:b/></w:rPr>"),
+            '<w:pPr><w:pStyle w:val="ResaltadoHijo"/></w:pPr>',
+        )
+    )
+    build_docx(
+        "redundant-formatting.docx",
+        document(body),
+        title="Formato redundante",
+        styles=REDUNDANT_STYLES,
+    )
+
+
 def docx_images_vml() -> None:
     """Legacy VML picture (`w:pict`), typical of documents converted from .doc."""
     pict = (
@@ -2240,6 +2294,7 @@ GENERATORS = [
     docx_headers_footers,
     docx_footnotes,
     docx_custom_styles,
+    docx_redundant_formatting,
     docx_images_vml,
     docx_fields_raw,
     xlsx_values_types,

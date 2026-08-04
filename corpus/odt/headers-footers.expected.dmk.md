@@ -36,7 +36,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -48,11 +48,11 @@ styles:
 ---
 
 ::: {.header scope=default}
-Encabezado del documento {.Standard}
+Encabezado del documento
 :::
 
 ::: {.footer scope=default}
-Pagina [1]{.field field=PAGE} de [1]{.field field=NUMPAGES} {.Standard}
+Pagina [1]{.field field=PAGE} de [1]{.field field=NUMPAGES}
 :::
 
-Cuerpo con encabezado y pie. {.Standard}
+Cuerpo con encabezado y pie.

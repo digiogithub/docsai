@@ -35,6 +35,7 @@ Practical difference between the two folders:
 | [19 — Phase 11 plan](19-phase-11-plan.md) | Projections, raw sidecar, `--fidelity agent`, `read --select`: the increments |
 | [20 — Phase 11 A](20-phase-11-raw-sidecar.md) | Raw-block bytes move to `assets/_raw/`, and a missing sidecar is an error |
 | [21 — Phase 11 B](21-phase-11-agent-fidelity.md) | `--fidelity agent`: the projection rule, what it enforces, and what the plan's criterion got wrong |
+| [22 — Phase 11 C](22-phase-11-delta-emission.md) | Delta emission against the whole cascade, and the fixture that made it measurable |
 
 ## Status in one line
 
@@ -50,8 +51,9 @@ and `docsai outline` measured with a vendored BPE tokenizer, and the corpus toke
 (`corpus/token-budget.md`) gated in CI.
 
 **Phase 11 is in progress**: raw-block bytes live in `assets/_raw/` sidecars (11-A) and
-`--fidelity agent` projects a document down to what a program can edit (11-B). Next is delta
-emission against the inheritance chain (11-C).
+`--fidelity agent` projects a document down to what a program can edit (11-B); no attribute
+the inheritance chain already implies is written (11-C). Next is the attribute-set dictionary
+(11-D).
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives

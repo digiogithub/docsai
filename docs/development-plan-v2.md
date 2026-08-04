@@ -121,8 +121,12 @@ Acceptance criteria:
       an edit node by node is Phase 17.
 - [ ] `read --select` output re-parses standalone, and re-writing it produces no warnings other
       than the documented "partial document" one.
-- [ ] Delta emission does not change any golden's semantics (goldens updated by hand, diff
-      reviewed, fidelity metric unchanged or better).
+- [x] Delta emission does not change any golden's semantics: the 12 goldens that moved lost only
+      implied classes (`.Heading1`, `.Standard`) and one style value equal to its parent's;
+      round-trip identity, idempotence and the fidelity metric are unchanged. Corpus
+      24 883 → 24 667 (−0.9 %) — small because the generated fixtures were already clean, which
+      is why `docx/redundant-formatting.docx` was added to measure it on a document that is not
+      (600 → 528).
 
 ## Phase 12 — Presentation spikes (2–3 weeks)
 

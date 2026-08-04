@@ -37,7 +37,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -48,14 +48,14 @@ styles:
     font: { bold: true }
 ---
 
-# Titulo principal {#n1 .Heading_20_1}
+# Titulo principal {#n1}
 
-## Subtitulo {#n2 .Heading_20_2}
+## Subtitulo {#n2}
 
-Texto con **negrita**, [italica]{.Emphasis} y [**ambas**]{.Emphasis}. {.Standard}
+Texto con **negrita**, [italica]{.Emphasis} y [**ambas**]{.Emphasis}.
 
-Centrado por estilo automatico. {.Standard align=center}
+Centrado por estilo automatico. {align=center}
 
-Color [rojo subrayado]{.underline color=#C00000}. {.Standard}
+Color [rojo subrayado]{.underline color=#C00000}.
 
-Enlace a [example.com](https://example.com/docsai). {.Standard}
+Enlace a [example.com](https://example.com/docsai).

@@ -163,7 +163,7 @@ fn write_styles(out: &mut String, catalog: &StyleCatalog) {
     }
     out.push_str("styles:\n");
     for style in catalog.styles.values() {
-        write_style(out, style);
+        write_style(out, style, catalog);
     }
 }
 
@@ -177,7 +177,7 @@ fn write_defaults(out: &mut String, defaults: &DocDefaults) {
     }
 }
 
-fn write_style(out: &mut String, style: &Style) {
+fn write_style(out: &mut String, style: &Style, catalog: &StyleCatalog) {
     out.push_str(&format!("  {}:\n", yaml_key(style.id.as_str())));
     out.push_str(&format!("    type: {}\n", style.style_type.as_str()));
     if style.name != style.id.as_str() {
@@ -192,10 +192,16 @@ fn write_style(out: &mut String, style: &Style) {
     if style.is_default {
         out.push_str("    default: true\n");
     }
-    if let Some(font) = font_flow(&style.font) {
+    // Only what the chain does not already say (spec §3.1). Readers hand us
+    // deltas when the source format stores deltas, but not every one does —
+    // `.doc` and `.xls` resolve as they go — and the parser rebuilds the same
+    // catalogue either way, since dropping a value equal to the inherited one
+    // cannot change what it resolves to.
+    let inherited = catalog.resolve(style.based_on.as_ref());
+    if let Some(font) = font_flow(&style.font.minus(&inherited.font)) {
         out.push_str(&format!("    font: {font}\n"));
     }
-    if let Some(para) = para_flow(&style.paragraph) {
+    if let Some(para) = para_flow(&style.paragraph.minus(&inherited.paragraph)) {
         out.push_str(&format!("    paragraph: {para}\n"));
     }
 }

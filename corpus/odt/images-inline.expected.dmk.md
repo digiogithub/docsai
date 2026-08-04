@@ -37,7 +37,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -48,4 +48,4 @@ styles:
     font: { bold: true }
 ---
 
-Antes ![Blue](assets/img-40e10599.png){#n2 height=2.25cm name=Blue width=3cm} despues. {#n1 .Standard}
+Antes ![Blue](assets/img-40e10599.png){#n2 height=2.25cm name=Blue width=3cm} despues. {#n1}

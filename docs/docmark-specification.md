@@ -101,7 +101,11 @@ A normal paragraph (default style, no attributes).
 Paragraph with style and direct formatting. {.Quote align=center space-after=12pt}
 ```
 
-- The `#` level reflects the outline level; the class indicates the actual style.
+- The `#` level reflects the outline level; the class indicates the actual style — and is
+  **omitted when the level already names it**: when exactly one paragraph style in the catalogue
+  declares that outline level, a heading of that level and that style writes no class, and the
+  parser puts the style back. Two styles claiming the same level make it ambiguous, and an
+  ambiguous chain implies nothing: the class stays.
 - Paragraph attributes go in `{...}` **at the end of the block**: `align`,
   `indent-left`, `indent-right`, `indent-first-line`, `indent-hanging`,
   `space-before`, `space-after`, `line-height`, `background`, `keep-with-next`,
@@ -110,7 +114,20 @@ Paragraph with style and direct formatting. {.Quote align=center space-after=12p
   represent it, because Markdown absorbs it: in `full` mode it is written `[]{.empty}`.
   `standard` and `plain` modes discard it, which is exactly what they promise (§6).
 - Economy rule: if formatting matches exactly what the style defines, redundant attributes are
-  **not** emitted (keeps Markdown clean and diffs stable).
+  **not** emitted (keeps Markdown clean and diffs stable). "The style" means the whole cascade,
+  in this order:
+  1. document defaults (`style-defaults`),
+  2. the **paragraph's** style chain — a run inherits from its paragraph before it inherits from
+     the document, so a run repeating what its paragraph's style says carries no span at all,
+  3. the run's own character style chain,
+  4. direct formatting, which is the only thing left to write.
+
+  The same rule applies to the catalogue itself: a style writes only what its `based-on` chain
+  does not already say. And the **default paragraph style is never named** on a paragraph — it
+  is what applies where nothing else does.
+
+  Every omission here is reversible by construction: a value equal to the inherited one resolves
+  to the inherited one. Nothing is dropped that re-reading would not give back.
 
 ### 3.2 Inline formatting
 

@@ -37,7 +37,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -48,4 +48,4 @@ styles:
     font: { bold: true }
 ---
 
-![Transformed](assets/img-8cbae2d9.png){#n2 crop="13.33%,10%,13.33%,10%" flip=h height=3cm name=Transformed rotation=15 width=3cm} {#n1 .Standard}
+![Transformed](assets/img-8cbae2d9.png){#n2 crop="13.33%,10%,13.33%,10%" flip=h height=3cm name=Transformed rotation=15 width=3cm} {#n1}

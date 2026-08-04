@@ -69,7 +69,7 @@ pub fn parse_with_base(
         assets,
         report: &mut report,
         footnotes: BTreeMap::new(),
-        _styles: fm.styles.clone(),
+        styles: fm.styles.clone(),
     };
 
     let blocks = parser.parse_blocks(body, body_line)?;
@@ -316,7 +316,7 @@ struct BodyParser<'a> {
     assets: &'a mut dyn AssetStore,
     report: &'a mut Report,
     footnotes: BTreeMap<u32, Vec<Block>>,
-    _styles: docsai_model::StyleCatalog,
+    styles: docsai_model::StyleCatalog,
 }
 
 impl<'a> BodyParser<'a> {
@@ -398,6 +398,11 @@ impl<'a> BodyParser<'a> {
             let (mut para, _) = self.parse_paragraph_line(content, true)?;
             // The `{#id}` on a heading line addresses the heading itself.
             let id = para.id.take();
+            // A heading with no class names the style the level implies; the
+            // serializer left it out for exactly that reason (spec §3.1).
+            if para.format.style.is_none() {
+                para.format.style = self.styles.heading_style(level).cloned();
+            }
             self.report.stats.headings += 1;
             self.report.stats.paragraphs += 1;
             return Ok(Some(ParsedBlock::Normal(Block::Heading(Heading {

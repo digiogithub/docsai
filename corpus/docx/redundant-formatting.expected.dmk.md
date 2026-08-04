@@ -1,8 +1,8 @@
 ---
 docmark: "1.1"
 source-format: docx
-next-id: 3
-title: "Estilos basicos"
+next-id: 2
+title: "Formato redundante"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
 created: 2026-01-01T00:00:00Z
@@ -35,19 +35,25 @@ styles:
   Normal:
     type: paragraph
     default: true
+  Resaltado:
+    type: paragraph
+    based-on: Normal
+    font: { size: 14pt, color: "#C00000" }
+    paragraph: { align: center, space-before: 6pt }
+  ResaltadoHijo:
+    type: paragraph
+    name: "Resaltado hijo"
+    based-on: Resaltado
+    font: { bold: true }
   TableGrid:
     type: table
     name: "Table Grid"
 ---
 
-# Titulo de nivel 1 {#n1}
+# Titulo con estilo implicito {#n1}
 
-**negrita** *cursiva* ~~tachado~~ [subrayado]{.underline}
+Todo esto ya lo dice el estilo. {.Resaltado}
 
-## Titulo de nivel 2 {#n2}
+Y esto lo dice dos veces. {.Resaltado}
 
-[rojo]{color=#FF0000} [resaltado]{highlight=yellow} [Arial 14]{font=Arial size=14pt} x[2]{.sup} H[2]{.sub}O
-
-Visita [el sitio](https://example.com/docsai){.Hyperlink} para mas informacion.
-
-Parrafo centrado con sangria. {align=center indent-first-line=24px indent-left=48px space-after=6pt space-before=12pt}
+*Heredado dos niveles* y una diferencia real. {.ResaltadoHijo}

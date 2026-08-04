@@ -37,7 +37,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -65,13 +65,13 @@ list-definitions:
       - { format: lowerLetter, text: "%2.", indent: 48px, hanging: 24px }
 ---
 
-Listas anidadas: {.Standard}
+Listas anidadas:
 
-- Uno {.Standard list=L3 list-id=n1}
-  - Uno-A {.Standard list=L3 list-id=n2}
-  - Uno-B {.Standard}
-- Dos {.Standard}
+- Uno {list=L3 list-id=n1}
+  - Uno-A {list=L3 list-id=n2}
+  - Uno-B
+- Dos
 
-1. Primero {.Standard list=L4 list-id=n3}
-   1. Primero-a {.Standard list=L4 list-id=n4}
-2. Segundo {.Standard}
+1. Primero {list=L4 list-id=n3}
+   1. Primero-a {list=L4 list-id=n4}
+2. Segundo

@@ -36,7 +36,7 @@ styles:
     type: paragraph
     name: "Heading 2"
     based-on: Heading
-    font: { size: 14pt, color: "#2E74B5", bold: true }
+    font: { color: "#2E74B5", bold: true }
     paragraph: { outline-level: 1 }
   Standard:
     type: paragraph
@@ -47,13 +47,13 @@ styles:
     font: { bold: true }
 ---
 
-Primer parrafo del documento. {.Standard}
+Primer parrafo del documento.
 
 Segundo parrafo con un salto  
-de linea manual. {.Standard}
+de linea manual.
 
-Caracteres que Markdown escapa: \*asterisco\* \_guion\_ #almohadilla |tuberia| \[corchete\] \<angulo> \`backtick\` \\barra. {.Standard}
+Caracteres que Markdown escapa: \*asterisco\* \_guion\_ #almohadilla |tuberia| \[corchete\] \<angulo> \`backtick\` \\barra.
 
-[]{.empty} {.Standard}
+[]{.empty}
 
-Parrafo final tras uno vacio. {.Standard}
+Parrafo final tras uno vacio.

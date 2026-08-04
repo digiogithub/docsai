@@ -8,7 +8,7 @@
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{Anchor, AxisPos, Flip, ImageRef};
 use docsai_model::report::{ConversionReport, Warning};
-use docsai_model::style::{FontProps, ResolvedStyle, StyleCatalog, Underline, VertAlign};
+use docsai_model::style::{FontProps, ResolvedStyle, StyleCatalog, StyleId, Underline, VertAlign};
 use docsai_model::text::{
     Block, BreakKind, HeaderFooter, Inline, List, Paragraph, RawFragment, RunProps, Section, Table,
     TableCell, TextDocument,
@@ -34,6 +34,11 @@ pub struct Writer<'a> {
     footnotes: Vec<String>,
     /// Node ids for this run (spec §11.1).
     ids: &'a mut IdSource,
+    /// The formatting the paragraph being rendered already implies. A run
+    /// inherits from its paragraph's style before it inherits from the
+    /// document (the middle of the OOXML cascade), so this is the base every
+    /// run delta is measured against.
+    para_style: ResolvedStyle,
 }
 
 impl<'a> Writer<'a> {
@@ -51,6 +56,7 @@ impl<'a> Writer<'a> {
             report: ConversionReport::new(),
             footnotes: Vec::new(),
             ids,
+            para_style: styles.resolve(None),
         }
     }
 
@@ -297,11 +303,18 @@ impl<'a> Writer<'a> {
         id: Option<String>,
     ) -> String {
         self.report.stats.paragraphs += 1;
+        // A footnote body is a paragraph inside a paragraph, so the context is
+        // saved and put back rather than simply overwritten.
+        let outer = std::mem::replace(
+            &mut self.para_style,
+            self.styles.resolve(paragraph.format.style.as_ref()),
+        );
         let content = self.render_inlines(&paragraph.content, TextContext::Block);
+        self.para_style = outer;
         let mut attrs = if self.plain() {
             Attrs::new()
         } else {
-            self.paragraph_attrs(paragraph, prefix.is_some())
+            self.paragraph_attrs(paragraph, prefix.map(|hashes| hashes.len() as u8))
         };
         if !self.plain() {
             if let Some(id) = id {
@@ -332,13 +345,28 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// True when naming the style would say what the document already says
+    /// (spec §3.1, the economy rule).
+    ///
+    /// Two cases, and both have to be reversible or the class cannot go: the
+    /// default paragraph style, which applies wherever nothing else does, and
+    /// the style a heading of this level names by being that heading.
+    fn style_is_implied(&self, style: &StyleId, heading_level: Option<u8>) -> bool {
+        match heading_level {
+            Some(level) => self.styles.heading_style(level) == Some(style),
+            None => self.styles.default_paragraph_style().map(|s| &s.id) == Some(style),
+        }
+    }
+
     /// The attribute block of a paragraph: its style plus whatever direct
     /// formatting the style does not already imply (the economy rule, §3.1).
-    fn paragraph_attrs(&self, paragraph: &Paragraph, is_heading: bool) -> Attrs {
+    fn paragraph_attrs(&self, paragraph: &Paragraph, heading_level: Option<u8>) -> Attrs {
         let mut attrs = Attrs::new();
         let style = paragraph.format.style.as_ref();
         if let Some(style) = style {
-            attrs.class(style.as_str());
+            if !self.style_is_implied(style, heading_level) {
+                attrs.class(style.as_str());
+            }
         }
         if !self.formatting() {
             // The style *name* survives — it is what the paragraph is — but
@@ -371,7 +399,7 @@ impl<'a> Writer<'a> {
             attrs.set("page-break-before", "true");
         }
         // The `#` count already carries the heading depth.
-        if !is_heading {
+        if heading_level.is_none() {
             if let Some(level) = direct.outline_level {
                 attrs.set("outline-level", level.to_string());
             }
@@ -532,7 +560,17 @@ impl<'a> Writer<'a> {
     fn render_table_cell(&mut self, cell: &TableCell) -> String {
         let mut text = match cell.blocks.as_slice() {
             [] => String::new(),
-            [Block::Paragraph(p)] => self.render_inlines(&p.content, TextContext::TableCell),
+            [Block::Paragraph(p)] => {
+                // A one-paragraph cell is rendered inline, so it has to carry
+                // its own style context the way `render_paragraph` would.
+                let outer = std::mem::replace(
+                    &mut self.para_style,
+                    self.styles.resolve(p.format.style.as_ref()),
+                );
+                let text = self.render_inlines(&p.content, TextContext::TableCell);
+                self.para_style = outer;
+                text
+            }
             blocks => {
                 let rendered = self.render_blocks(blocks, 0);
                 rendered.replace('\n', " ")
@@ -718,7 +756,9 @@ impl<'a> Writer<'a> {
         if inner.is_empty() {
             return inner;
         }
-        let resolved = self.styles.resolve(props.style.as_ref());
+        let resolved = self
+            .styles
+            .resolve_over(props.style.as_ref(), &self.para_style);
         let font = props.direct.minus(&resolved.font);
 
         let mut text = inner;
@@ -749,7 +789,9 @@ impl<'a> Writer<'a> {
         if let Some(style) = &props.style {
             attrs.class(style.as_str());
         }
-        let resolved: ResolvedStyle = self.styles.resolve(props.style.as_ref());
+        let resolved: ResolvedStyle = self
+            .styles
+            .resolve_over(props.style.as_ref(), &self.para_style);
         let font: FontProps = props.direct.minus(&resolved.font);
 
         // Classes first: they name what the run *is*, and `agent` keeps them —

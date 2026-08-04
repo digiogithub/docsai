@@ -365,6 +365,38 @@ impl StyleCatalog {
             .find(|s| s.is_default && s.style_type == StyleType::Paragraph)
     }
 
+    /// The paragraph style a heading of `level` (1-based) already names by
+    /// being a heading: the one style whose *resolved* outline level is
+    /// `level - 1`.
+    ///
+    /// `None` when the document has no such style, or has more than one — an
+    /// ambiguous chain implies nothing, and a serializer that guessed would
+    /// have to guess the same way on the way back.
+    pub fn heading_style(&self, level: u8) -> Option<&StyleId> {
+        if level == 0 {
+            return None;
+        }
+        let wanted = level - 1;
+        let mut found = None;
+        for (id, style) in &self.styles {
+            if style.style_type != StyleType::Paragraph {
+                continue;
+            }
+            // The style's *own* level, not the resolved one: a style that
+            // inherits its outline level from a heading is a different style,
+            // and counting it would make every document with a `TOC Heading`
+            // ambiguous.
+            if style.paragraph.outline_level != Some(wanted) {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some(id);
+        }
+        found
+    }
+
     /// Walks the `based_on` chain from the document defaults up to `id` and
     /// merges every level, producing fully resolved formatting.
     ///
@@ -386,6 +418,20 @@ impl StyleCatalog {
     /// assert_eq!(r.font.size, Some(docsai_model::units::Length::from_pt(11.0)));
     /// ```
     pub fn resolve(&self, id: Option<&StyleId>) -> ResolvedStyle {
+        let defaults = ResolvedStyle {
+            font: self.defaults.font.clone(),
+            paragraph: self.defaults.paragraph.clone(),
+        };
+        self.resolve_over(id, &defaults)
+    }
+
+    /// Resolves `id` on top of `base` rather than on the document defaults.
+    ///
+    /// This is the middle of the OOXML cascade: a run's formatting inherits
+    /// from its *paragraph's* style before it inherits from the document, so a
+    /// character style resolved on the defaults alone would report as "direct"
+    /// everything the paragraph style already said.
+    pub fn resolve_over(&self, id: Option<&StyleId>, base: &ResolvedStyle) -> ResolvedStyle {
         let mut chain: Vec<&Style> = Vec::new();
         let mut visited: Vec<&StyleId> = Vec::new();
         let mut cursor = id;
@@ -403,10 +449,7 @@ impl StyleCatalog {
             }
         }
 
-        let mut resolved = ResolvedStyle {
-            font: self.defaults.font.clone(),
-            paragraph: self.defaults.paragraph.clone(),
-        };
+        let mut resolved = base.clone();
         // `chain` runs child → ancestor; apply ancestors first.
         for style in chain.iter().rev() {
             resolved.font = style.font.over(&resolved.font);
