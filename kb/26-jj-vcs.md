@@ -76,15 +76,22 @@ Two jj facts that remove most of the reasons to reach for git:
 Not done here, because it rewrites what is already committed and that is the repository owner's
 call:
 
-1. The Phase 11 chain needs a bookmark (`jj bookmark create feat/phase-11-projections -r @-`)
-   before it can be pushed anywhere.
-2. The descriptionless side heads are **duplicates**, verified with `jj diff -r <rev> --stat`:
-   each holds exactly the content of the git commit made at that moment (`zsyrvwnx` = 20 files,
-   1292 insertions = commit `62e8684`, and so on down the chain). They can be dropped with
-   `jj abandon` without losing anything.
+1. ~~The Phase 11 chain needs a bookmark~~ **Done.** `main` was moved onto it with
+   `jj bookmark set main -r @-` — a pure fast-forward, since the old `main` (`9dd637a`) was a
+   direct ancestor. `main@origin` is still at `9dd637a`, seven commits behind; pushing is a
+   separate, outward-facing decision.
+2. ~~The side heads~~ **Done.** All nine were duplicates and were abandoned. They were verified
+   by **tree hash**, not by eyeballing the diff: each one's tree is byte-identical to a commit
+   already on `main` (`wonsutnx` and `f84e9bb` both point at tree `51f10f57`, `wzmyyqvr` and
+   `82cfb96` at `fd9aee9e`, and so on). Nothing was merged because there was nothing to merge.
 
-   One head in that column is **not** a duplicate and must not be abandoned: `wonsutnx`
-   (`35f0a4c`, *"feat: new mcp tools"*, 24 files) carries a description and work that is on no
-   bookmark. It predates this session's Phase 11 chain and belongs to the repository owner.
+   **The trap: two of them carried a description that had nothing to do with their content** —
+   `35f0a4c` said *"feat: new mcp tools"* and `30d2d0f2` said *"feat: pptx format
+   implementation"*, while holding the Phase 11 A raw-sidecar work and the Phase 11 D dictionary
+   respectively. A jj working-copy commit can be described *before* it is finished; when
+   `git commit` then took the content out from under it, the stale description stayed on the
+   abandoned twin. So on a repository that has been driven with git by mistake, **a side head's
+   description is not evidence of anything** — compare `git rev-parse <rev>^{tree}` against the
+   trees on the branch and let the hashes answer.
 
 The rules are carried into every session by `.claude/skills/jj-vcs/SKILL.md` and by AGENTS.md §4.1.
