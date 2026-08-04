@@ -241,6 +241,39 @@ DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens
 CI (GitHub Actions) runs the matrix `{ubuntu-latest, windows-latest, macos-latest}` ×
 `{stable}`. A PR is not merged with red CI.
 
+### 4.1 Version control is **jj**, not git
+
+This is a **colocated jj repository** (`.jj/` and `.git/` side by side): git is the storage
+backend and the transport, [jj](https://jj-vcs.github.io/) is the interface.
+
+**Never run a `git` command that writes.** No `commit`, `add`, `reset`, `checkout`, `stash`,
+`rebase`, `merge`, `restore`, `read-tree`. Read-only git (`log`, `show`, `diff`, `cat-file`) is
+allowed, and jj has an equivalent for all of it.
+
+Two things git reports about this repository are **normal, not damage**, and trying to fix them
+is how the damage actually happens:
+
+- `HEAD` is detached. Git's `HEAD` tracks `@-`, the parent of jj's working-copy commit. There is
+  no branch to be on.
+- `git status` shows files staged with a blob identical to `HEAD`. jj rewrites `.git/index` on
+  every snapshot; jj has no staging area, and neither does this repository.
+
+```bash
+jj status                       # what changed
+jj log                          # history, including the working-copy commit `@`
+jj diff                         # the current change
+jj commit -m "…"                # describe `@` and start a new empty `@`
+jj describe -r @-               # reword the last commit
+jj squash                       # fold the working copy into the last commit
+jj new <rev>                    # put work aside — no stash, the change stays a change
+jj bookmark create <name> -r @- # name a line of work (a git branch)
+jj git push --bookmark <name>   # push it
+jj undo                         # undo the last operation; see also `jj op log`
+```
+
+Rationale and the history of getting this wrong: `kb/26-jj-vcs.md`. The session skill is
+`.claude/skills/jj-vcs/SKILL.md`.
+
 ## 5. Code conventions
 
 - **Rust edition 2021+ / stable toolchain**. No `nightly` in the main tree.
@@ -297,7 +330,9 @@ CI (GitHub Actions) runs the matrix `{ubuntu-latest, windows-latest, macos-lates
    concatenate with `/`), line endings (the DocMark serializer always emits
    `\n`; the parser accepts `\r\n`), and no POSIX tool dependencies in production
    code.
-7. Work on branches and push to the branch you are told; do not push to `main`.
+7. Work on branches and push to the branch you are told; do not push to `main`. Branches are
+   **jj bookmarks** here (`jj bookmark create`, `jj git push --bookmark`) — see §4.1, and never
+   reach for a `git` command that writes.
 
 ## 8. Definition of Done
 

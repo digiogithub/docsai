@@ -39,6 +39,7 @@ Practical difference between the two folders:
 | [23 — Phase 11 D](23-phase-11-attr-dictionary.md) | Repeated attribute patterns interned as `{.g1}`, and why expansion happens before interpretation |
 | [24 — Phase 11 E](24-phase-11-readable-units.md) | Units chosen by what a length measures, `--precision`, and the tolerance that turned out to be zero |
 | [25 — Phase 11 F](25-phase-11-read-select.md) | `read --select`: a selection that stands on its own, the minimum front matter, and where the etag finally gets written |
+| [26 — jj, not git](26-jj-vcs.md) | This repository is driven by Jujutsu; what git misreports, what `git commit` left behind, and the command map |
 
 ## Status in one line
 
