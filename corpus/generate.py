@@ -992,6 +992,40 @@ def docx_redundant_formatting() -> None:
     )
 
 
+def docx_repeated_formatting() -> None:
+    """The same direct formatting, applied by hand over and over.
+
+    What `redundant-formatting.docx` carries is redundancy against a style;
+    this is the other half: formatting that no style implies, so the delta
+    emission of spec 3.1 has to keep every copy of it. It is what a document
+    written without styles looks like — an author who colours each term and
+    indents each note by hand — and it is what the attribute-set dictionary
+    (spec 3.7) exists to compress: two patterns, twelve nodes carrying them.
+    """
+    term = (
+        '<w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>'
+        '<w:color w:val="1F4E79"/><w:sz w:val="24"/></w:rPr>'
+    )
+    note_ppr = '<w:pPr><w:ind w:left="720"/><w:spacing w:before="120" w:after="120"/></w:pPr>'
+    entries = [
+        ("convert", "transforma un documento al formato pivote."),
+        ("inspect", "describe la estructura sin convertir nada."),
+        ("outline", "devuelve el mapa de nodos direccionables."),
+        ("tokens", "mide lo que cuesta leer el documento."),
+        ("search", "localiza texto y devuelve identificadores."),
+        ("roundtrip", "comprueba la identidad de ida y vuelta."),
+    ]
+    body = ""
+    for name, description in entries:
+        body += p(r(name, term) + r(f" {description}"))
+        body += p(r(f"Nota sobre {name}: sin estilo, con sangria manual."), note_ppr)
+    build_docx(
+        "repeated-formatting.docx",
+        document(body),
+        title="Formato repetido",
+    )
+
+
 def docx_images_vml() -> None:
     """Legacy VML picture (`w:pict`), typical of documents converted from .doc."""
     pict = (
@@ -2295,6 +2329,7 @@ GENERATORS = [
     docx_footnotes,
     docx_custom_styles,
     docx_redundant_formatting,
+    docx_repeated_formatting,
     docx_images_vml,
     docx_fields_raw,
     xlsx_values_types,

@@ -11,6 +11,7 @@ use docsai_model::text::{DocumentMeta, PageGeometry};
 use docsai_model::units::Length;
 use docsai_model::{Document, Format, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED};
 
+use crate::dict::AttrDict;
 use crate::units::{len, pt};
 use crate::Fidelity;
 
@@ -26,6 +27,7 @@ pub fn write(
     source: Format,
     fidelity: Fidelity,
     next_id: Option<u64>,
+    dict: &AttrDict,
 ) {
     if fidelity == Fidelity::Plain {
         return; // plain output is CommonMark only (spec §6)
@@ -68,8 +70,24 @@ pub fn write(
             }
         }
     }
+    write_attr_sets(out, dict);
 
     out.push_str("---\n\n");
+}
+
+/// The attribute-set dictionary (spec §3.7).
+///
+/// The value is the attribute-block payload verbatim, quoted, so the reader
+/// gives it to the same parser that reads a block in the body — one syntax,
+/// one implementation, and no second escaping scheme to get wrong.
+fn write_attr_sets(out: &mut String, dict: &AttrDict) {
+    if dict.is_empty() {
+        return;
+    }
+    out.push_str("attribute-sets:\n");
+    for (name, pattern) in dict.entries() {
+        out.push_str(&format!("  {name}: {}\n", quoted(pattern)));
+    }
 }
 
 fn write_meta(out: &mut String, meta: &DocumentMeta) {
@@ -392,7 +410,14 @@ mod tests {
 
     fn render(doc: &Document) -> String {
         let mut out = String::new();
-        write(&mut out, doc, Format::Docx, Fidelity::Full, None);
+        write(
+            &mut out,
+            doc,
+            Format::Docx,
+            Fidelity::Full,
+            None,
+            &AttrDict::off(),
+        );
         out
     }
 
@@ -482,7 +507,14 @@ mod tests {
     fn plain_fidelity_has_no_front_matter() {
         let doc = Document::Text(TextDocument::default());
         let mut out = String::new();
-        write(&mut out, &doc, Format::Docx, Fidelity::Plain, None);
+        write(
+            &mut out,
+            &doc,
+            Format::Docx,
+            Fidelity::Plain,
+            None,
+            &AttrDict::off(),
+        );
         assert!(out.is_empty());
     }
 
@@ -495,7 +527,14 @@ mod tests {
             ..Default::default()
         });
         let mut out = String::new();
-        write(&mut out, &doc, Format::Docx, Fidelity::Standard, None);
+        write(
+            &mut out,
+            &doc,
+            Format::Docx,
+            Fidelity::Standard,
+            None,
+            &AttrDict::off(),
+        );
         assert!(!out.contains("styles:"));
         assert!(out.contains("docmark:"));
     }

@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::dict::AttrDict;
 use crate::escape::{escape_attr_value, is_bare_value};
 
 /// A set of attributes being built for one node.
@@ -71,33 +72,106 @@ impl Attrs {
     /// assert_eq!(a.render(), r#"{#img-1 .Quote title="Figura 1" width=450px}"#);
     /// ```
     pub fn render(&self) -> String {
+        self.render_with(&AttrDict::off())
+    }
+
+    /// Renders the block, interning its pairs through `dict` (spec §3.7).
+    ///
+    /// With a dictionary that is counting, or that has no name for this
+    /// pattern, the output is exactly [`Attrs::render`]'s — the first pass and
+    /// a document with nothing to intern write the same bytes.
+    pub fn render_with(&self, dict: &AttrDict) -> String {
         if self.is_empty() {
             return String::new();
         }
+        let interned = match self.pattern() {
+            Some(pattern) => {
+                dict.observe(&pattern);
+                dict.name_for(&pattern)
+            }
+            None => None,
+        };
+
         let mut parts: Vec<String> = Vec::new();
         if let Some(id) = &self.id {
             parts.push(format!("#{id}"));
         }
         let mut classes = self.classes.clone();
+        if let Some(name) = interned {
+            classes.push(name.to_string());
+        }
         classes.sort();
         parts.extend(classes.into_iter().map(|c| format!(".{c}")));
-        for (key, value) in &self.pairs {
-            if is_bare_value(value) {
-                parts.push(format!("{key}={value}"));
-            } else {
-                parts.push(format!("{key}=\"{}\"", escape_attr_value(value)));
-            }
+        if interned.is_none() && !self.pairs.is_empty() {
+            parts.push(self.pairs_rendered());
         }
         format!("{{{}}}", parts.join(" "))
     }
 
+    /// The pairs as they render, which is what the dictionary interns.
+    ///
+    /// `None` when there is nothing to intern: no pairs, or a raw-block, whose
+    /// `src=` is scanned out of the serialised text by
+    /// [`crate::raw::raw_sidecars`] and must stay where it is written.
+    fn pattern(&self) -> Option<String> {
+        if self.pairs.is_empty() || self.has_class("raw") {
+            return None;
+        }
+        Some(self.pairs_rendered())
+    }
+
+    fn pairs_rendered(&self) -> String {
+        self.pairs
+            .iter()
+            .map(|(key, value)| {
+                if is_bare_value(value) {
+                    format!("{key}={value}")
+                } else {
+                    format!("{key}=\"{}\"", escape_attr_value(value))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// Renders the block preceded by a space, for appending to a line.
     pub fn suffix(&self) -> String {
+        self.suffix_with(&AttrDict::off())
+    }
+
+    /// [`Attrs::suffix`], through a dictionary.
+    pub fn suffix_with(&self, dict: &AttrDict) -> String {
         if self.is_empty() {
             String::new()
         } else {
-            format!(" {}", self.render())
+            format!(" {}", self.render_with(dict))
         }
+    }
+
+    /// Replaces every dictionary class by the pairs it stands for (spec §3.7).
+    ///
+    /// A pair written on the node itself wins: the dictionary is a default the
+    /// node may override, so an expanded block never loses what it said
+    /// explicitly.
+    pub fn expand(&mut self, sets: &BTreeMap<String, Attrs>) {
+        if sets.is_empty() || self.classes.is_empty() {
+            return;
+        }
+        let classes = std::mem::take(&mut self.classes);
+        let mut kept = Vec::new();
+        for class in classes {
+            match sets.get(&class) {
+                Some(set) => {
+                    for (key, value) in &set.pairs {
+                        self.pairs
+                            .entry(key.clone())
+                            .or_insert_with(|| value.clone());
+                    }
+                }
+                None => kept.push(class),
+            }
+        }
+        self.classes = kept;
     }
 
     /// The id, if any (`#id`).

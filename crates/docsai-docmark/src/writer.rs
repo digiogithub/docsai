@@ -18,6 +18,7 @@ use docsai_model::units::Length;
 use docsai_model::addressing::{list_is_addressable, paragraph_is_container, NodeKind};
 
 use crate::attrs::Attrs;
+use crate::dict::AttrDict;
 use crate::escape::{escape, TextContext};
 use crate::ids::IdSource;
 use crate::units::{len, number, percent, pt};
@@ -34,6 +35,9 @@ pub struct Writer<'a> {
     footnotes: Vec<String>,
     /// Node ids for this run (spec §11.1).
     ids: &'a mut IdSource,
+    /// The attribute-set dictionary (spec §3.7). Shared rather than owned: the
+    /// first pass only counts through it, so it needs no mutable access.
+    dict: &'a AttrDict,
     /// The formatting the paragraph being rendered already implies. A run
     /// inherits from its paragraph's style before it inherits from the
     /// document (the middle of the OOXML cascade), so this is the base every
@@ -47,6 +51,7 @@ impl<'a> Writer<'a> {
         styles: &'a StyleCatalog,
         assets: &'a dyn AssetStore,
         ids: &'a mut IdSource,
+        dict: &'a AttrDict,
     ) -> Self {
         Writer {
             out: String::new(),
@@ -56,6 +61,7 @@ impl<'a> Writer<'a> {
             report: ConversionReport::new(),
             footnotes: Vec::new(),
             ids,
+            dict,
             para_style: styles.resolve(None),
         }
     }
@@ -145,7 +151,11 @@ impl<'a> Writer<'a> {
                 }
                 attrs.set("orientation", section.page.orientation.as_str());
             }
-            let rendered = format!("::: {}\n{}\n:::", attrs.render(), body.trim_end());
+            let rendered = format!(
+                "::: {}\n{}\n:::",
+                attrs.render_with(self.dict),
+                body.trim_end()
+            );
             self.ids
                 .record(id.as_deref(), NodeKind::Section, &rendered, mark);
             self.block(&rendered);
@@ -161,7 +171,11 @@ impl<'a> Writer<'a> {
         }
         let mut attrs = Attrs::new();
         attrs.class(kind).set("scope", part.scope.as_str());
-        let rendered = format!("::: {}\n{}\n:::", attrs.render(), body.trim_end());
+        let rendered = format!(
+            "::: {}\n{}\n:::",
+            attrs.render_with(self.dict),
+            body.trim_end()
+        );
         self.block(&rendered);
     }
 
@@ -240,7 +254,11 @@ impl<'a> Writer<'a> {
                         attrs.set("y", len(y));
                     }
                 }
-                format!("::: {}\n{}\n:::", attrs.render(), body.trim_end())
+                format!(
+                    "::: {}\n{}\n:::",
+                    attrs.render_with(self.dict),
+                    body.trim_end()
+                )
             }
             Block::Raw(raw) => self.render_raw(raw),
         }
@@ -272,7 +290,7 @@ impl<'a> Writer<'a> {
                 "src",
                 crate::raw::sidecar_path(&self.options.assets_dir, raw),
             );
-            return format!("::: {}\n:::", attrs.render());
+            return format!("::: {}\n:::", attrs.render_with(self.dict));
         }
         // The fence must be longer than the longest backtick run inside.
         let longest = raw
@@ -284,7 +302,7 @@ impl<'a> Writer<'a> {
         let fence = "`".repeat(longest.max(2) + 1);
         format!(
             "::: {}\n{fence}xml\n{}\n{fence}\n:::",
-            attrs.render(),
+            attrs.render_with(self.dict),
             raw.content.trim_end()
         )
     }
@@ -327,7 +345,7 @@ impl<'a> Writer<'a> {
 
         let body = content.trim_end_matches(' ');
         match prefix {
-            Some(hashes) => format!("{hashes} {body}{}", attrs.suffix()),
+            Some(hashes) => format!("{hashes} {body}{}", attrs.suffix_with(self.dict)),
             // An empty paragraph is real content in a word processor (it is
             // how people space a document out), and a blank line cannot carry
             // it: Markdown would merge it away. Full fidelity marks it with an
@@ -340,8 +358,8 @@ impl<'a> Writer<'a> {
                     String::new()
                 }
             }
-            None if body.is_empty() => format!("[]{{.empty}}{}", attrs.suffix()),
-            None => format!("{body}{}", attrs.suffix()),
+            None if body.is_empty() => format!("[]{{.empty}}{}", attrs.suffix_with(self.dict)),
+            None => format!("{body}{}", attrs.suffix_with(self.dict)),
         }
     }
 
@@ -553,7 +571,11 @@ impl<'a> Writer<'a> {
             return out.trim_end().to_string();
         }
         attrs.class("table");
-        format!("::: {}\n{}\n:::", attrs.render(), out.trim_end())
+        format!(
+            "::: {}\n{}\n:::",
+            attrs.render_with(self.dict),
+            out.trim_end()
+        )
     }
 
     /// Cell content plus its span attributes, on one line.
@@ -593,7 +615,9 @@ impl<'a> Writer<'a> {
                 attrs.set("background", background);
             }
         }
-        format!("{text}{}", attrs.suffix()).trim().to_string()
+        format!("{text}{}", attrs.suffix_with(self.dict))
+            .trim()
+            .to_string()
     }
 
     /// Tables GFM cannot hold (multi-paragraph or nested content, spec §3.4).
@@ -606,7 +630,7 @@ impl<'a> Writer<'a> {
         if let Some(id) = id {
             attrs.id(id);
         }
-        let mut out = format!("::: {}\n", attrs.render());
+        let mut out = format!("::: {}\n", attrs.render_with(self.dict));
         for row in &table.rows {
             let mut row_attrs = Attrs::new();
             row_attrs.class("row");
@@ -616,7 +640,7 @@ impl<'a> Writer<'a> {
                 row_attrs.id(id);
             }
             let row_start = out.len();
-            out.push_str(&format!("::: {}\n", row_attrs.render()));
+            out.push_str(&format!("::: {}\n", row_attrs.render_with(self.dict)));
             for cell in &row.cells {
                 let mut cell_attrs = Attrs::new();
                 cell_attrs.class("cell");
@@ -629,7 +653,7 @@ impl<'a> Writer<'a> {
                 let body = self.render_blocks(&cell.blocks, 0);
                 out.push_str(&format!(
                     "::: {}\n{}\n:::\n",
-                    cell_attrs.render(),
+                    cell_attrs.render_with(self.dict),
                     body.trim_end()
                 ));
             }
@@ -678,7 +702,7 @@ impl<'a> Writer<'a> {
                 } else {
                     let mut attrs = Attrs::new();
                     self.style_attrs(&mut attrs, props);
-                    format!("{link}{}", attrs.render())
+                    format!("{link}{}", attrs.render_with(self.dict))
                 }
             }
             Inline::Footnote(note) => {
@@ -704,7 +728,7 @@ impl<'a> Writer<'a> {
                 self.ids
                     .record(id.as_deref(), NodeKind::Footnote, &definition, mark);
                 self.footnotes.push(definition);
-                format!("[^{index}]{}", attrs.render())
+                format!("[^{index}]{}", attrs.render_with(self.dict))
             }
             Inline::Field {
                 kind,
@@ -720,7 +744,7 @@ impl<'a> Writer<'a> {
                 if self.full() && !instruction.is_empty() && instruction != kind.as_str() {
                     attrs.set("instr", instruction);
                 }
-                format!("[{text}]{}", attrs.render())
+                format!("[{text}]{}", attrs.render_with(self.dict))
             }
             Inline::Break(BreakKind::Line) => "  \n".to_string(),
             Inline::Break(kind) => {
@@ -729,7 +753,7 @@ impl<'a> Writer<'a> {
                 } else {
                     let mut attrs = Attrs::new();
                     attrs.class("break").set("kind", kind.as_str());
-                    format!("[]{}", attrs.render())
+                    format!("[]{}", attrs.render_with(self.dict))
                 }
             }
             Inline::Image(image) => self.render_image(image),
@@ -780,7 +804,7 @@ impl<'a> Writer<'a> {
         if attrs.is_empty() {
             text
         } else {
-            format!("[{text}]{}", attrs.render())
+            format!("[{text}]{}", attrs.render_with(self.dict))
         }
     }
 
@@ -879,7 +903,10 @@ impl<'a> Writer<'a> {
             // the alt text and the link survive; the EMUs do not.
             attrs.set_opt("title", image.title.clone());
             attrs.set_opt("link", image.link.clone());
-            return (format!("![{alt}]({path}){}", attrs.render()), id);
+            return (
+                format!("![{alt}]({path}){}", attrs.render_with(self.dict)),
+                id,
+            );
         }
 
         // `width`/`height` are mandatory except on two-cell sheet anchors,
@@ -942,7 +969,10 @@ impl<'a> Writer<'a> {
             attrs.set("render", "unsupported");
         }
 
-        (format!("![{alt}]({path}){}", attrs.render()), id)
+        (
+            format!("![{alt}]({path}){}", attrs.render_with(self.dict)),
+            id,
+        )
     }
 
     fn anchor_attrs(&self, attrs: &mut Attrs, anchor: &Anchor) {

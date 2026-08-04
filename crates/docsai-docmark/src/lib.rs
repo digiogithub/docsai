@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod attrs;
+mod dict;
 mod error;
 pub mod escape;
 mod frontmatter;
@@ -41,6 +42,9 @@ use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format};
 
+use std::collections::BTreeSet;
+
+use crate::dict::AttrDict;
 use crate::ids::IdSource;
 
 /// How much of the IR reaches the output (spec §6).
@@ -211,15 +215,56 @@ fn run(
     } else {
         options.ids
     };
+    // Pass one counts repeated attribute patterns and writes exactly the bytes
+    // a run without a dictionary would write (spec §3.7). Only if it finds
+    // something worth naming does the body get rendered again, through the
+    // dictionary this time — so the common document, which repeats nothing,
+    // still pays a single pass.
+    let mut dict = if dictionary_applies(doc, options) {
+        AttrDict::collecting()
+    } else {
+        AttrDict::off()
+    };
+    let (mut ids, mut body, mut report) = render_body(doc, assets, options, policy, trace, &dict);
+    if dict.is_collecting() {
+        dict = dict.build(&taken_class_names(doc));
+        if !dict.is_empty() {
+            let second = render_body(doc, assets, options, policy, trace, &dict);
+            ids = second.0;
+            body = second.1;
+            report = second.2;
+        }
+    }
+
+    let mut out = String::new();
+    frontmatter::write(
+        &mut out,
+        doc,
+        options.source_format,
+        options.fidelity,
+        ids.next_id(),
+        &dict,
+    );
+    out.push_str(&body);
+    (out, report, ids.into_fragments())
+}
+
+fn render_body(
+    doc: &Document,
+    assets: &dyn AssetStore,
+    options: &Options,
+    policy: IdPolicy,
+    trace: bool,
+    dict: &AttrDict,
+) -> (IdSource, String, ConversionReport) {
     let mut ids = if trace {
         IdSource::traced(doc, policy)
     } else {
         IdSource::new(doc, policy)
     };
-
     let (body, report) = match doc {
         Document::Text(text) => {
-            let writer = writer::Writer::new(options, &text.styles, assets, &mut ids);
+            let writer = writer::Writer::new(options, &text.styles, assets, &mut ids, dict);
             let (body, mut report) = writer.finish(text);
             report.stats.styles = text.styles.styles.len() as u32;
             (body, report)
@@ -230,15 +275,29 @@ fn run(
             (body, report)
         }
     };
+    (ids, body, report)
+}
 
-    let mut out = String::new();
-    frontmatter::write(
-        &mut out,
-        doc,
-        options.source_format,
-        options.fidelity,
-        ids.next_id(),
-    );
-    out.push_str(&body);
-    (out, report, ids.into_fragments())
+/// Whether this document, at this level, gets a dictionary.
+///
+/// Only where there is formatting to compress, and only for text documents: a
+/// sheet already compacts identical cell metadata into ranges
+/// (`sheet_writer::collect_cell_meta`), so a dictionary over it would be a
+/// second answer to a question already answered.
+fn dictionary_applies(doc: &Document, options: &Options) -> bool {
+    doc.is_text() && options.fidelity.formatting()
+}
+
+/// Every class name the document already means something by. A generated
+/// dictionary name landing on one of these would change what a node is.
+fn taken_class_names(doc: &Document) -> BTreeSet<String> {
+    let mut taken: BTreeSet<String> = dict::RESERVED_CLASSES
+        .iter()
+        .map(|c| (*c).to_string())
+        .collect();
+    if let Document::Text(text) = doc {
+        taken.extend(text.styles.styles.keys().map(|id| id.as_str().to_string()));
+        taken.extend(text.list_defs.defs.keys().map(|id| id.to_string()));
+    }
+    taken
 }

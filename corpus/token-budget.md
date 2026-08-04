@@ -26,6 +26,7 @@ An update that inflates the total by more than 5 % is refused unless
 | `docx/long-report.docx` | 9083 | 8744 | 8698 | 8545 |
 | `docx/nested-lists.docx` | 701 | 238 | 272 | 77 |
 | `docx/redundant-formatting.docx` | 528 | 156 | 206 | 35 |
+| `docx/repeated-formatting.docx` | 616 | 223 | 390 | 129 |
 | `docx/table-merged.docx` | 496 | 194 | 260 | 63 |
 | `docx/table-simple.docx` | 470 | 171 | 234 | 55 |
 | `ods/formulas-basic.ods` | 235 | 224 | 159 | 54 |
@@ -48,4 +49,4 @@ An update that inflates the total by more than 5 % is refused unless
 | `xlsx/merged-cells.xlsx` | 300 | 220 | 189 | 71 |
 | `xlsx/number-formats.xlsx` | 344 | 216 | 201 | 94 |
 | `xlsx/values-types.xlsx` | 335 | 234 | 219 | 114 |
-| **total** | **25195** | **15326** | **16732** | **10448** |
+| **total** | **25811** | **15549** | **17122** | **10577** |

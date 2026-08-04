@@ -13,6 +13,7 @@ use docsai_model::text::{DocumentMeta, Margins, Orientation, PageGeometry};
 use docsai_model::units::{Length, Size};
 use docsai_model::{Format, DOCMARK_VERSION};
 
+use crate::attrs::Attrs;
 use crate::error::ParseError;
 use crate::yaml::{self, Value};
 
@@ -28,6 +29,10 @@ pub struct FrontMatter {
     /// The monotonic id counter (`next-id`, spec §11.1). Absent in a 1.0
     /// document, where the writer starts the counter from scratch.
     pub addressing: Addressing,
+    /// The attribute-set dictionary (spec §3.7), by class name. Every
+    /// attribute block in the body is expanded through it before anything
+    /// reads it, so the rest of the parser never learns that it exists.
+    pub attr_sets: BTreeMap<String, Attrs>,
 }
 
 impl Default for FrontMatter {
@@ -41,6 +46,7 @@ impl Default for FrontMatter {
             active_sheet: None,
             defined_names: Vec::new(),
             addressing: Addressing::default(),
+            attr_sets: BTreeMap::new(),
         }
     }
 }
@@ -99,6 +105,15 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
         for (id, value) in styles {
             if let Some(style) = read_style(id, value) {
                 fm.styles.insert(style);
+            }
+        }
+    }
+    if let Some(sets) = map.get("attribute-sets").and_then(|v| v.as_map()) {
+        for (name, value) in sets {
+            // An entry that does not parse is dropped rather than fatal: the
+            // body still carries the class, and an unknown class is inert.
+            if let Some(attrs) = value.as_str().and_then(Attrs::parse) {
+                fm.attr_sets.insert(name.clone(), attrs);
             }
         }
     }

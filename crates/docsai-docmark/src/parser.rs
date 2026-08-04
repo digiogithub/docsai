@@ -70,6 +70,7 @@ pub fn parse_with_base(
         report: &mut report,
         footnotes: BTreeMap::new(),
         styles: fm.styles.clone(),
+        attr_sets: fm.attr_sets.clone(),
     };
 
     let blocks = parser.parse_blocks(body, body_line)?;
@@ -317,9 +318,19 @@ struct BodyParser<'a> {
     report: &'a mut Report,
     footnotes: BTreeMap<u32, Vec<Block>>,
     styles: docsai_model::StyleCatalog,
+    /// The attribute-set dictionary declared in the front matter (spec §3.7).
+    attr_sets: BTreeMap<String, Attrs>,
 }
 
 impl<'a> BodyParser<'a> {
+    /// Replaces the dictionary classes of a block by the attributes they stand
+    /// for. Every attribute block read from the body passes through here, so
+    /// nothing downstream has to know whether the document used a dictionary.
+    fn expanded(&self, mut attrs: Attrs) -> Attrs {
+        attrs.expand(&self.attr_sets);
+        attrs
+    }
+
     fn parse_blocks(
         &mut self,
         text: &str,
@@ -426,7 +437,7 @@ impl<'a> BodyParser<'a> {
         let mut lines = text.lines();
         let first = lines.next().unwrap_or("");
         let attr_src = first.trim_start_matches(':').trim();
-        let attrs = Attrs::parse(attr_src).unwrap_or_default();
+        let attrs = self.expanded(Attrs::parse(attr_src).unwrap_or_default());
         let mut body_lines: Vec<&str> = Vec::new();
         let mut depth = 1i32;
         for l in lines {
@@ -532,6 +543,7 @@ impl<'a> BodyParser<'a> {
                 break;
             }
             let (inner_attrs, inner_body, next) = split_one_fence(rest, line)?;
+            let inner_attrs = self.expanded(inner_attrs);
             rest = next;
             if !inner_attrs.has_class("row") {
                 continue;
@@ -547,6 +559,7 @@ impl<'a> BodyParser<'a> {
                     break;
                 }
                 let (cell_attrs, cell_body, next_cell) = split_one_fence(cell_src, line)?;
+                let cell_attrs = self.expanded(cell_attrs);
                 cell_src = next_cell;
                 if !cell_attrs.has_class("cell") {
                     continue;
@@ -641,6 +654,7 @@ impl<'a> BodyParser<'a> {
     fn parse_table_cell(&mut self, text: &str) -> Result<TableCell, ParseError> {
         let text = text.trim();
         let (content, attrs) = split_trailing_attrs(text);
+        let attrs = attrs.map(|a| self.expanded(a));
         let content = unescape(&content.replace("\\|", "|"));
         let inlines = self.parse_inlines(&content)?;
         let mut cell = TableCell {
@@ -769,7 +783,7 @@ impl<'a> BodyParser<'a> {
             let mut format = ParaFormat::default();
             let mut extras = ParaExtras::default();
             let mut id = None;
-            if let Some(attrs) = Attrs::parse(rest) {
+            if let Some(attrs) = Attrs::parse(rest).map(|a| self.expanded(a)) {
                 extras = ParaExtras::from_attrs(&attrs);
                 id = attrs.id_ref().map(NodeId::new);
                 format = paragraph_format_from_attrs(&attrs, is_heading);
@@ -785,6 +799,7 @@ impl<'a> BodyParser<'a> {
         }
 
         let (content, attrs) = split_trailing_attrs(text);
+        let attrs = attrs.map(|a| self.expanded(a));
         let mut extras = ParaExtras::default();
         let mut id = None;
         let mut format = ParaFormat::default();
@@ -992,7 +1007,7 @@ fn parse_inlines_inner(text: &str, ctx: &mut BodyParser<'_>) -> Result<Vec<Inlin
                     if next < chars.len() && chars[next] == '{' {
                         if let Some(aend) = find_closing_brace(&chars, next + 1) {
                             let raw: String = chars[next..=aend].iter().collect();
-                            if let Some(attrs) = Attrs::parse(&raw) {
+                            if let Some(attrs) = Attrs::parse(&raw).map(|a| ctx.expanded(a)) {
                                 id = attrs.id_ref().map(NodeId::new);
                                 next = aend + 1;
                             }
@@ -1122,7 +1137,7 @@ fn try_parse_image(
     if i < chars.len() && chars[i] == '{' {
         if let Some(end) = find_closing_brace(chars, i + 1) {
             let raw: String = chars[i..=end].iter().collect();
-            attrs = Attrs::parse(&raw).unwrap_or_default();
+            attrs = ctx.expanded(Attrs::parse(&raw).unwrap_or_default());
             i = end + 1;
         }
     }
@@ -1154,7 +1169,7 @@ fn try_parse_bracket(
         if i < chars.len() && chars[i] == '{' {
             if let Some(aend) = find_closing_brace(chars, i + 1) {
                 let raw: String = chars[i..=aend].iter().collect();
-                if let Some(attrs) = Attrs::parse(&raw) {
+                if let Some(attrs) = Attrs::parse(&raw).map(|a| ctx.expanded(a)) {
                     props = run_props_from_attrs(&attrs);
                 }
                 i = aend + 1;
@@ -1173,7 +1188,7 @@ fn try_parse_bracket(
     if i < chars.len() && chars[i] == '{' {
         if let Some(aend) = find_closing_brace(chars, i + 1) {
             let raw: String = chars[i..=aend].iter().collect();
-            let attrs = Attrs::parse(&raw).unwrap_or_default();
+            let attrs = ctx.expanded(Attrs::parse(&raw).unwrap_or_default());
             i = aend + 1;
             // breaks
             if attrs.has_class("break") {

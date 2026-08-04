@@ -128,6 +128,14 @@ documents whose cost is their formatting — and almost nothing for a document w
 cost is its prose, which is what `docsai outline` and selectors are for. It says
 `fidelity: agent` in its front matter: read it whole, write it back node by node.
 
+Repeated formatting (spec §3.7): what a style implies is never written — not the
+paragraph's, not the run's, not what a style inherits from its parent — and what no
+style implies but repeats anyway is written **once**. A pattern used three times or
+more is interned in the front matter under `attribute-sets:` and referenced by class
+(`{.g1}`); the reader expands it before anything reads the block, so the document
+means exactly what it meant. On a document written without styles that is a 15 %
+cut at `full` and 22 % at `standard`.
+
 Node ids (`--ids`, spec §11.1): at `--fidelity full` the output is **DocMark 1.1**
 — addressable nodes carry `{#n7}` and the front matter declares `next-id`, so an
 agent can point at a node and keep pointing at it across edits. Ids are never

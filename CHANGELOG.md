@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Attribute-set dictionary** (plan v2 Phase 11, DocMark spec §3.7): a pattern of attributes
+  that repeats at least three times and is at least twelve characters long is written once in the
+  front matter under `attribute-sets:` and referenced by class in the body (`{.g1}`). The reader
+  expands the class into its pairs before anything interprets the block, so the IR is identical
+  either way and no consumer can tell a dictionary was used; a pair written on the node wins over
+  the entry's. Names follow first appearance and skip anything the document already uses — a
+  style id, a list name, a structural class — so the dictionary is a function of the document and
+  stays part of serializer determinism. Active at `full` and `standard`. Measured on
+  `docx/repeated-formatting.docx`: 725 → 616 tokens at `full` (−15 %) and 499 → 390 at
+  `standard` (−22 %).
+- Corpus fixture `docx/repeated-formatting.docx`: the same direct formatting applied by hand over
+  and over, which no style implies and the economy rule therefore cannot remove. Without it the
+  dictionary would be measured on a corpus that repeats nothing.
 - **Delta emission against the whole inheritance chain** (plan v2 Phase 11): a run is now
   resolved against its **paragraph's** style before its own, which is the middle of the OOXML
   cascade and the level the serializer used to skip — text typed after applying a style carries

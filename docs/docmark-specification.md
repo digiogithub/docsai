@@ -70,6 +70,9 @@ styles:                         # style catalog from the original document (§3)
     type: character
     font: { italic: true, color: "#C00000" }
 
+attribute-sets:                 # repeated attribute patterns, interned (§3.7)
+  g1: "color=#1F4E79 font=Consolas size=12pt"
+
 list-definitions:               # numbering.xml / normalized ODF list styles
   L1:
     levels:
@@ -287,6 +290,48 @@ Text box content.
 Dynamic fields (page number, date, TOC) are represented as `{.field field=...}` spans with their
 last known value as visible text.
 
+### 3.7 The attribute-set dictionary
+
+The economy rule of §3.1 removes what a style implies. What it cannot remove is formatting no
+style implies — an author who colours each term and indents each note by hand — and that
+repetition is paid for once per node. A pattern of key/value pairs that repeats is therefore
+**named once in the front matter and referenced by class**:
+
+```yaml
+attribute-sets:
+  g1: "color=#1F4E79 font=Consolas size=12pt"
+  g2: "indent-left=1.27cm space-after=6pt space-before=6pt"
+```
+
+```markdown
+[convert]{.g1} transforms a document into the pivot format.
+
+A note about convert, with no style and a manual indent. {.g2}
+```
+
+Normative rules:
+
+- The value of an entry is an **attribute-block payload**: exactly what would have been written
+  inside the `{…}`, so a reader parses it with the same parser it uses for the body.
+- A reader **expands every dictionary class into its pairs before interpreting the block**. A
+  pair written on the node itself wins over the entry's: the dictionary is a default, never an
+  override. After expansion no consumer can tell whether a document used a dictionary, which is
+  what makes it a compression and not a feature of the format's meaning.
+- Only key/value pairs are interned. The id and the other classes stay on the node — they are
+  what it *is*, not how it is written. A raw-block (§7) is never interned: its `src=` is scanned
+  out of the serialised text.
+- A pattern earns an entry when it appears **at least 3 times** and is **at least 12 characters**
+  long. Below either threshold the entry plus the references cost more than the repetition, so
+  interning would inflate the document it exists to shrink.
+- Names are `g1`, `g2`, … assigned in **order of first appearance**, skipping any name the
+  document already uses — a style id, a list name, or one of the structural classes (`.section`,
+  `.table`, `.raw`, `.underline`, …). A name that collided would change what a node *is*.
+- The dictionary is a function of the document, so it is part of serializer determinism (§8):
+  serialising a document twice, or re-serialising after a round trip, yields the same names in
+  the same order.
+- Levels: `full` and `standard`. `agent` (§6.1) has already dropped the formatting a dictionary
+  would compress, and is meant to be read directly; `plain` has no attributes at all.
+
 ## 4. Spreadsheets
 
 Each sheet is a `#` section with a metadata container; data go in a GFM table.
@@ -436,7 +481,8 @@ sidecar`); `--raw inline` keeps the form above:
 - Only characters that would change meaning in CommonMark are escaped (`*_#|[]<>` depending on
   context), with a fixed decision table documented in the code.
 - Attributes: canonical order (id, alphabetically sorted classes, sorted keys); values always
-  double-quoted except simple numbers/identifiers.
+  double-quoted except simple numbers/identifiers. A dictionary class (§3.7) sorts with the
+  others, so interning a pattern never depends on where the writer put the class.
 - GFM tables: columns aligned with fixed padding if the table has < 120 columns; no padding if
   it exceeds that.
 - These rules are **normative**: the idempotence test (`parse(serialize(ir)) == ir` and
@@ -535,14 +581,17 @@ the remaining bullets stay a sketch until Phase 11 implements them.
 - **Fidelity level `agent`** (§6.1) and the `fidelity:` front-matter key that declares a
   projection. Ids are assigned at `agent` as they are at `full`, since a node with no address
   cannot be written back.
+- **Delta emission against the whole cascade** (§3.1): nothing is written that the paragraph's
+  style, the run's style or a style's `based-on` chain already implies, and a heading omits the
+  class its level names.
+- **Attribute-set dictionary** (§3.7): `attribute-sets:` in the front matter, `{.g1}` in the
+  body, deterministic names, at `full` and `standard`.
 
 #### The rest of 1.1 (not yet implemented)
 
 - **Etags**: optional 6-character content hash, `{#s4.b2 etag=a3f9c1}`, over the *normalised*
   node content, so formatting-only changes do not churn it. Used as an edit precondition. The
   hash is **derived from the node, never stored in it**, so it cannot go stale behind an edit.
-- **Attribute-set dictionary**: repeated attribute patterns interned in the front matter and
-  referenced as a class (`{.g1}`), with deterministic naming so §8 idempotence still holds.
 - **Etags in the output**: `agent` addresses every node `full` addresses, but the etag is still
   computed and never written; the stub carries the id alone until `read --select` needs an
   if-match precondition.
