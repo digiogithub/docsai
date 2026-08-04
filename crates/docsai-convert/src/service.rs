@@ -398,11 +398,11 @@ pub fn validate_output_path(path: &Path) -> Result<(), ConvertError> {
     Ok(())
 }
 
-/// Parses a fidelity name (`full` / `standard` / `plain`).
+/// Parses a fidelity name (`full` / `agent` / `standard` / `plain`).
 pub fn parse_fidelity(value: &str) -> Result<Fidelity, ConvertError> {
     Fidelity::parse(value).ok_or_else(|| {
         ConvertError::Invalid(format!(
-            "unknown fidelity `{value}`; expected full, standard, or plain"
+            "unknown fidelity `{value}`; expected full, agent, standard, or plain"
         ))
     })
 }

@@ -87,7 +87,7 @@ fn write_sheet(
                 ),
             );
         }
-        if !sheet.cols.is_empty() {
+        if !sheet.cols.is_empty() && options.fidelity.formatting() {
             if let Some(range) = sheet.used_range() {
                 let mut widths = Vec::new();
                 for c in range.start.col..=range.end.col {
@@ -136,8 +136,8 @@ fn write_sheet(
     }
 
     // cell-meta
-    if full {
-        let meta_lines = collect_cell_meta(sheet, report);
+    if full || options.fidelity == Fidelity::Agent {
+        let meta_lines = collect_cell_meta(sheet, report, !full);
         if !meta_lines.is_empty() {
             out.push_str("::: {.cell-meta}\n");
             for line in meta_lines {
@@ -240,7 +240,13 @@ fn display_value(cell: &Cell) -> String {
     }
 }
 
-fn collect_cell_meta(sheet: &Sheet, report: &mut ConversionReport) -> Vec<String> {
+/// `formulas_only` is the `agent` projection: a formula and a merge are what a
+/// sheet *is*, a number format and a style are how it looks.
+fn collect_cell_meta(
+    sheet: &Sheet,
+    report: &mut ConversionReport,
+    formulas_only: bool,
+) -> Vec<String> {
     // Build per-cell attribute maps, then compact identical ranges.
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
     struct MetaKey {
@@ -263,6 +269,13 @@ fn collect_cell_meta(sheet: &Sheet, report: &mut ConversionReport) -> Vec<String
                 parts.push(("array-over".into(), range.a1()));
             }
             report.stats.formulas = report.stats.formulas.saturating_add(1);
+        }
+        if formulas_only {
+            if !parts.is_empty() {
+                parts.sort();
+                by_cell.insert(*cref, MetaKey { parts });
+            }
+            continue;
         }
         // type= when not plain text / empty, or when date/bool/error/number with fmt
         match &cell.value {
@@ -425,6 +438,20 @@ fn render_image(
     let id = ids.take(image);
     if let Some(id) = id.clone() {
         attrs.id(id);
+    }
+
+    if !options.fidelity.formatting() {
+        // On a sheet the anchor cell *is* the address of the image, so it
+        // stays even at `agent`; the offsets and the size do not.
+        let cell = match &image.geometry.anchor {
+            Anchor::SheetTwoCell { from, .. } | Anchor::SheetOneCell { from } => from.cell.a1(),
+            _ => "A1".to_string(),
+        };
+        attrs.set("from", cell);
+        attrs.set_opt("name", image.name.clone());
+        attrs.set_opt("title", image.title.clone());
+        attrs.set_opt("link", image.link.clone());
+        return (format!("![{alt}]({path}){}", attrs.render()), id);
     }
 
     // Always set anchor for sheet images.

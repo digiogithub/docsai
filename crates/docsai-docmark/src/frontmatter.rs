@@ -38,6 +38,12 @@ pub fn write(
     };
     scalar(out, "docmark", &quoted(version));
     scalar(out, "source-format", source.as_str());
+    if fidelity == Fidelity::Agent {
+        // A projection says so: whoever reads this must know the document it
+        // came from carries more, and that writing this back whole would lose
+        // it (spec §6.1).
+        scalar(out, "fidelity", "agent");
+    }
     if let Some(next_id) = next_id {
         scalar(out, "next-id", &next_id.to_string());
     }
@@ -46,7 +52,9 @@ pub fn write(
     match doc {
         Document::Text(text) => {
             if let Some(section) = text.sections.first() {
-                write_page(out, &section.page);
+                if fidelity.formatting() {
+                    write_page(out, &section.page);
+                }
             }
             if fidelity == Fidelity::Full {
                 write_styles(out, &text.styles);

@@ -51,9 +51,15 @@ fn sanitize(id: &str) -> String {
 ///
 /// A pure function of the document, so a caller can write the files before,
 /// after or without serialising, and always get the same names the body uses.
-/// Empty unless the run both emits raw-blocks (`full`) and puts them aside.
+/// Empty unless the run emits raw-block stubs: `full` when the policy puts the
+/// bytes aside, and `agent` always — a projection never carries a payload.
 pub fn raw_sidecars(doc: &Document, options: &Options) -> Vec<RawSidecar> {
-    if options.fidelity != crate::Fidelity::Full || options.raw != RawPolicy::Sidecar {
+    let stubbed = match options.fidelity {
+        crate::Fidelity::Full => options.raw == RawPolicy::Sidecar,
+        crate::Fidelity::Agent => true,
+        crate::Fidelity::Standard | crate::Fidelity::Plain => false,
+    };
+    if !stubbed {
         return Vec::new();
     }
     let Document::Text(text) = doc else {

@@ -50,7 +50,7 @@ pub struct ConvertToMarkdownArgs {
     /// File name hint required with `content_base64` (e.g. `report.docx`).
     #[serde(default)]
     pub filename: Option<String>,
-    /// Fidelity: `full` (default), `standard`, or `plain`.
+    /// Fidelity: `full` (default), `agent`, `standard`, or `plain`.
     #[serde(default)]
     pub fidelity: Option<String>,
     /// Asset delivery: `inline-base64` (default) or `files`.

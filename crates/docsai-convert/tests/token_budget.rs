@@ -19,7 +19,12 @@ use docsai_convert::{token_report_path, ConvertOptions, Fidelity};
 /// How much the corpus total may grow before the gate refuses the update.
 const MAX_INFLATION: f64 = 5.0;
 
-const LEVELS: [Fidelity; 3] = [Fidelity::Full, Fidelity::Standard, Fidelity::Plain];
+const LEVELS: [Fidelity; 4] = [
+    Fidelity::Full,
+    Fidelity::Agent,
+    Fidelity::Standard,
+    Fidelity::Plain,
+];
 
 fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
@@ -68,11 +73,13 @@ fn report() -> String {
             totals[index] += report.total;
             costs.push(report.total);
         }
-        rows.push_str(&format!(
-            "| `{name}` | {} | {} | {} |\n",
-            costs[0], costs[1], costs[2]
-        ));
+        let cells: Vec<String> = costs.iter().map(usize::to_string).collect();
+        rows.push_str(&format!("| `{name}` | {} |\n", cells.join(" | ")));
     }
+
+    let header: Vec<&str> = LEVELS.iter().map(|f| f.as_str()).collect();
+    let rule = "|---".to_string() + &"|---:".repeat(LEVELS.len()) + "|";
+    let total_cells: Vec<String> = totals.iter().map(|t| format!("**{t}**")).collect();
 
     format!(
         "# Corpus token budget\n\
@@ -87,10 +94,11 @@ fn report() -> String {
          An update that inflates the total by more than {MAX_INFLATION:.0} % is refused unless\n\
          `DOCSAI_ACCEPT_TOKEN_INFLATION=1` says so on purpose.\n\
          \n\
-         | Document | full | standard | plain |\n\
-         |---|---:|---:|---:|\n\
-         {rows}| **total** | **{}** | **{}** | **{}** |\n",
-        totals[0], totals[1], totals[2]
+         | Document | {} |\n\
+         {rule}\n\
+         {rows}| **total** | {} |\n",
+        header.join(" | "),
+        total_cells.join(" | ")
     )
 }
 

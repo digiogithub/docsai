@@ -53,9 +53,10 @@ impl Default for ConvertOptions {
 impl ConvertOptions {
     /// The id policy this conversion applies.
     pub fn id_policy(&self) -> IdPolicy {
-        self.ids.unwrap_or(match self.fidelity {
-            Fidelity::Full => IdPolicy::Assign,
-            _ => IdPolicy::Never,
+        self.ids.unwrap_or(if self.fidelity.addresses() {
+            IdPolicy::Assign
+        } else {
+            IdPolicy::Never
         })
     }
 }

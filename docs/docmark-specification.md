@@ -42,6 +42,7 @@ Initial YAML block delimited by `---`. Defined fields:
 ---
 docmark: "1.0"                  # version of this specification (required)
 source-format: docx             # docx | doc | odt | xlsx | xls | ods (required when converting)
+fidelity: agent                 # only on a projection (§6.1); absent means the whole document
 title: "Annual Report"          # docProps / meta.xml
 author: "Ana Perez"
 created: 2026-03-01T10:00:00Z
@@ -356,8 +357,30 @@ without metadata. This mode is **unidirectional by definition** and the CLI mark
 | Mode | Content | Use |
 |---|---|---|
 | `full` (default) | Everything: attributes, catalogs, raw-blocks | Round-trip |
+| `agent` | Text, structure, node ids, raw stubs; no catalogs and no measurements | An agent reading a document it means to edit |
 | `standard` | Main attributes, no raw-blocks or full catalog | Readable rich Markdown |
 | `plain` | Pure CommonMark+GFM, no attributes | LLM/RAG consumption MarkItDown-style |
+
+### 6.1 `agent` is a projection, not a conversion
+
+`agent` is not "a bit less than `standard`" — it is a different question. `standard` asks *what
+survives if a human reads and edits this in a text editor*; `agent` asks *what a program needs in
+order to change one node and leave the rest alone*. The rule that decides every case is:
+
+> keep what a node **is** and what it **says**; drop how it **looks**.
+
+So the style *name* stays (`{.Quote}`) and its indents do not; `.sup` stays because superscript
+changes what the text says; a cell's formula and its merge stay because they are the sheet; the
+column widths, the page geometry, the image EMUs, the style and list catalogues do not. A
+raw-block becomes a stub with its id (§7) — an agent has to see that something is there, and the
+bytes are the definition of what it cannot edit.
+
+Two invariants make it a projection rather than a lossy level:
+
+- **It addresses exactly what `full` addresses.** A node with no id could not be written back.
+- **It says everything the document says.** Only appearance is dropped, and the level declares
+  itself in the front matter with `fidelity: agent` so nothing writes it back as a whole
+  document: the way back is node by node, with the etag proving nothing else moved.
 
 ## 7. Fidelity escape hatch: raw-blocks
 
@@ -492,6 +515,9 @@ the remaining bullets stay a sketch until Phase 11 implements them.
 
 - **Raw-block sidecar** (§7): `src=` in the stub, payload in `assets/_raw/<id>.xml`, `--raw
   inline|sidecar` with `sidecar` as the default. Inline raw-blocks remain valid.
+- **Fidelity level `agent`** (§6.1) and the `fidelity:` front-matter key that declares a
+  projection. Ids are assigned at `agent` as they are at `full`, since a node with no address
+  cannot be written back.
 
 #### The rest of 1.1 (not yet implemented)
 
@@ -500,8 +526,9 @@ the remaining bullets stay a sketch until Phase 11 implements them.
   hash is **derived from the node, never stored in it**, so it cannot go stale behind an edit.
 - **Attribute-set dictionary**: repeated attribute patterns interned in the front matter and
   referenced as a class (`{.g1}`), with deterministic naming so §8 idempotence still holds.
-- **Fidelity level `agent`** added to §6: editable content as text, everything else collapsed to
-  a one-line stub carrying id and etag.
+- **Etags in the output**: `agent` addresses every node `full` addresses, but the etag is still
+  computed and never written; the stub carries the id alone until `read --select` needs an
+  if-match precondition.
 
 ### 11.2 DocMark 1.2 — the presentation profile (DocMark-P)
 

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--fidelity agent`** (plan v2 Phase 11), a fourth level and the first that is a *projection*
+  rather than a conversion: text, structure, node ids and raw stubs, without the style and list
+  catalogues, indents, spacing, page geometry, image geometry or column widths. A sheet keeps its
+  formulas and merges — those are what a sheet is. The output declares `fidelity: agent` in its
+  front matter and is meant to be read whole and written back node by node, so ids are assigned
+  as at `full`. Measured on the corpus: 62–75 % fewer tokens than `full` on 24 of the 25 text
+  documents; the exception is the one whose cost is prose rather than formatting.
+- `corpus/token-budget.md` now has an `agent` column, so the projection's cost is gated in CI
+  like every other level.
 - **Raw-block sidecars** (plan v2 Phase 11): at `--fidelity full` the bytes of a raw-block go
   to `assets/_raw/<id>.xml` and the body keeps a stub, `::: {.raw … src="assets/_raw/r7.xml"}`.
   `docsai convert --raw inline|sidecar` (default `sidecar`) chooses; `--raw inline` restores the

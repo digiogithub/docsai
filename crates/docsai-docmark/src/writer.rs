@@ -62,6 +62,12 @@ impl<'a> Writer<'a> {
         self.options.fidelity == Fidelity::Plain
     }
 
+    /// Whether appearance reaches the output. `agent` says no: it keeps the
+    /// text, the structure and the addresses, and drops every measurement.
+    fn formatting(&self) -> bool {
+        self.options.fidelity.formatting()
+    }
+
     /// Writes the whole document body and returns the text and the report.
     pub fn finish(mut self, doc: &TextDocument) -> (String, ConversionReport) {
         let multi_section = doc.sections.len() > 1;
@@ -124,13 +130,15 @@ impl<'a> Writer<'a> {
             if let Some(id) = id.clone() {
                 attrs.id(id);
             }
-            if section.page.columns > 1 {
-                attrs.set("columns", section.page.columns.to_string());
+            if self.formatting() {
+                if section.page.columns > 1 {
+                    attrs.set("columns", section.page.columns.to_string());
+                }
+                if let Some(paper) = section.page.paper_name() {
+                    attrs.set("page-size", paper);
+                }
+                attrs.set("orientation", section.page.orientation.as_str());
             }
-            if let Some(paper) = section.page.paper_name() {
-                attrs.set("page-size", paper);
-            }
-            attrs.set("orientation", section.page.orientation.as_str());
             let rendered = format!("::: {}\n{}\n:::", attrs.render(), body.trim_end());
             self.ids
                 .record(id.as_deref(), NodeKind::Section, &rendered, mark);
@@ -213,16 +221,18 @@ impl<'a> Writer<'a> {
                 }
                 let mut attrs = Attrs::new();
                 attrs.class("textbox");
-                if let Some(size) = text_box.size {
-                    attrs
-                        .set("width", len(size.width))
-                        .set("height", len(size.height));
-                }
-                if let Some(x) = text_box.x {
-                    attrs.set("x", len(x));
-                }
-                if let Some(y) = text_box.y {
-                    attrs.set("y", len(y));
+                if self.formatting() {
+                    if let Some(size) = text_box.size {
+                        attrs
+                            .set("width", len(size.width))
+                            .set("height", len(size.height));
+                    }
+                    if let Some(x) = text_box.x {
+                        attrs.set("x", len(x));
+                    }
+                    if let Some(y) = text_box.y {
+                        attrs.set("y", len(y));
+                    }
                 }
                 format!("::: {}\n{}\n:::", attrs.render(), body.trim_end())
             }
@@ -231,9 +241,11 @@ impl<'a> Writer<'a> {
     }
 
     /// A raw-block (spec §7). Dropped in `standard` and `plain`, which is a
-    /// documented loss and therefore a warning.
+    /// documented loss and therefore a warning. `agent` keeps it, always as a
+    /// stub: an agent has to *see* that something is there — it addresses the
+    /// node — but the bytes are the definition of what it cannot edit.
     fn render_raw(&mut self, raw: &RawFragment) -> String {
-        if !self.full() {
+        if !self.options.fidelity.addresses() {
             self.report.warn(Warning::RawBlockDropped {
                 id: raw.id.as_str().to_string(),
                 format: raw.format.clone(),
@@ -247,7 +259,7 @@ impl<'a> Writer<'a> {
             .set("format", &raw.format)
             .set("part", &raw.part)
             .id(raw.id.as_str());
-        if self.options.raw == RawPolicy::Sidecar {
+        if self.options.raw == RawPolicy::Sidecar || !self.full() {
             // The bytes are in a file of their own; the body keeps the stub so
             // a reader sees that something is there without paying for it.
             attrs.set(
@@ -327,6 +339,11 @@ impl<'a> Writer<'a> {
         let style = paragraph.format.style.as_ref();
         if let Some(style) = style {
             attrs.class(style.as_str());
+        }
+        if !self.formatting() {
+            // The style *name* survives — it is what the paragraph is — but
+            // its indents and spacing are not something an agent edits.
+            return attrs;
         }
         let resolved = self.styles.resolve(style);
         let direct = paragraph.format.direct.minus(&resolved.paragraph);
@@ -494,7 +511,7 @@ impl<'a> Writer<'a> {
         if let Some(style) = &table.style {
             attrs.set("style", style.as_str());
         }
-        if !table.col_widths.is_empty() {
+        if !table.col_widths.is_empty() && self.formatting() {
             let widths: Vec<String> = table.col_widths.iter().map(|w| len(*w)).collect();
             attrs.set("col-widths", widths.join(","));
         }
@@ -534,7 +551,9 @@ impl<'a> Writer<'a> {
             attrs.set("rowspan", cell.rowspan.to_string());
         }
         if let Some(background) = &cell.background {
-            attrs.set("background", background);
+            if self.formatting() {
+                attrs.set("background", background);
+            }
         }
         format!("{text}{}", attrs.suffix()).trim().to_string()
     }
@@ -677,7 +696,7 @@ impl<'a> Writer<'a> {
             }
             Inline::Image(image) => self.render_image(image),
             Inline::Raw(raw) => {
-                if self.full() {
+                if self.options.fidelity.addresses() {
                     // An inline raw fragment still travels as a block-level
                     // raw-block; the spec has no inline form (§7).
                     let rendered = self.render_raw(raw);
@@ -733,15 +752,10 @@ impl<'a> Writer<'a> {
         let resolved: ResolvedStyle = self.styles.resolve(props.style.as_ref());
         let font: FontProps = props.direct.minus(&resolved.font);
 
-        match font.underline {
-            Some(Underline::None) | None => {}
-            Some(Underline::Single) => {
-                attrs.class("underline");
-            }
-            Some(other) => {
-                attrs.class("underline");
-                attrs.set("underline", underline_name(other));
-            }
+        // Classes first: they name what the run *is*, and `agent` keeps them —
+        // superscript is not decoration, it changes what the text says.
+        if !matches!(font.underline, Some(Underline::None) | None) {
+            attrs.class("underline");
         }
         match font.vert_align {
             Some(VertAlign::Superscript) => {
@@ -751,6 +765,21 @@ impl<'a> Writer<'a> {
                 attrs.class("sub");
             }
             _ => {}
+        }
+        if font.small_caps == Some(true) {
+            attrs.class("small-caps");
+        }
+        if font.caps == Some(true) {
+            attrs.class("caps");
+        }
+        if !self.formatting() {
+            return;
+        }
+
+        if let Some(other) = font.underline {
+            if !matches!(other, Underline::None | Underline::Single) {
+                attrs.set("underline", underline_name(other));
+            }
         }
         if font.bold == Some(false) {
             attrs.set("bold", "false");
@@ -763,12 +792,6 @@ impl<'a> Writer<'a> {
         attrs.set_opt("font", font.name);
         if let Some(size) = font.size {
             attrs.set("size", pt(size));
-        }
-        if font.small_caps == Some(true) {
-            attrs.class("small-caps");
-        }
-        if font.caps == Some(true) {
-            attrs.class("caps");
         }
     }
 
@@ -807,6 +830,15 @@ impl<'a> Writer<'a> {
             attrs.id(id);
         }
         let geometry = &image.geometry;
+
+        if !self.formatting() {
+            // An image is a leaf an agent can move, delete or re-caption, and
+            // its geometry is exactly the part it cannot write. The address,
+            // the alt text and the link survive; the EMUs do not.
+            attrs.set_opt("title", image.title.clone());
+            attrs.set_opt("link", image.link.clone());
+            return (format!("![{alt}]({path}){}", attrs.render()), id);
+        }
 
         // `width`/`height` are mandatory except on two-cell sheet anchors,
         // where the grid defines the size (spec §4.1).

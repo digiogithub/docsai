@@ -49,6 +49,10 @@ pub enum Fidelity {
     /// Everything: attributes, catalogues and raw-blocks. Round-trip grade.
     #[default]
     Full,
+    /// A projection for agents (spec §6.1): the text, the structure and every
+    /// node address, and nothing an agent cannot edit — no catalogues, no
+    /// measurements, no raw payloads. Read whole, written back node by node.
+    Agent,
     /// The main attributes, without catalogues or raw-blocks.
     Standard,
     /// Plain CommonMark + GFM, for LLM and RAG consumption.
@@ -59,6 +63,7 @@ impl Fidelity {
     pub fn as_str(self) -> &'static str {
         match self {
             Fidelity::Full => "full",
+            Fidelity::Agent => "agent",
             Fidelity::Standard => "standard",
             Fidelity::Plain => "plain",
         }
@@ -68,10 +73,25 @@ impl Fidelity {
     pub fn parse(value: &str) -> Option<Fidelity> {
         match value.trim().to_ascii_lowercase().as_str() {
             "full" => Some(Fidelity::Full),
+            "agent" => Some(Fidelity::Agent),
             "standard" => Some(Fidelity::Standard),
             "plain" => Some(Fidelity::Plain),
             _ => None,
         }
+    }
+
+    /// Whether appearance reaches the output: measurements, colours, geometry,
+    /// column widths. `agent` keeps the *names* of things and drops the rest,
+    /// which is the whole reason it is cheaper than `standard` on a document
+    /// whose cost is its formatting.
+    pub fn formatting(self) -> bool {
+        matches!(self, Fidelity::Full | Fidelity::Standard)
+    }
+
+    /// Whether the level addresses nodes by default. `agent` output exists to
+    /// be written back node by node, so an id on every node is not optional.
+    pub fn addresses(self) -> bool {
+        matches!(self, Fidelity::Full | Fidelity::Agent)
     }
 }
 

@@ -94,6 +94,7 @@ docsai convert report.docx -o report.dmk.md      # extracts assets/ next to the 
 docsai convert report.docx                         # DocMark on stdout
 docsai convert report.docx -o -                    # same, explicit stdout
 docsai convert - --to docmark < report.docx        # stdin → stdout pipeline
+docsai convert report.docx --fidelity agent        # the projection an agent edits from
 docsai convert report.docx --fidelity plain        # clean CommonMark, for LLM/RAG
 docsai convert report.docx -o out.md --json        # conversion report as JSON
 docsai convert *.docx --out-dir md/                # batch (parallel) into a folder
@@ -116,8 +117,16 @@ docsai mcp                                          # MCP server over stdio (Pha
 ```
 
 Fidelity levels (`--fidelity`, spec §6): `full` (default, round-trip grade),
-`standard` (rich Markdown without catalogues or raw-blocks) and `plain` (pure
-CommonMark+GFM).
+`agent` (a projection for programs, below), `standard` (rich Markdown without
+catalogues or raw-blocks) and `plain` (pure CommonMark+GFM).
+
+`--fidelity agent` (spec §6.1) is what an agent reads before editing. It keeps the
+text, the structure, every node id and a stub for everything opaque, and drops what
+no program edits: the style and list catalogues, indents and spacing, page geometry,
+image EMUs, column widths. On the corpus that is a **62–75 % cut against `full`** for
+documents whose cost is their formatting — and almost nothing for a document whose
+cost is its prose, which is what `docsai outline` and selectors are for. It says
+`fidelity: agent` in its front matter: read it whole, write it back node by node.
 
 Node ids (`--ids`, spec §11.1): at `--fidelity full` the output is **DocMark 1.1**
 — addressable nodes carry `{#n7}` and the front matter declares `next-id`, so an

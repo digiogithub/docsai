@@ -59,7 +59,7 @@ enum Command {
         /// Force the target format instead of inferring it from `--output` / `--out-dir`.
         #[arg(long, value_name = "FMT")]
         to: Option<String>,
-        /// How much of the source survives: full, standard or plain.
+        /// How much of the source survives: full, agent, standard or plain.
         #[arg(long, default_value = "full")]
         fidelity: String,
         /// Node ids in the output: `assign`, `preserve` or `never`.
@@ -109,7 +109,7 @@ enum Command {
         /// Keep only the first N levels of the tree.
         #[arg(long, value_name = "N")]
         depth: Option<usize>,
-        /// How much of the source survives: full, standard or plain.
+        /// How much of the source survives: full, agent, standard or plain.
         #[arg(long, default_value = "full")]
         fidelity: String,
         /// Print the outline as JSON on stdout.
@@ -126,7 +126,7 @@ enum Command {
     Tokens {
         /// Input document.
         input: PathBuf,
-        /// How much of the source survives: full, standard or plain.
+        /// How much of the source survives: full, agent, standard or plain.
         #[arg(long, default_value = "full")]
         fidelity: String,
         /// Node ids in the measured output: `assign`, `preserve` or `never`.
@@ -155,7 +155,7 @@ enum Command {
         /// Optional path for the regenerated Office package.
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// How much of the source survives: full, standard or plain.
+        /// How much of the source survives: full, agent, standard or plain.
         #[arg(long, default_value = "full")]
         fidelity: String,
         /// Print the fidelity report as JSON on stdout.
@@ -729,8 +729,9 @@ fn print_formats(json: bool) {
 }
 
 fn parse_fidelity(value: &str) -> anyhow::Result<Fidelity> {
-    Fidelity::parse(value)
-        .ok_or_else(|| anyhow::anyhow!("unknown --fidelity `{value}`; use full, standard or plain"))
+    Fidelity::parse(value).ok_or_else(|| {
+        anyhow::anyhow!("unknown --fidelity `{value}`; use full, agent, standard or plain")
+    })
 }
 
 fn parse_use_loffice(value: &str) -> anyhow::Result<UseLoffice> {
