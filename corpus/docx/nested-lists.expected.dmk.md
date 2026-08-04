@@ -45,13 +45,13 @@ styles:
 list-definitions:
   L1:
     levels:
-      - { format: decimal, text: "%1.", start: 1, indent: 48px, hanging: 24px }
-      - { format: lowerLetter, text: "%2)", start: 1, indent: 96px, hanging: 24px }
-      - { format: lowerRoman, text: "%3.", start: 1, indent: 144px, hanging: 12px }
+      - { format: decimal, text: "%1.", start: 1, indent: 36pt, hanging: 18pt }
+      - { format: lowerLetter, text: "%2)", start: 1, indent: 72pt, hanging: 18pt }
+      - { format: lowerRoman, text: "%3.", start: 1, indent: 108pt, hanging: 9pt }
   L2:
     levels:
-      - { format: bullet, text: "•", indent: 48px, hanging: 24px }
-      - { format: bullet, text: "o", indent: 96px, hanging: 24px }
+      - { format: bullet, text: "•", indent: 36pt, hanging: 18pt }
+      - { format: bullet, text: "o", indent: 72pt, hanging: 18pt }
 ---
 
 Lista numerada anidada:

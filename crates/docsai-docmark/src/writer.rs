@@ -21,7 +21,7 @@ use crate::attrs::Attrs;
 use crate::dict::AttrDict;
 use crate::escape::{escape, TextContext};
 use crate::ids::IdSource;
-use crate::units::{len, number, percent, pt};
+use crate::units::{geometry, len, number, percent, pt};
 use crate::{Fidelity, Options, RawPolicy};
 
 /// Serialises a text document body (front matter excluded).
@@ -78,6 +78,16 @@ impl<'a> Writer<'a> {
     /// text, the structure and the addresses, and drops every measurement.
     fn formatting(&self) -> bool {
         self.options.fidelity.formatting()
+    }
+
+    /// Decimals a readable unit may use (spec §2).
+    fn precision(&self) -> u8 {
+        self.options.precision
+    }
+
+    /// A drawing length: image sizes and anchor offsets, in pixels.
+    fn geometry(&self, value: Length) -> String {
+        geometry(value, self.precision())
     }
 
     /// Writes the whole document body and returns the text and the report.
@@ -244,14 +254,14 @@ impl<'a> Writer<'a> {
                 if self.formatting() {
                     if let Some(size) = text_box.size {
                         attrs
-                            .set("width", len(size.width))
-                            .set("height", len(size.height));
+                            .set("width", self.geometry(size.width))
+                            .set("height", self.geometry(size.height));
                     }
                     if let Some(x) = text_box.x {
-                        attrs.set("x", len(x));
+                        attrs.set("x", self.geometry(x));
                     }
                     if let Some(y) = text_box.y {
-                        attrs.set("y", len(y));
+                        attrs.set("y", self.geometry(y));
                     }
                 }
                 format!(
@@ -397,10 +407,30 @@ impl<'a> Writer<'a> {
         if let Some(align) = direct.align {
             attrs.set("align", align.as_str());
         }
-        push_len(&mut attrs, "indent-left", direct.indent_left);
-        push_len(&mut attrs, "indent-right", direct.indent_right);
-        push_len(&mut attrs, "indent-first-line", direct.indent_first_line);
-        push_len(&mut attrs, "indent-hanging", direct.indent_hanging);
+        push_len(
+            &mut attrs,
+            "indent-left",
+            direct.indent_left,
+            self.precision(),
+        );
+        push_len(
+            &mut attrs,
+            "indent-right",
+            direct.indent_right,
+            self.precision(),
+        );
+        push_len(
+            &mut attrs,
+            "indent-first-line",
+            direct.indent_first_line,
+            self.precision(),
+        );
+        push_len(
+            &mut attrs,
+            "indent-hanging",
+            direct.indent_hanging,
+            self.precision(),
+        );
         if let Some(value) = direct.space_before {
             attrs.set("space-before", pt(value));
         }
@@ -558,7 +588,11 @@ impl<'a> Writer<'a> {
             attrs.set("style", style.as_str());
         }
         if !table.col_widths.is_empty() && self.formatting() {
-            let widths: Vec<String> = table.col_widths.iter().map(|w| len(*w)).collect();
+            let widths: Vec<String> = table
+                .col_widths
+                .iter()
+                .map(|w| len(*w, self.precision()))
+                .collect();
             attrs.set("col-widths", widths.join(","));
         }
         if !has_header {
@@ -914,8 +948,8 @@ impl<'a> Writer<'a> {
         let two_cell = matches!(geometry.anchor, Anchor::SheetTwoCell { .. });
         if !two_cell {
             attrs
-                .set("width", len(geometry.display_size.width))
-                .set("height", len(geometry.display_size.height));
+                .set("width", self.geometry(geometry.display_size.width))
+                .set("height", self.geometry(geometry.display_size.height));
         }
         if let Some((w, h)) = geometry.native_size_px {
             attrs.set("native-size", format!("{w}x{h}"));
@@ -992,11 +1026,11 @@ impl<'a> Writer<'a> {
                     attrs.set("relative-to-v", relative_to_v.as_str());
                 }
                 match position.h {
-                    AxisPos::Offset(x) => attrs.set("x", len(x)),
+                    AxisPos::Offset(x) => attrs.set("x", self.geometry(x)),
                     AxisPos::Align(keyword) => attrs.set("align-h", keyword.as_str()),
                 };
                 match position.v {
-                    AxisPos::Offset(y) => attrs.set("y", len(y)),
+                    AxisPos::Offset(y) => attrs.set("y", self.geometry(y)),
                     AxisPos::Align(keyword) => attrs.set("align-v", keyword.as_str()),
                 };
                 attrs.set("wrap", wrap.as_str());
@@ -1013,9 +1047,15 @@ impl<'a> Writer<'a> {
                 attrs
                     .set("anchor", "two-cell")
                     .set("from", from.cell.a1())
-                    .set("from-offset", offset(from.offset_x, from.offset_y))
+                    .set(
+                        "from-offset",
+                        offset(from.offset_x, from.offset_y, self.precision()),
+                    )
                     .set("to", to.cell.a1())
-                    .set("to-offset", offset(to.offset_x, to.offset_y))
+                    .set(
+                        "to-offset",
+                        offset(to.offset_x, to.offset_y, self.precision()),
+                    )
                     .set("move-with-cells", move_with_cells.to_string())
                     .set("size-with-cells", size_with_cells.to_string());
             }
@@ -1023,13 +1063,16 @@ impl<'a> Writer<'a> {
                 attrs
                     .set("anchor", "one-cell")
                     .set("from", from.cell.a1())
-                    .set("from-offset", offset(from.offset_x, from.offset_y));
+                    .set(
+                        "from-offset",
+                        offset(from.offset_x, from.offset_y, self.precision()),
+                    );
             }
             Anchor::SheetAbsolute { pos } => {
                 attrs
                     .set("anchor", "absolute")
-                    .set("x", len(pos.x))
-                    .set("y", len(pos.y));
+                    .set("x", self.geometry(pos.x))
+                    .set("y", self.geometry(pos.y));
             }
         }
     }
@@ -1071,13 +1114,13 @@ fn strip_redundant_style(content: &[Inline], props: &RunProps) -> Vec<Inline> {
         .collect()
 }
 
-fn offset(x: Length, y: Length) -> String {
-    format!("{},{}", len(x), len(y))
+fn offset(x: Length, y: Length, precision: u8) -> String {
+    format!("{},{}", geometry(x, precision), geometry(y, precision))
 }
 
-fn push_len(attrs: &mut Attrs, key: &str, value: Option<Length>) {
+fn push_len(attrs: &mut Attrs, key: &str, value: Option<Length>, precision: u8) {
     if let Some(value) = value {
-        attrs.set(key, len(value));
+        attrs.set(key, len(value, precision));
     }
 }
 

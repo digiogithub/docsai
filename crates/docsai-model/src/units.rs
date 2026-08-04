@@ -191,30 +191,117 @@ const fn div_round(value: i64, divisor: i64) -> i64 {
 
 /// EMU in one pixel at 96 dpi.
 const EMU_PER_PX: i64 = EMU_PER_INCH / DEFAULT_DPI as i64;
-/// EMU in a hundredth of a centimetre.
-const EMU_PER_CENTI_CM: i64 = EMU_PER_CM / 100;
-/// EMU in a hundredth of a point.
-const EMU_PER_CENTI_PT: i64 = EMU_PER_POINT / 100;
+
+/// What a length measures, which is what decides the unit it reads best in.
+///
+/// Both styles are **lossless**: they pick the first unit that represents the
+/// length exactly at the requested precision, and fall back to raw `emu`. What
+/// they change is which exact unit is preferred, and that is a readability
+/// choice, never an accuracy one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LengthStyle {
+    /// Layout and typography: indents, spacing, margins, column widths. Word
+    /// stores these in twips and a twip is exactly `0.05pt`, so points are
+    /// exact for every value a text document can hold — and they are the unit
+    /// the document was authored in. Order: `pt`, `cm`, `emu`.
+    #[default]
+    Typographic,
+    /// Drawings and bitmaps: image sizes and anchor offsets. A bitmap has a
+    /// natural size in pixels, so pixels come first here. Order: `px`, `cm`,
+    /// `pt`, `emu`.
+    Geometric,
+}
+
+/// Decimals used when no exactness argument decides otherwise.
+pub const DEFAULT_PRECISION: u8 = 2;
+
+impl Length {
+    /// Renders the length the way DocMark writes it, always **losslessly**.
+    ///
+    /// `precision` is how many decimals a unit may use; a unit is only chosen
+    /// when it represents the length *exactly* within those decimals, and raw
+    /// `emu` is the last resort. Choosing readability over exactness would
+    /// silently move margins and image sizes on every round-trip, so a margin
+    /// of 1417 twips prints as `70.85pt`, never as an approximate `2.499cm`.
+    ///
+    /// Raising the precision therefore buys accuracy in *readable* units, not
+    /// accuracy in the length: `1.251cm` needs three decimals, and at two it
+    /// is written in EMU rather than rounded.
+    ///
+    /// ```
+    /// use docsai_model::units::{Length, LengthStyle};
+    /// let indent = Length::from_twips(720);
+    /// assert_eq!(indent.render(LengthStyle::Typographic, 2), "36pt");
+    /// assert_eq!(indent.render(LengthStyle::Geometric, 2), "48px");
+    /// assert_eq!(Length::ZERO.render(LengthStyle::Typographic, 2), "0");
+    /// let odd = Length::from_cm(1.251);
+    /// assert_eq!(odd.render(LengthStyle::Typographic, 2), "450360emu");
+    /// assert_eq!(odd.render(LengthStyle::Typographic, 3), "1.251cm");
+    /// ```
+    pub fn render(self, style: LengthStyle, precision: u8) -> String {
+        // Zero measures nothing, so it names no unit.
+        if self.0 == 0 {
+            return "0".to_string();
+        }
+        let order: &[Unit] = match style {
+            LengthStyle::Typographic => &[Unit::Pt, Unit::Cm],
+            LengthStyle::Geometric => &[Unit::Px, Unit::Cm, Unit::Pt],
+        };
+        for unit in order {
+            if let Some(text) = self.exact_in(*unit, precision) {
+                return text;
+            }
+        }
+        format!("{}emu", self.0)
+    }
+
+    /// The length written in `unit`, or `None` when `precision` decimals
+    /// cannot express it exactly.
+    fn exact_in(self, unit: Unit, precision: u8) -> Option<String> {
+        let per_unit = match unit {
+            Unit::Px => EMU_PER_PX,
+            Unit::Cm => EMU_PER_CM,
+            Unit::Pt => EMU_PER_POINT,
+        };
+        // Exact in `precision` decimals iff scaling by that many powers of ten
+        // makes the division whole. Done on integers: asking whether a float
+        // has exactly two decimals is a question floats cannot answer.
+        let scaled = self.0.checked_mul(10i64.checked_pow(precision as u32)?)?;
+        if scaled % per_unit != 0 {
+            return None;
+        }
+        let value = self.0 as f64 / per_unit as f64;
+        Some(format!(
+            "{}{}",
+            trim_float(value, precision as usize),
+            unit.suffix()
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Unit {
+    Px,
+    Cm,
+    Pt,
+}
+
+impl Unit {
+    fn suffix(self) -> &'static str {
+        match self {
+            Unit::Px => "px",
+            Unit::Cm => "cm",
+            Unit::Pt => "pt",
+        }
+    }
+}
 
 impl fmt::Display for Length {
-    /// Renders the length the way DocMark does, always **losslessly**: the
-    /// first unit that represents it exactly wins, in the order `px`, `cm`,
-    /// `pt`, and raw `emu` as the last resort.
-    ///
-    /// Choosing readability over exactness here would silently move margins
-    /// and image sizes on every round-trip, so exactness comes first: a Word
-    /// margin of 1417 twips prints as `70.85pt`, not as an approximate
-    /// `2.499cm`.
+    /// The geometric rendering at the default precision. Serialisation goes
+    /// through [`Length::render`] with the style the value deserves; this is
+    /// for logs and error messages.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0 % EMU_PER_PX == 0 {
-            write!(f, "{}px", self.0 / EMU_PER_PX)
-        } else if self.0 % EMU_PER_CENTI_CM == 0 {
-            write!(f, "{}cm", trim_float(self.cm(), 2))
-        } else if self.0 % EMU_PER_CENTI_PT == 0 {
-            write!(f, "{}pt", trim_float(self.pt(), 2))
-        } else {
-            write!(f, "{}emu", self.0)
-        }
+        f.write_str(&self.render(LengthStyle::Geometric, DEFAULT_PRECISION))
     }
 }
 

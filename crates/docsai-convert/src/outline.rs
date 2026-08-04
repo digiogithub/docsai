@@ -140,6 +140,7 @@ pub fn outline_path(
         assets_dir: "assets".into(),
         source_format,
         raw: options.raw,
+        precision: options.precision,
     };
     let mut outline = outline(&doc, &assets, &docmark, depth);
     outline.path = Some(input.display().to_string());

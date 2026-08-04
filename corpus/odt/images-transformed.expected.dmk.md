@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 page:
   size: A4
-  margins: { top: 2cm, bottom: 2cm, left: 2cm, right: 2cm, header: 0px, footer: 0px }
+  margins: { top: 2cm, bottom: 2cm, left: 2cm, right: 2cm, header: 0, footer: 0 }
   orientation: portrait
 style-defaults:
   font: { name: "Liberation Serif", size: 12pt }

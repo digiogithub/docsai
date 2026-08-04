@@ -83,11 +83,22 @@ list-definitions:               # numbering.xml / normalized ODF list styles
 
 Rules:
 - Keys in kebab-case. Explicit units (`px`, `cm`, `pt`, `emu`, `%`); colors `#RRGGBB`.
-- **Unit rule (normative)**: the serializer chooses the **first unit that represents the length
-  exactly**, in the order `px` (at 96 dpi) → `cm` → `pt` → `emu`. Readability yields to exactness:
-  a Word margin of 1417 twips is written `70.85pt`, never an approximate `2.499cm`, because
-  rounding would shift the margin on every round-trip. `emu` is the final escape hatch and always
-  exists.
+- **Unit rule (normative)**: a length is written in the unit of **what it measures**, and only in
+  a unit that represents it **exactly**.
+  - *Layout and typography* — indents, spacing, margins, page size, column widths, list levels:
+    `pt` → `cm` → `emu`. Points, because a text document is authored in them: Word stores layout
+    in twips and a twip is exactly `0.05pt`, so two decimals name every value one can hold.
+  - *Drawings and bitmaps* — image sizes, anchor offsets: `px` (at 96 dpi) → `cm` → `pt` → `emu`.
+    Pixels, because a bitmap has a natural size in pixels.
+  - **Zero names no unit**: `0`, not `0px`.
+  - **Precision** is configurable (`--precision N`, default 2 decimals) and buys *readable units*,
+    never rounding. A unit is used only when `N` decimals express the length exactly; otherwise
+    the next unit is tried and `emu` is the final escape hatch, which always exists. So
+    `1.251cm` is written `450360emu` at precision 2 and `1.251cm` at precision 3 — never rounded
+    to `1.25cm`, which would move the length by 3600 EMU on every round-trip.
+
+  The consequence, which is normative too: **the round-trip tolerance for a length is zero**. A
+  serialised length re-parses to the identical EMU at every precision.
 - The `styles` block is a **catalog**: the body references styles by name via classes
   (`{.Heading1}`); the inverse writer uses it to regenerate `styles.xml` / ODF `styles.xml`.
 - Unknown fields are preserved (parsers must not reject them): forward-compatible.
@@ -586,6 +597,9 @@ the remaining bullets stay a sketch until Phase 11 implements them.
   class its level names.
 - **Attribute-set dictionary** (§3.7): `attribute-sets:` in the front matter, `{.g1}` in the
   body, deterministic names, at `full` and `standard`.
+- **Readable units** (§2): a length is written in the unit of what it measures, zero carries no
+  unit, and `--precision` sets how many decimals a readable unit may use. Still exact: the
+  round-trip tolerance is zero.
 
 #### The rest of 1.1 (not yet implemented)
 

@@ -42,7 +42,7 @@ styles:
 
 Tabla regular:
 
-::: {#n1 .table col-widths="200px,200px,200px" header-row=false style=TableGrid}
+::: {#n1 .table col-widths="150pt,150pt,150pt" header-row=false style=TableGrid}
 |          |     |     |
 | -------- | --- | --- |
 | Concepto | T1  | T2  |

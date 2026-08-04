@@ -128,6 +128,13 @@ documents whose cost is their formatting — and almost nothing for a document w
 cost is its prose, which is what `docsai outline` and selectors are for. It says
 `fidelity: agent` in its front matter: read it whole, write it back node by node.
 
+Units (`--precision`, spec §2): a length is written in the unit of **what it
+measures** — points for layout (indents, margins, column widths), pixels for
+bitmaps and drawing offsets — and zero carries no unit. A unit is only used when
+it names the length *exactly*: `--precision N` (default 2) sets how many decimals
+it may use, and `emu` is the escape hatch when none of them fits. It buys
+readable units, never rounding, so the round-trip tolerance for a length is zero.
+
 Repeated formatting (spec §3.7): what a style implies is never written — not the
 paragraph's, not the run's, not what a style inherits from its parent — and what no
 style implies but repeats anyway is written **once**. A pattern used three times or

@@ -37,6 +37,7 @@ Practical difference between the two folders:
 | [21 — Phase 11 B](21-phase-11-agent-fidelity.md) | `--fidelity agent`: the projection rule, what it enforces, and what the plan's criterion got wrong |
 | [22 — Phase 11 C](22-phase-11-delta-emission.md) | Delta emission against the whole cascade, and the fixture that made it measurable |
 | [23 — Phase 11 D](23-phase-11-attr-dictionary.md) | Repeated attribute patterns interned as `{.g1}`, and why expansion happens before interpretation |
+| [24 — Phase 11 E](24-phase-11-readable-units.md) | Units chosen by what a length measures, `--precision`, and the tolerance that turned out to be zero |
 
 ## Status in one line
 
@@ -54,8 +55,8 @@ and `docsai outline` measured with a vendored BPE tokenizer, and the corpus toke
 **Phase 11 is in progress**: raw-block bytes live in `assets/_raw/` sidecars (11-A) and
 `--fidelity agent` projects a document down to what a program can edit (11-B); no attribute
 the inheritance chain already implies is written (11-C), and a pattern that repeats anyway is
-written once in the front matter and referenced by class (11-D). Next are readable units with
-tolerance (11-E).
+written once in the front matter and referenced by class (11-D), and a length is written in the
+unit of what it measures, exactly (11-E). Next is `docsai read --select` (11-F).
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives

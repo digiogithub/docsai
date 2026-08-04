@@ -29,9 +29,9 @@ styles:
 :::
 
 ::: {.sheet-images}
-![Logo de la empresa](assets/img-40e10599.png){#n2 anchor=two-cell from=B2 from-offset="12px,3px" move-with-cells=true name=Logo size-with-cells=false to=D8 to-offset="0px,0px"}
+![Logo de la empresa](assets/img-40e10599.png){#n2 anchor=two-cell from=B2 from-offset="12px,3px" move-with-cells=true name=Logo size-with-cells=false to=D8 to-offset="0,0"}
 
-![Firma](assets/img-7fcbd432.gif){#n3 anchor=one-cell from=F20 from-offset="0px,0px" height=60px name=Firma width=180px}
+![Firma](assets/img-7fcbd432.gif){#n3 anchor=one-cell from=F20 from-offset="0,0" height=60px name=Firma width=180px}
 
 ![Marca de agua](assets/img-40e10599.png){#n4 anchor=absolute height=7.5cm name="Marca de agua" width=10cm x=5cm y=8cm}
 

@@ -42,7 +42,7 @@ styles:
 
 Imagen rotada 45 grados:
 
-![Rotada](assets/img-40e10599.png){#n2 anchor=floating height=3cm name=Rotada native-size=120x90 relative-to=margin relative-to-v=paragraph rotation=45 width=4cm wrap=square x=0px y=0px z-index=251658240} {#n1}
+![Rotada](assets/img-40e10599.png){#n2 anchor=floating height=3cm name=Rotada native-size=120x90 relative-to=margin relative-to-v=paragraph rotation=45 width=4cm wrap=square x=0 y=0 z-index=251658240} {#n1}
 
 Imagen recortada con borde:
 
@@ -50,4 +50,4 @@ Imagen recortada con borde:
 
 Imagen volteada y escalada al 50 %:
 
-![Volteada](assets/img-8cbae2d9.png){#n6 anchor=floating flip=hv height=1.5cm name=Volteada native-size=64x64 relative-to=margin relative-to-v=paragraph width=2cm wrap=square x=0px y=0px z-index=251658240} {#n5}
+![Volteada](assets/img-8cbae2d9.png){#n6 anchor=floating flip=hv height=1.5cm name=Volteada native-size=64x64 relative-to=margin relative-to-v=paragraph width=2cm wrap=square x=0 y=0 z-index=251658240} {#n5}

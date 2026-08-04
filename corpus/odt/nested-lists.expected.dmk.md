@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 page:
   size: A4
-  margins: { top: 2cm, bottom: 2cm, left: 2cm, right: 2cm, header: 0px, footer: 0px }
+  margins: { top: 2cm, bottom: 2cm, left: 2cm, right: 2cm, header: 0, footer: 0 }
   orientation: portrait
 style-defaults:
   font: { name: "Liberation Serif", size: 12pt }
@@ -49,20 +49,20 @@ styles:
 list-definitions:
   L1:
     levels:
-      - { format: bullet, text: "•", indent: 24px, hanging: 24px }
-      - { format: bullet, text: "◦", indent: 48px, hanging: 24px }
+      - { format: bullet, text: "•", indent: 18pt, hanging: 18pt }
+      - { format: bullet, text: "◦", indent: 36pt, hanging: 18pt }
   L2:
     levels:
-      - { format: decimal, text: "%1.", indent: 24px, hanging: 24px }
-      - { format: lowerLetter, text: "%2.", indent: 48px, hanging: 24px }
+      - { format: decimal, text: "%1.", indent: 18pt, hanging: 18pt }
+      - { format: lowerLetter, text: "%2.", indent: 36pt, hanging: 18pt }
   L3:
     levels:
-      - { format: bullet, text: "•", indent: 24px, hanging: 24px }
-      - { format: bullet, text: "◦", indent: 48px, hanging: 24px }
+      - { format: bullet, text: "•", indent: 18pt, hanging: 18pt }
+      - { format: bullet, text: "◦", indent: 36pt, hanging: 18pt }
   L4:
     levels:
-      - { format: decimal, text: "%1.", indent: 24px, hanging: 24px }
-      - { format: lowerLetter, text: "%2.", indent: 48px, hanging: 24px }
+      - { format: decimal, text: "%1.", indent: 18pt, hanging: 18pt }
+      - { format: lowerLetter, text: "%2.", indent: 36pt, hanging: 18pt }
 ---
 
 Listas anidadas:

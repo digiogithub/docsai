@@ -33,6 +33,10 @@ pub struct ConvertOptions {
     /// per-fidelity default: `assign` at `full`, `never` otherwise, because
     /// the lossy levels are meant to stay readable.
     pub ids: Option<IdPolicy>,
+    /// Decimals a readable unit may use before a length falls back to `emu`
+    /// (DocMark spec §2). Never rounds: raising it buys readable units for
+    /// lengths two decimals cannot name, and nothing else.
+    pub precision: u8,
 }
 
 impl Default for ConvertOptions {
@@ -46,6 +50,7 @@ impl Default for ConvertOptions {
             max_cells: None,
             raw: RawPolicy::default(),
             ids: None,
+            precision: docsai_model::units::DEFAULT_PRECISION,
         }
     }
 }
@@ -388,6 +393,7 @@ fn write_document(
                 assets_dir: relative_assets_dir(assets_dir, file_output),
                 source_format,
                 raw: options.raw,
+                precision: options.precision,
             };
             let (markdown, write_report) =
                 docsai_docmark::serialize(&document, store, &docmark_options);
@@ -442,6 +448,7 @@ fn write_document(
                     // This DocMark is the caller's view of what was written, not
                     // a file on disk: a `src=` here would point at nothing.
                     raw: RawPolicy::Inline,
+                    precision: options.precision,
                 },
             );
 
@@ -562,6 +569,7 @@ pub fn roundtrip_file(
             // The round trip happens in memory, so it has to be self-contained:
             // there is no directory for a sidecar to live in.
             raw: RawPolicy::Inline,
+            precision: docsai_model::units::DEFAULT_PRECISION,
         },
     );
     report.merge(r1);
@@ -608,6 +616,7 @@ pub fn roundtrip_file(
             assets_dir: "assets".into(),
             source_format: office_format,
             raw: RawPolicy::Inline,
+            precision: docsai_model::units::DEFAULT_PRECISION,
         },
     );
     report.merge(r5);

@@ -111,6 +111,7 @@ pub fn token_report_path(
         assets_dir: "assets".into(),
         source_format,
         raw: options.raw,
+        precision: options.precision,
     };
     let mut report = token_report(&doc, &assets, &docmark);
     report.path = Some(input.display().to_string());

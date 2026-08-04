@@ -11,7 +11,7 @@ use docsai_model::NodeKind;
 use crate::attrs::Attrs;
 use crate::escape::{escape, escape_attr_value, is_bare_value, TextContext};
 use crate::ids::IdSource;
-use crate::units::{len, number, percent};
+use crate::units::{geometry, number, percent};
 use crate::{Fidelity, Options};
 
 /// Serialises a workbook body (front matter excluded).
@@ -467,12 +467,20 @@ fn render_image(
                 .set("from", from.cell.a1())
                 .set(
                     "from-offset",
-                    format!("{},{}", len(from.offset_x), len(from.offset_y)),
+                    format!(
+                        "{},{}",
+                        geometry(from.offset_x, options.precision),
+                        geometry(from.offset_y, options.precision)
+                    ),
                 )
                 .set("to", to.cell.a1())
                 .set(
                     "to-offset",
-                    format!("{},{}", len(to.offset_x), len(to.offset_y)),
+                    format!(
+                        "{},{}",
+                        geometry(to.offset_x, options.precision),
+                        geometry(to.offset_y, options.precision)
+                    ),
                 )
                 .set("move-with-cells", move_with_cells.to_string())
                 .set("size-with-cells", size_with_cells.to_string());
@@ -484,18 +492,34 @@ fn render_image(
                 .set("from", from.cell.a1())
                 .set(
                     "from-offset",
-                    format!("{},{}", len(from.offset_x), len(from.offset_y)),
+                    format!(
+                        "{},{}",
+                        geometry(from.offset_x, options.precision),
+                        geometry(from.offset_y, options.precision)
+                    ),
                 )
-                .set("width", len(image.geometry.display_size.width))
-                .set("height", len(image.geometry.display_size.height));
+                .set(
+                    "width",
+                    geometry(image.geometry.display_size.width, options.precision),
+                )
+                .set(
+                    "height",
+                    geometry(image.geometry.display_size.height, options.precision),
+                );
         }
         Anchor::SheetAbsolute { pos } => {
             attrs
                 .set("anchor", "absolute")
-                .set("x", len(pos.x))
-                .set("y", len(pos.y))
-                .set("width", len(image.geometry.display_size.width))
-                .set("height", len(image.geometry.display_size.height));
+                .set("x", geometry(pos.x, options.precision))
+                .set("y", geometry(pos.y, options.precision))
+                .set(
+                    "width",
+                    geometry(image.geometry.display_size.width, options.precision),
+                )
+                .set(
+                    "height",
+                    geometry(image.geometry.display_size.height, options.precision),
+                );
         }
         other => {
             report.warn(Warning::ImageGeometryDegraded {
@@ -505,8 +529,14 @@ fn render_image(
             attrs
                 .set("anchor", "one-cell")
                 .set("from", "A1")
-                .set("width", len(image.geometry.display_size.width))
-                .set("height", len(image.geometry.display_size.height));
+                .set(
+                    "width",
+                    geometry(image.geometry.display_size.width, options.precision),
+                )
+                .set(
+                    "height",
+                    geometry(image.geometry.display_size.height, options.precision),
+                );
         }
     }
 

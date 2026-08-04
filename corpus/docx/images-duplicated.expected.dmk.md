@@ -46,4 +46,4 @@ El mismo mapa de bits tres veces con geometrias distintas.
 
 ![Mitad](assets/img-40e10599.png){#n4 height=45px name="Copia B" native-size=120x90 width=60px} {#n3}
 
-![Flotante](assets/img-40e10599.png){#n6 anchor=floating height=3.75cm name="Copia C" native-size=120x90 relative-to=margin relative-to-v=paragraph width=5cm wrap=square wrap-side=largest x=2cm y=0px z-index=251658240}Tercera aparicion, flotante. {#n5}
+![Flotante](assets/img-40e10599.png){#n6 anchor=floating height=3.75cm name="Copia C" native-size=120x90 relative-to=margin relative-to-v=paragraph width=5cm wrap=square wrap-side=largest x=2cm y=0 z-index=251658240}Tercera aparicion, flotante. {#n5}

@@ -81,6 +81,7 @@ fn convert(
         assets_dir: "assets".into(),
         source_format,
         raw: docsai_docmark::RawPolicy::Sidecar,
+        ..Options::default()
     };
     let (markdown, write_report) = docsai_docmark::serialize(&document, &assets, &options);
     report.merge(write_report);
@@ -415,6 +416,7 @@ fn serialize_parse_is_identity_on_docx_goldens() {
                 assets_dir: "assets".into(),
                 source_format: Format::Docx,
                 raw: docsai_docmark::RawPolicy::Sidecar,
+                ..Options::default()
             },
         );
         assert_eq!(

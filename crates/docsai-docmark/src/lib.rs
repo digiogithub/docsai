@@ -155,6 +155,10 @@ pub struct Options {
     /// Where raw-block bytes go (spec §7). Only `full` emits raw-blocks at
     /// all, so this is inert at the lossy levels.
     pub raw: RawPolicy,
+    /// Decimals a readable unit may use before a length falls back to `emu`
+    /// (spec §2). Raising it buys readable units for lengths that two decimals
+    /// cannot name exactly; it never rounds, so it never costs accuracy.
+    pub precision: u8,
 }
 
 impl Default for Options {
@@ -165,6 +169,7 @@ impl Default for Options {
             assets_dir: "assets".into(),
             source_format: Format::Docx,
             raw: RawPolicy::default(),
+            precision: docsai_model::units::DEFAULT_PRECISION,
         }
     }
 }
@@ -237,14 +242,7 @@ fn run(
     }
 
     let mut out = String::new();
-    frontmatter::write(
-        &mut out,
-        doc,
-        options.source_format,
-        options.fidelity,
-        ids.next_id(),
-        &dict,
-    );
+    frontmatter::write(&mut out, doc, options, ids.next_id(), &dict);
     out.push_str(&body);
     (out, report, ids.into_fragments())
 }

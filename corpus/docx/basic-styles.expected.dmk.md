@@ -50,4 +50,4 @@ styles:
 
 Visita [el sitio](https://example.com/docsai){.Hyperlink} para mas informacion.
 
-Parrafo centrado con sangria. {align=center indent-first-line=24px indent-left=48px space-after=6pt space-before=12pt}
+Parrafo centrado con sangria. {align=center indent-first-line=18pt indent-left=36pt space-after=6pt space-before=12pt}

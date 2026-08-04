@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 page:
   size: A4
-  margins: { top: 2cm, bottom: 2cm, left: 2cm, right: 2cm, header: 0px, footer: 0px }
+  margins: { top: 2cm, bottom: 2cm, left: 2cm, right: 2cm, header: 0, footer: 0 }
   orientation: portrait
 style-defaults:
   font: { name: "Liberation Serif", size: 12pt }
@@ -50,7 +50,7 @@ styles:
 
 Tabla con celdas combinadas:
 
-::: {#n1 .table col-widths="0px,0px,0px" header-row=false}
+::: {#n1 .table col-widths="0,0,0" header-row=false}
 |                |     |     |     |
 | -------------- | --- | --- | --- |
 | AB {colspan=2} |     |     | C   |

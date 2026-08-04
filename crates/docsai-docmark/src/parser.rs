@@ -2140,6 +2140,7 @@ mod tests {
                 assets_dir: "assets".into(),
                 source_format: docsai_model::Format::Docx,
                 raw: crate::RawPolicy::Sidecar,
+                ..crate::Options::default()
             },
         );
         assert_eq!(out, md, "serialize(parse(md)) must equal md");
@@ -2164,6 +2165,7 @@ mod tests {
                 assets_dir: "assets".into(),
                 source_format: docsai_model::Format::Docx,
                 raw: crate::RawPolicy::Sidecar,
+                ..crate::Options::default()
             },
         );
         assert_eq!(out, md, "{name}: serialize(parse(md)) must equal md");

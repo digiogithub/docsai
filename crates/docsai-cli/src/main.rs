@@ -69,6 +69,11 @@ enum Command {
         /// Raw-block bytes: `sidecar` (a file per fragment) or `inline`.
         #[arg(long, default_value = "sidecar", value_name = "MODE")]
         raw: String,
+        /// Decimals a readable unit may use before a length falls back to EMU
+        /// (DocMark spec §2). Never rounds: this buys readable units, not
+        /// accuracy.
+        #[arg(long, default_value_t = docsai_model::units::DEFAULT_PRECISION, value_name = "N")]
+        precision: u8,
         /// Where to extract media. Defaults to `assets/` next to the output.
         #[arg(long, value_name = "DIR")]
         assets_dir: Option<PathBuf>,
@@ -288,6 +293,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             fidelity,
             ids,
             raw,
+            precision,
             assets_dir,
             style_map,
             max_cells,
@@ -302,6 +308,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             fidelity,
             ids.as_deref(),
             raw,
+            *precision,
             assets_dir.clone(),
             style_map.as_ref(),
             *max_cells,
@@ -560,6 +567,7 @@ fn run_convert(
     fidelity: &str,
     ids: Option<&str>,
     raw: &str,
+    precision: u8,
     assets_dir: Option<PathBuf>,
     style_map: Option<&PathBuf>,
     max_cells: Option<u64>,
@@ -587,6 +595,7 @@ fn run_convert(
         fidelity,
         ids,
         raw,
+        precision,
         assets_dir,
         target,
         use_loffice,

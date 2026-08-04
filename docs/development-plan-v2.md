@@ -119,6 +119,14 @@ Acceptance criteria:
       pays over `plain`. The writeback half is enforced as its two preconditions — the
       projection addresses exactly what `full` addresses, and loses no content — since applying
       an edit node by node is Phase 17.
+- [x] Readable units (11-E), with one correction to the task as stated: the **tolerance turned
+      out to be unnecessary**. Choosing the unit by what a length measures (pt for layout, px for
+      drawings) and making the precision configurable covers the readability goal *losslessly*,
+      because a unit is used only when it names the length exactly and `emu` remains the escape
+      hatch. Round-trip comparison therefore stays byte equality rather than a tolerance, and the
+      tolerance is documented as **zero** and tested over every Word twip value. Accepting a
+      tolerance would have bought nothing and cost the round-trip identity the whole project
+      rests on.
 - [ ] `read --select` output re-parses standalone, and re-writing it produces no warnings other
       than the documented "partial document" one.
 - [x] Delta emission does not change any golden's semantics: the 12 goldens that moved lost only

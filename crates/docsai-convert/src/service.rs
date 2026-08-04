@@ -121,6 +121,7 @@ fn convert_to_markdown_inline(
         // The caller gets bytes, not a directory: a `src=` would point at
         // nothing, so an inline result carries its raw-blocks with it.
         raw: docsai_docmark::RawPolicy::Inline,
+        precision: options.precision,
     };
     let (markdown, write_report) = docsai_docmark::serialize(&document, &store, &docmark_options);
     report.merge(write_report);
@@ -153,6 +154,7 @@ fn convert_to_markdown_files(
         assets_dir: "assets".into(),
         source_format,
         raw: options.raw,
+        precision: options.precision,
     };
     let (markdown, write_report) = docsai_docmark::serialize(&document, &store, &docmark_options);
     report.merge(write_report);

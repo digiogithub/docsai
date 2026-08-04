@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Readable units** (plan v2 Phase 11, DocMark spec §2): a length is now written in the unit of
+  **what it measures** rather than in whichever unit happened to divide it exactly — points for
+  layout and typography (indents, margins, column widths, list levels), pixels for drawings and
+  bitmaps. An indent of 720 twips reads `36pt` instead of `48px`, and zero carries no unit at all
+  (`0`, not `0px`).
+- `docsai convert --precision N` (default 2): how many decimals a readable unit may use before a
+  length falls back to `emu`. It buys readable units, never rounding — `1.251cm` is written
+  `450360emu` at precision 2 and `1.251cm` at precision 3, never rounded to `1.25cm`. The
+  round-trip tolerance for a length therefore stays **zero** at every precision, which
+  `crates/docsai-docmark/tests/readable_units.rs` checks over every Word twip value.
+- `docsai_model::units::LengthStyle` and `Length::render(style, precision)`, the one place the
+  rule lives. `Display` keeps the geometric rendering for logs and messages.
 - **Attribute-set dictionary** (plan v2 Phase 11, DocMark spec §3.7): a pattern of attributes
   that repeats at least three times and is at least twelve characters long is written once in the
   front matter under `attribute-sets:` and referenced by class in the body (`{.g1}`). The reader

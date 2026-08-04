@@ -9,11 +9,11 @@ use docsai_model::sheet::Workbook;
 use docsai_model::style::{DocDefaults, FontProps, ParaProps, Style, StyleCatalog, Underline};
 use docsai_model::text::{DocumentMeta, PageGeometry};
 use docsai_model::units::Length;
-use docsai_model::{Document, Format, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED};
+use docsai_model::{Document, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED};
 
 use crate::dict::AttrDict;
 use crate::units::{len, pt};
-use crate::Fidelity;
+use crate::{Fidelity, Options};
 
 /// Writes the front matter block, delimiters included, ending in a blank line.
 ///
@@ -24,11 +24,11 @@ use crate::Fidelity;
 pub fn write(
     out: &mut String,
     doc: &Document,
-    source: Format,
-    fidelity: Fidelity,
+    options: &Options,
     next_id: Option<u64>,
     dict: &AttrDict,
 ) {
+    let fidelity = options.fidelity;
     if fidelity == Fidelity::Plain {
         return; // plain output is CommonMark only (spec §6)
     }
@@ -39,7 +39,7 @@ pub fn write(
         None => DOCMARK_VERSION,
     };
     scalar(out, "docmark", &quoted(version));
-    scalar(out, "source-format", source.as_str());
+    scalar(out, "source-format", options.source_format.as_str());
     if fidelity == Fidelity::Agent {
         // A projection says so: whoever reads this must know the document it
         // came from carries more, and that writing this back whole would lose
@@ -55,18 +55,18 @@ pub fn write(
         Document::Text(text) => {
             if let Some(section) = text.sections.first() {
                 if fidelity.formatting() {
-                    write_page(out, &section.page);
+                    write_page(out, &section.page, options.precision);
                 }
             }
             if fidelity == Fidelity::Full {
-                write_styles(out, &text.styles);
-                write_lists(out, &text.list_defs);
+                write_styles(out, &text.styles, options.precision);
+                write_lists(out, &text.list_defs, options.precision);
             }
         }
         Document::Workbook(book) => {
             write_workbook(out, book);
             if fidelity == Fidelity::Full {
-                write_styles(out, &book.styles);
+                write_styles(out, &book.styles, options.precision);
             }
         }
     }
@@ -120,7 +120,7 @@ fn write_meta(out: &mut String, meta: &DocumentMeta) {
     }
 }
 
-fn write_page(out: &mut String, page: &PageGeometry) {
+fn write_page(out: &mut String, page: &PageGeometry, precision: u8) {
     if page.size.width.is_zero() && page.size.height.is_zero() {
         return;
     }
@@ -129,19 +129,19 @@ fn write_page(out: &mut String, page: &PageGeometry) {
         Some(name) => out.push_str(&format!("  size: {name}\n")),
         None => out.push_str(&format!(
             "  size: {{ width: {}, height: {} }}\n",
-            len(page.size.width),
-            len(page.size.height)
+            len(page.size.width, precision),
+            len(page.size.height, precision)
         )),
     }
     let m = &page.margins;
     out.push_str(&format!(
         "  margins: {{ top: {}, bottom: {}, left: {}, right: {}, header: {}, footer: {} }}\n",
-        len(m.top),
-        len(m.bottom),
-        len(m.left),
-        len(m.right),
-        len(m.header),
-        len(m.footer)
+        len(m.top, precision),
+        len(m.bottom, precision),
+        len(m.left, precision),
+        len(m.right, precision),
+        len(m.header, precision),
+        len(m.footer, precision)
     ));
     out.push_str(&format!("  orientation: {}\n", page.orientation.as_str()));
     if page.columns > 1 {
@@ -172,30 +172,30 @@ fn write_workbook(out: &mut String, book: &Workbook) {
     }
 }
 
-fn write_styles(out: &mut String, catalog: &StyleCatalog) {
+fn write_styles(out: &mut String, catalog: &StyleCatalog, precision: u8) {
     if !catalog.defaults.is_empty() {
-        write_defaults(out, &catalog.defaults);
+        write_defaults(out, &catalog.defaults, precision);
     }
     if catalog.styles.is_empty() {
         return;
     }
     out.push_str("styles:\n");
     for style in catalog.styles.values() {
-        write_style(out, style, catalog);
+        write_style(out, style, catalog, precision);
     }
 }
 
-fn write_defaults(out: &mut String, defaults: &DocDefaults) {
+fn write_defaults(out: &mut String, defaults: &DocDefaults, precision: u8) {
     out.push_str("style-defaults:\n");
     if let Some(font) = font_flow(&defaults.font) {
         out.push_str(&format!("  font: {font}\n"));
     }
-    if let Some(para) = para_flow(&defaults.paragraph) {
+    if let Some(para) = para_flow(&defaults.paragraph, precision) {
         out.push_str(&format!("  paragraph: {para}\n"));
     }
 }
 
-fn write_style(out: &mut String, style: &Style, catalog: &StyleCatalog) {
+fn write_style(out: &mut String, style: &Style, catalog: &StyleCatalog, precision: u8) {
     out.push_str(&format!("  {}:\n", yaml_key(style.id.as_str())));
     out.push_str(&format!("    type: {}\n", style.style_type.as_str()));
     if style.name != style.id.as_str() {
@@ -219,7 +219,7 @@ fn write_style(out: &mut String, style: &Style, catalog: &StyleCatalog) {
     if let Some(font) = font_flow(&style.font.minus(&inherited.font)) {
         out.push_str(&format!("    font: {font}\n"));
     }
-    if let Some(para) = para_flow(&style.paragraph.minus(&inherited.paragraph)) {
+    if let Some(para) = para_flow(&style.paragraph.minus(&inherited.paragraph), precision) {
         out.push_str(&format!("    paragraph: {para}\n"));
     }
 }
@@ -264,15 +264,20 @@ pub fn font_flow(font: &FontProps) -> Option<String> {
 }
 
 /// A `ParaProps` as a YAML flow mapping, or `None` when it carries nothing.
-pub fn para_flow(para: &ParaProps) -> Option<String> {
+pub fn para_flow(para: &ParaProps, precision: u8) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(align) = para.align {
         parts.push(format!("align: {}", align.as_str()));
     }
-    push_len(&mut parts, "indent-left", para.indent_left);
-    push_len(&mut parts, "indent-right", para.indent_right);
-    push_len(&mut parts, "indent-first-line", para.indent_first_line);
-    push_len(&mut parts, "indent-hanging", para.indent_hanging);
+    push_len(&mut parts, "indent-left", para.indent_left, precision);
+    push_len(&mut parts, "indent-right", para.indent_right, precision);
+    push_len(
+        &mut parts,
+        "indent-first-line",
+        para.indent_first_line,
+        precision,
+    );
+    push_len(&mut parts, "indent-hanging", para.indent_hanging, precision);
     if let Some(value) = para.space_before {
         parts.push(format!("space-before: {}", pt(value)));
     }
@@ -302,7 +307,7 @@ fn line_height(value: docsai_model::style::LineHeight) -> String {
     }
 }
 
-fn write_lists(out: &mut String, catalog: &ListCatalog) {
+fn write_lists(out: &mut String, catalog: &ListCatalog, precision: u8) {
     if catalog.is_empty() {
         return;
     }
@@ -317,8 +322,8 @@ fn write_lists(out: &mut String, catalog: &ListCatalog) {
             if let Some(start) = level.start {
                 parts.push(format!("start: {start}"));
             }
-            push_len(&mut parts, "indent", level.indent);
-            push_len(&mut parts, "hanging", level.hanging);
+            push_len(&mut parts, "indent", level.indent, precision);
+            push_len(&mut parts, "hanging", level.hanging, precision);
             out.push_str(&format!("      - {{ {} }}\n", parts.join(", ")));
         }
     }
@@ -351,9 +356,9 @@ fn push_flag(parts: &mut Vec<String>, key: &str, value: Option<bool>) {
     }
 }
 
-fn push_len(parts: &mut Vec<String>, key: &str, value: Option<Length>) {
+fn push_len(parts: &mut Vec<String>, key: &str, value: Option<Length>, precision: u8) {
     if let Some(value) = value {
-        parts.push(format!("{key}: {}", len(value)));
+        parts.push(format!("{key}: {}", len(value, precision)));
     }
 }
 
@@ -410,14 +415,7 @@ mod tests {
 
     fn render(doc: &Document) -> String {
         let mut out = String::new();
-        write(
-            &mut out,
-            doc,
-            Format::Docx,
-            Fidelity::Full,
-            None,
-            &AttrDict::off(),
-        );
+        write(&mut out, doc, &Options::default(), None, &AttrDict::off());
         out
     }
 
@@ -510,8 +508,10 @@ mod tests {
         write(
             &mut out,
             &doc,
-            Format::Docx,
-            Fidelity::Plain,
+            &Options {
+                fidelity: Fidelity::Plain,
+                ..Options::default()
+            },
             None,
             &AttrDict::off(),
         );
@@ -530,8 +530,10 @@ mod tests {
         write(
             &mut out,
             &doc,
-            Format::Docx,
-            Fidelity::Standard,
+            &Options {
+                fidelity: Fidelity::Standard,
+                ..Options::default()
+            },
             None,
             &AttrDict::off(),
         );

@@ -39,7 +39,7 @@ styles:
     name: "Table Grid"
 attribute-sets:
   g1: "color=#1F4E79 font=Consolas size=12pt"
-  g2: "indent-left=48px space-after=6pt space-before=6pt"
+  g2: "indent-left=36pt space-after=6pt space-before=6pt"
 ---
 
 [convert]{.g1} transforma un documento al formato pivote.
