@@ -98,11 +98,14 @@ fn every_corpus_document_selects_into_a_document() {
             continue; // nothing addressable; `outline` shows nothing either
         }
         let (again, warnings) = rewrite_with_assets(&selection.docmark, &path);
+        // `ETAGS_MOVE_ON_REPARSE` is written with `/`, so the separator has to
+        // be the same one on every host: on Windows this name arrives with
+        // backslashes, misses the list, and the exception reads as a failure.
         let name = path
             .strip_prefix(corpus(""))
             .unwrap_or(&path)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         assert_eq!(
             body_of(&again),
             body_of(&selection.docmark),
