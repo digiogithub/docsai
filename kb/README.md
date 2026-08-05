@@ -40,6 +40,7 @@ Practical difference between the two folders:
 | [24 — Phase 11 E](24-phase-11-readable-units.md) | Units chosen by what a length measures, `--precision`, and the tolerance that turned out to be zero |
 | [25 — Phase 11 F](25-phase-11-read-select.md) | `read --select`: a selection that stands on its own, the minimum front matter, and where the etag finally gets written |
 | [26 — jj, not git](26-jj-vcs.md) | This repository is driven by Jujutsu; what git misreports, what `git commit` left behind, and the command map |
+| [27 — Phase 11 G](27-phase-11-search.md) | `docsai search`: why the unit is the block and not the addressed node, and the relative address prose gets |
 
 ## Status in one line
 
@@ -58,7 +59,9 @@ and `docsai outline` measured with a vendored BPE tokenizer, and the corpus toke
 `--fidelity agent` projects a document down to what a program can edit (11-B); no attribute
 the inheritance chain already implies is written (11-C), and a pattern that repeats anyway is
 written once in the front matter and referenced by class (11-D), and a length is written in the
-unit of what it measures, exactly (11-E). Next is `docsai read --select` (11-F).
+unit of what it measures, exactly (11-E). `docsai read --select` hands over part of a document as
+self-contained DocMark (11-F), and `docsai search` says where a document says something without
+handing over the document (11-G). Next is 11-H: the three primitives over MCP.
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives

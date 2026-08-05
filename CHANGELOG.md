@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docsai search <in> <query>`** (plan v2 Phase 11): where a document says something, with an
+  address and the words around each match — never the document. The query is a case-insensitive
+  literal; `--context N` (default 48) sets the characters quoted either side of a match,
+  `--limit N` (default 20) how many blocks are listed, and the rest are counted rather than
+  dropped. The unit is the DocMark **block**, not the addressed node, because ordinary prose
+  carries no id (spec §11.1): a block with an id is reported at it together with the selector
+  that reads it back, and a block without one is reported relative to the last id before it
+  (`n12.b2`). A footnote is reported at the block that refers to it, since it cannot be selected
+  on its own. Searching a 9 000-token report for a phrase that appears 35 times costs 386 tokens
+  (4.2 %). A relative hit deliberately names **no** selector: `read --select` has no `.bN` term
+  yet, and an address that would read something else is worse than none.
 - **`docsai read <in> --select <selector>`** (plan v2 Phase 11, DocMark spec §2.1): part of a
   document as valid, self-contained DocMark. Selector terms are `s4` and `s7-s9` (positions in
   the order `docsai outline` prints, 1-based, inclusive), `#n7`, `type:heading` and `text:foo`;

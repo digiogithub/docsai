@@ -111,6 +111,8 @@ docsai outline report.docx                         # map of addressable nodes + 
 docsai outline report.docx --depth 1 --json        # top level only, machine-readable
 docsai read report.docx --select s7-s9             # just those nodes, as DocMark
 docsai read report.docx --select '#n7,text:riesgo' # by id, or by what it says
+docsai search report.docx "riesgo"                 # where it says that, with context
+docsai search report.docx "riesgo" --json --limit 5 # machine-readable, capped
 docsai tokens report.docx                          # what the document costs an LLM
 docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary
@@ -199,6 +201,33 @@ etags:
 
 ### Conclusion de alcance del proyecto {#n3}
 ```
+
+Finding text (`docsai search <in> <query>`): the answer to *where does it say
+that*, without paying for the document. Matching is a case-insensitive literal
+over the text a conversion would write, and the unit is the DocMark **block**,
+not the addressed node — ordinary prose paragraphs carry no id (spec §11.1:
+"reached by relative path"), and a search that only looked at addressed nodes
+would find headings and nothing else. A block that carries an id is reported at
+it, with the selector that reads it back; one that does not is reported relative
+to the last id before it (`n12.b2`). `--context N` sets how many characters
+either side of a match are quoted, `--limit N` how many blocks are listed — the
+rest are **counted, not dropped**.
+
+```text
+$ docsai search report.docx "rendimiento medido" --limit 2
+s12 #n12 heading 14 tokens ×1
+  …## \6. Estado de «rendimiento medido»…
+n12.b1 text 81 tokens ×4
+  …El equipo revisa «rendimiento medido» en cada iteracion y deja constancia…
+… 9 more block(s) not listed (--limit)
+35 match(es) in 11 block(s) · hits 386 tokens · document 9083 tokens (4.2 %)
+```
+
+A hit that names a selector composes with the previous command —
+`docsai read --select '#n12'` returns exactly what the hit pointed at. A
+relative hit names no selector, because `read --select` has no `.bN` term yet:
+saying so is the point, rather than handing back an address that would read
+something else.
 
 Token budget (`docsai tokens`): the cost of the document is **measured** with a
 real BPE tokenizer (`o200k_base`, embedded — no network, no Python), never

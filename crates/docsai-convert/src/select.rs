@@ -336,7 +336,7 @@ pub fn select_path(
 /// it — so document order is recovered the way [`crate::outline`] rebuilds the
 /// tree: walking a range backwards, the last fragment is the outermost node,
 /// and its `descendants` say how many before it are its own.
-fn document_order(fragments: &[NodeFragment]) -> Vec<usize> {
+pub(crate) fn document_order(fragments: &[NodeFragment]) -> Vec<usize> {
     let mut order = Vec::with_capacity(fragments.len());
     walk(fragments, 0, fragments.len(), &mut order);
     order

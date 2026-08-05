@@ -11,6 +11,7 @@ pub mod inspect;
 pub mod loffice;
 pub mod outline;
 mod pipeline;
+pub mod search;
 pub mod select;
 pub mod service;
 pub mod style_map;
@@ -27,6 +28,7 @@ pub use pipeline::{
     read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
     Outcome, RoundtripOutcome,
 };
+pub use search::{search, search_path, Hit, Location, Query, QueryError, SearchResults, Snippet};
 pub use select::{select, select_path, SelectedNode, Selection, Selector, SelectorError};
 pub use service::{
     convert_from_markdown, convert_to_markdown, inspect_bytes, inspect_input, mime_type_for,

@@ -149,6 +149,32 @@ enum Command {
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
+    /// Find text in a document: node ids plus the words around each match.
+    ///
+    /// The answer to "where does it say that", without paying for the
+    /// document. Every hit carries the selector that reads it, so the next
+    /// call is `docsai read --select <that>`.
+    Search {
+        /// Input document.
+        input: PathBuf,
+        /// What to look for: a literal, matched case-insensitively.
+        query: String,
+        /// Characters of context kept either side of a match.
+        #[arg(long, default_value_t = 48, value_name = "N")]
+        context: usize,
+        /// Hits to list; the rest are counted. `0` lists all of them.
+        #[arg(long, default_value_t = 20, value_name = "N")]
+        limit: usize,
+        /// How much of the source survives: full, agent, standard or plain.
+        #[arg(long, default_value = "full")]
+        fidelity: String,
+        /// Print the hits as JSON on stdout.
+        #[arg(long)]
+        json: bool,
+        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        #[arg(long, default_value = "auto", value_name = "MODE")]
+        use_loffice: String,
+    },
     /// Measure what a document costs an LLM, per document and per node.
     ///
     /// Counted with a real BPE tokenizer (`o200k_base`) over the DocMark that
@@ -270,6 +296,15 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             *json,
             use_loffice,
         ),
+        Command::Search {
+            input,
+            query,
+            context,
+            limit,
+            fidelity,
+            json,
+            use_loffice,
+        } => run_search(input, query, *context, *limit, fidelity, *json, use_loffice),
         Command::Roundtrip {
             input,
             output,
@@ -513,6 +548,53 @@ fn run_read(
         }
         _ => print!("{}", selection.docmark),
     }
+    Ok(EXIT_OK)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_search(
+    input: &Path,
+    query: &str,
+    context: usize,
+    limit: usize,
+    fidelity: &str,
+    json: bool,
+    use_loffice: &str,
+) -> anyhow::Result<u8> {
+    // Every level is allowed, unlike `read --select`: a level that writes no id
+    // still writes text, and saying where the text is — relative to nothing,
+    // if that is what the level left — beats pretending the document is empty.
+    let fidelity = parse_fidelity(fidelity)?;
+    let mut query: docsai_convert::Query = query.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
+    query.context = context;
+    query.limit = (limit > 0).then_some(limit);
+    let options = ConvertOptions {
+        fidelity,
+        use_loffice: parse_use_loffice(use_loffice)?,
+        ..Default::default()
+    };
+    let results = docsai_convert::search_path(input, &options, &query)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+        return Ok(EXIT_OK);
+    }
+    if results.is_empty() {
+        println!("`{}` appears nowhere in {}", results.query, input.display());
+        return Ok(EXIT_OK);
+    }
+    print!("{}", results.render_text());
+    if results.omitted > 0 {
+        println!("… {} more block(s) not listed (--limit)", results.omitted);
+    }
+    println!(
+        "{} match(es) in {} block(s) · hits {} tokens · document {} tokens ({:.1} %)",
+        results.matches,
+        results.blocks,
+        results.tokens,
+        results.document_tokens,
+        share(results.tokens, results.document_tokens)
+    );
     Ok(EXIT_OK)
 }
 

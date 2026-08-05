@@ -153,7 +153,7 @@ fn report_from(
 }
 
 /// Offset of the first byte after the front matter, or 0 when there is none.
-fn front_matter_end(markdown: &str) -> usize {
+pub(crate) fn front_matter_end(markdown: &str) -> usize {
     let Some(rest) = markdown.strip_prefix("---\n") else {
         return 0;
     };
