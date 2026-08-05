@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod images;
 mod input;
 mod server;
 mod tools;
@@ -16,14 +17,24 @@ mod tools;
 pub use config::{
     McpConfig, DEFAULT_MAX_INPUT_BYTES, DEFAULT_TIMEOUT_SECS, ENV_MAX_INPUT_BYTES, ENV_TIMEOUT_SECS,
 };
+pub use images::ImagePolicy;
 pub use server::DocsaiServer;
 
 /// Names of the tools the server exposes (architecture §6).
+///
+/// The last three are the Phase 11 agent-native primitives, and they are what
+/// an agent should reach for first: `outline_document` says what is in a
+/// document, `search_document` says where it says something, and
+/// `read_selection` hands over just that part. `convert_to_markdown` remains
+/// the tool that reads a whole document — the expensive one.
 pub const TOOLS: &[&str] = &[
     "convert_to_markdown",
     "convert_from_markdown",
     "inspect_document",
     "list_supported_formats",
+    "outline_document",
+    "search_document",
+    "read_selection",
 ];
 
 /// Runs the MCP server on stdio until the client disconnects.
@@ -95,11 +106,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_v1_tool_set_is_four_tools() {
-        assert_eq!(TOOLS.len(), 4);
-        assert!(TOOLS.contains(&"convert_to_markdown"));
-        assert!(TOOLS.contains(&"convert_from_markdown"));
-        assert!(TOOLS.contains(&"inspect_document"));
-        assert!(TOOLS.contains(&"list_supported_formats"));
+    fn the_tool_set_is_the_four_converters_plus_the_three_primitives() {
+        assert_eq!(TOOLS.len(), 7);
+        for expected in [
+            "convert_to_markdown",
+            "convert_from_markdown",
+            "inspect_document",
+            "list_supported_formats",
+            "outline_document",
+            "search_document",
+            "read_selection",
+        ] {
+            assert!(TOOLS.contains(&expected), "missing {expected}");
+        }
     }
 }

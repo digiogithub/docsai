@@ -225,14 +225,17 @@ docsai mcp                           # MCP server over stdio
 
 Based on `rmcp` (official SDK), **stdio** transport. Logs to stderr exclusively.
 
-Tools exposed (v1):
+Tools exposed:
 
 | Tool | Input | Output |
 |---|---|---|
-| `convert_to_markdown` | `path` (or `content_base64` + `filename`), `fidelity`, `assets` = `inline-base64`\|`files` | DocMark (text), assets, `report` |
+| `convert_to_markdown` | `path` (or `content_base64` + `filename`), `fidelity`, `assets` = `inline-base64`\|`files`, `include_images` | DocMark (text), image payloads, `report` |
 | `convert_from_markdown` | `markdown`, `target_format`, optional assets | base64 file or written `path`, `report` |
 | `inspect_document` | `path`/`content_base64` | structure JSON (same shape as `inspect --json`) |
 | `list_supported_formats` | — | support matrix with status per direction |
+| `outline_document` | `path`/`content_base64`, `depth`, `fidelity` | tree of addressable nodes with id, kind, preview, token cost (same shape as `outline --json`) |
+| `search_document` | `path`/`content_base64`, `query`, `context`, `limit`, `fidelity` | hits: an address, a selector when there is one, and the words around each match |
+| `read_selection` | `path`/`content_base64`, `select`, `fidelity` | self-contained DocMark for those nodes, with etags (same shape as `read --select --json`) |
 
 Decisions:
 - Dual **path/base64** mode: local MCP clients (Claude Desktop/Code) pass paths; remote
@@ -240,6 +243,14 @@ Decisions:
 - Large responses: DocMark as `text content`; binaries as base64 resource with correct MIME.
 - The server is stateless; each tool call is an independent conversion (no persistent temp
   files unless the client asks for `assets=files`).
+- The **last three tools are the intended path** (plan v2 Phase 11): map, find, read the part.
+  `convert_to_markdown` returns the whole document and is the expensive one; the server says
+  so in its `instructions`, which is the only place an agent reads before choosing a tool.
+- `include_images` = `none|refs|thumbnails|full`, default **`refs`**. It changes the
+  *payload*, never the markdown: the body keeps its `assets/…` links at every rung, so no
+  rung is a lossy conversion and a client can come back for `full` later. Every rung reports
+  `image_count` and `image_bytes`, because "no images in the response" and "no images in the
+  document" must not look alike.
 
 ## 7. Cross-platform and distribution
 

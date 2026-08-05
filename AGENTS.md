@@ -147,8 +147,8 @@ serialize **and parse** for text and workbooks (`docsai-docmark`), ODT/ODS
 readers **and writers** (`docsai-odf`), orchestration (`docsai-convert`, including
 optional LibreOffice headless for `.doc`, plus `inspect`, batch, style-map, and
 in-memory MCP helpers), the CLI with `convert`, `inspect`, `formats`, `roundtrip`
-and `mcp`, and the MCP stdio server (`docsai-mcp` / `rmcp`) with the four tools
-from architecture §6. The DOCX writer covers floating DrawingML, image transforms,
+and `mcp`, and the MCP stdio server (`docsai-mcp` / `rmcp`) with the tools from
+architecture §6 (four converters plus the three Phase 11 addressing primitives). The DOCX writer covers floating DrawingML, image transforms,
 and full footnote bodies; the full docx corpus round-trips with DocMark identity.
 ODF packages use the same IR with automatic-style de-automatization and OpenFormula
 preserved. Phase 6 also adds stdin/stdout pipelines, `--out-dir` batch conversion,

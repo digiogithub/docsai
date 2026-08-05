@@ -3,7 +3,9 @@
 ## Status
 
 **Core path implemented.** `docsai mcp` starts an MCP server (official `rmcp` SDK,
-stdio transport) exposing the four tools from `architecture.md` §6.
+stdio transport) exposing the four tools from `architecture.md` §6. Plan v2 Phase 11 added
+three more — `outline_document`, `search_document`, `read_selection` — and changed the image
+default of `convert_to_markdown`; see [28-phase-11-mcp.md](28-phase-11-mcp.md).
 
 ## Delivered
 

@@ -53,12 +53,80 @@ pub struct ConvertToMarkdownArgs {
     /// Fidelity: `full` (default), `agent`, `standard`, or `plain`.
     #[serde(default)]
     pub fidelity: Option<String>,
-    /// Asset delivery: `inline-base64` (default) or `files`.
+    /// Asset delivery: `inline-base64` or `files` (writes media under `assets_dir`).
     #[serde(default)]
     pub assets: Option<String>,
     /// Directory for `assets=files` (required with base64 input).
     #[serde(default)]
     pub assets_dir: Option<String>,
+    /// Image payload: `none`, `refs` (default), `thumbnails`, or `full`.
+    /// The markdown always keeps its `![](assets/…)` links whichever is chosen.
+    #[serde(default)]
+    pub include_images: Option<String>,
+}
+
+/// Arguments for `outline_document`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct OutlineDocumentArgs {
+    /// Filesystem path to the source document.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Base64-encoded document bytes.
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    /// File name hint required with `content_base64`.
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Levels of the tree to return; all of them when omitted.
+    #[serde(default)]
+    pub depth: Option<usize>,
+    /// Fidelity: `full` (default) or `agent`; the lossy levels address nothing.
+    #[serde(default)]
+    pub fidelity: Option<String>,
+}
+
+/// Arguments for `read_selection`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReadSelectionArgs {
+    /// Filesystem path to the source document.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Base64-encoded document bytes.
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    /// File name hint required with `content_base64`.
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Selector: `s4`, `s7-s9`, `#n7`, `type:heading`, `text:foo`, comma-separated.
+    pub select: String,
+    /// Fidelity: `full` (default) or `agent`.
+    #[serde(default)]
+    pub fidelity: Option<String>,
+}
+
+/// Arguments for `search_document`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SearchDocumentArgs {
+    /// Filesystem path to the source document.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Base64-encoded document bytes.
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    /// File name hint required with `content_base64`.
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Case-insensitive literal to look for.
+    pub query: String,
+    /// Characters quoted either side of a match (default 48).
+    #[serde(default)]
+    pub context: Option<usize>,
+    /// Blocks listed before the rest are only counted (default 20).
+    #[serde(default)]
+    pub limit: Option<usize>,
+    /// Fidelity: any level; text is findable even where ids are not.
+    #[serde(default)]
+    pub fidelity: Option<String>,
 }
 
 /// Arguments for `convert_from_markdown`.
@@ -94,7 +162,7 @@ pub struct InspectDocumentArgs {
 impl DocsaiServer {
     #[tool(
         name = "convert_to_markdown",
-        description = "Convert an Office/LibreOffice document to DocMark (extended Markdown). Accepts a filesystem path or base64 content. Returns markdown, assets, and a conversion report."
+        description = "Convert a whole Office/LibreOffice document to DocMark (extended Markdown). Accepts a filesystem path or base64 content. Returns markdown, image payloads per include_images (default `refs`: names and sizes, no bytes), and a conversion report. For a large document prefer outline_document + read_selection."
     )]
     async fn convert_to_markdown(
         &self,
@@ -109,6 +177,7 @@ impl DocsaiServer {
                 args.fidelity.as_deref(),
                 args.assets.as_deref(),
                 args.assets_dir.as_deref(),
+                args.include_images.as_deref(),
                 &config,
             )
         })
@@ -163,6 +232,74 @@ impl DocsaiServer {
     async fn list_supported_formats(&self) -> Result<CallToolResult, McpError> {
         Ok(json_result(tools::tool_list_supported_formats()))
     }
+
+    #[tool(
+        name = "outline_document",
+        description = "Map a document without reading it: the tree of addressable nodes with stable id, kind, a short preview and the token cost of each, plus what the whole document would cost. Costs a few percent of the document. Start here, then read_selection or search_document."
+    )]
+    async fn outline_document(
+        &self,
+        Parameters(args): Parameters<OutlineDocumentArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_tool(move || {
+            tools::tool_outline_document(
+                args.path.as_deref(),
+                args.content_base64.as_deref(),
+                args.filename.as_deref(),
+                args.fidelity.as_deref(),
+                args.depth,
+                &config,
+            )
+        })
+        .await
+    }
+
+    #[tool(
+        name = "search_document",
+        description = "Find where a document says something, without returning the document. Case-insensitive literal; each hit gives an address and the words around the match. A hit on an addressed block also names the selector that reads it back with read_selection; a hit on ordinary prose gives a relative address (`n12.b2`) and no selector."
+    )]
+    async fn search_document(
+        &self,
+        Parameters(args): Parameters<SearchDocumentArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_tool(move || {
+            tools::tool_search_document(
+                args.path.as_deref(),
+                args.content_base64.as_deref(),
+                args.filename.as_deref(),
+                &args.query,
+                args.context,
+                args.limit,
+                args.fidelity.as_deref(),
+                &config,
+            )
+        })
+        .await
+    }
+
+    #[tool(
+        name = "read_selection",
+        description = "Read part of a document as valid self-contained DocMark: the exact bytes the whole document would write for those nodes, plus the minimum front matter to parse and write it back (next-id, partial: true, and an etag per node for an if-match write). Selector terms: s4, s7-s9, #n7, type:heading, text:foo."
+    )]
+    async fn read_selection(
+        &self,
+        Parameters(args): Parameters<ReadSelectionArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_tool(move || {
+            tools::tool_read_selection(
+                args.path.as_deref(),
+                args.content_base64.as_deref(),
+                args.filename.as_deref(),
+                &args.select,
+                args.fidelity.as_deref(),
+                &config,
+            )
+        })
+        .await
+    }
 }
 
 impl DocsaiServer {
@@ -204,10 +341,17 @@ impl ServerHandler for DocsaiServer {
             .with_server_info(Implementation::new("docsai", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Bidirectional converter between Office/LibreOffice documents and DocMark. \
-                 Tools: convert_to_markdown, convert_from_markdown, inspect_document, \
-                 list_supported_formats. Prefer path mode on local machines; use \
-                 content_base64 + filename when the client cannot share a filesystem path. \
-                 Logs always go to stderr; stdout is reserved for MCP JSON-RPC.",
+                 On a document of any size, work through the addressing primitives rather \
+                 than reading it whole: outline_document to see what is in it, \
+                 search_document to find where it says something, read_selection to get \
+                 just that part back as self-contained DocMark you can edit and write with \
+                 convert_from_markdown. convert_to_markdown returns the whole document and \
+                 is the expensive path; its images now default to include_images=refs \
+                 (names and sizes, no bytes) — ask for thumbnails or full when you need to \
+                 see them. Also: inspect_document, list_supported_formats. Prefer path mode \
+                 on local machines; use content_base64 + filename when the client cannot \
+                 share a filesystem path. Logs always go to stderr; stdout is reserved for \
+                 MCP JSON-RPC.",
             )
     }
 }

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The three addressing primitives over MCP** (plan v2 Phase 11, closing the phase):
+  `outline_document`, `search_document` and `read_selection`, the same answers as
+  `docsai outline`, `docsai search` and `docsai read --select`, over a filesystem `path` or
+  `content_base64` + `filename` like every other tool. They are the intended path for a
+  document of any size — map it, find where it says the thing, read back that part as
+  self-contained DocMark with an etag per node — and the server's `instructions` now say so,
+  since that is the only text an agent reads before choosing a tool. `convert_to_markdown`
+  stays what it was: the whole document, the expensive one. On the 9 000-token report the
+  three cost 3.8 %, 4.2 % and 0.3 % of reading it.
+- **`include_images=none|refs|thumbnails|full`** on MCP `convert_to_markdown`, default
+  **`refs`** (see *Changed*). `none` sends no image payload, `refs` sends each image's name,
+  MIME type and size, `thumbnails` adds a PNG downscaled to 256 px on the long side, and
+  `full` sends the original bytes. The **markdown never changes**: the body keeps its
+  `![](assets/…)` links at every rung, so no rung is a lossy conversion and a client that
+  started cheap can come back for `full`. Every rung reports `image_count` and `image_bytes`
+  — an empty payload list must not read as a document without images. A thumbnail never
+  costs more than the image it stands for: for the icons and logos already smaller than the
+  box, re-encoding would *add* bytes, so the original is sent instead. Images that no
+  pure-Rust decoder in the dependency budget reads (EMF, WMF, SVG) come back as a ref with
+  the reason on the row, never dropped in silence.
+- `docsai_convert::outline_input`, `select_input` and `search_input`: the three primitives
+  over a `SourceInput`, so they answer about the same document from a path or from bytes.
+  The `*_path` functions remain, as wrappers.
 - **`docsai search <in> <query>`** (plan v2 Phase 11): where a document says something, with an
   address and the words around each match — never the document. The query is a case-insensitive
   literal; `--context N` (default 48) sets the characters quoted either side of a match,
@@ -140,6 +163,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (MCP): `convert_to_markdown` no longer returns image bytes by default.** The
+  default is now `include_images=refs` — name, MIME type and size per image — where it used
+  to be the whole base64 payload. On a document holding one 1200 × 900 screenshot the
+  response drops from **906 709 bytes to 2 289** (0.25 %); at `thumbnails` it is 83 956
+  (9.3 %), still a picture the client can look at.
+
+  *Migration*: a client that wants the old behaviour passes `include_images: "full"`. A
+  client already passing `assets: "inline-base64"` **needs no change at all** — an explicit
+  request is still honoured, only the default moved. The `markdown` field is byte for byte
+  identical at every rung, so a client that only reads the text is unaffected.
+
+  Why break it: an image outweighs every word around it once it is base64, which made the
+  tool unusable on exactly the documents an agent most wants to read. The old default
+  charged for content the caller had not asked for and usually could not use; the new one
+  makes wanting the pixels an explicit choice.
+- MCP `list_tools` now returns **seven** tools rather than four.
 - `--fidelity full` output is now **DocMark 1.1** and declares `next-id`; documents
   without ids (and `--ids never`) still declare `1.0`. A 1.0 document parses unchanged
   and gains ids on its next write. MCP `convert_to_markdown` inherits the new default.

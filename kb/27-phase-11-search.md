@@ -93,6 +93,6 @@ writes no document, so it cannot change what a conversion writes.
 
 ## Next — 11-H: MCP
 
-Expose `outline`, `read_selection` and `search_document` over MCP, plus
-`include_images=none|refs|thumbnails|full` with **`refs` as the new default** — a breaking change
-of the MCP default that needs a migration note in the CHANGELOG. That closes Phase 11.
+Done, in [[28-phase-11-mcp]]: `outline_document`, `search_document` and `read_selection` over
+MCP, plus `include_images=none|refs|thumbnails|full` with `refs` as the new default. That closed
+Phase 11.

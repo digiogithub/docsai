@@ -262,6 +262,39 @@ pub fn mime_type_for(format: Format) -> &'static str {
     }
 }
 
+/// Loads a document for the read-only primitives — `outline`, `read --select`
+/// and `search` — and hands it to `f` with the DocMark options a conversion of
+/// the same document would use, plus the label to report it under.
+///
+/// The three answer *about* a document without writing one, so the media bytes
+/// are never needed: the links are written, a throwaway directory holds
+/// whatever the reader extracts, and it goes away on the way out. Sharing this
+/// is what keeps the primitives answering about the same document over a path
+/// and over base64 (MCP, Phase 11 H).
+pub(crate) fn with_scratch_document<T>(
+    source: SourceInput<'_>,
+    options: &ConvertOptions,
+    dictionary: bool,
+    f: impl FnOnce(&Document, &dyn AssetStore, &DocMarkOptions) -> T,
+) -> Result<(T, Option<String>), ConvertError> {
+    let dir = tempfile::tempdir().map_err(|source| ConvertError::Io {
+        path: "<scratch assets>".into(),
+        source,
+    })?;
+    let mut assets = DirAssetStore::new(dir.path());
+    let (document, source_format, _, label) = load_document(source, &mut assets, options)?;
+    let docmark = DocMarkOptions {
+        fidelity: options.fidelity,
+        ids: options.id_policy(),
+        assets_dir: "assets".into(),
+        source_format,
+        raw: options.raw,
+        precision: options.precision,
+        dictionary,
+    };
+    Ok((f(&document, &assets, &docmark), label))
+}
+
 fn load_document(
     source: SourceInput<'_>,
     assets: &mut dyn AssetStore,

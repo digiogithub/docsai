@@ -24,7 +24,7 @@ Practical difference between the two folders:
 | [07 — Phase 4 ODF](07-phase-4-odf.md) | ODT/ODS ⇄ DocMark: package, de-automatization, OpenFormula |
 | [08 — Phase 5 legacy DOC](08-phase-5-legacy-doc.md) | `.doc` native degraded read + LibreOffice fallback |
 | [09 — Phase 6 CLI & distribution](09-phase-6-cli.md) | inspect, batch, style-map, stdin/stdout, cargo-dist |
-| [10 — Phase 7 MCP](10-phase-7-mcp.md) | `docsai mcp`, four tools, path/base64, limits |
+| [10 — Phase 7 MCP](10-phase-7-mcp.md) | `docsai mcp`, the first four tools, path/base64, limits |
 | [11 — Plan v2 on-ramp](11-plan-v2-onramp.md) | What agent-native + presentations work reuses, what is new, traps that will bite again |
 | [13 — Phase 10 plan](13-phase-10-addressing-plan.md) | Increments A–F of stable addressing and the token budget |
 | [14 — Phase 10 A/B](14-phase-10-addressing-core.md) | `docsai-model::addressing`, ids in the IR, etags, risk-P7 property tests |
@@ -41,6 +41,7 @@ Practical difference between the two folders:
 | [25 — Phase 11 F](25-phase-11-read-select.md) | `read --select`: a selection that stands on its own, the minimum front matter, and where the etag finally gets written |
 | [26 — jj, not git](26-jj-vcs.md) | This repository is driven by Jujutsu; what git misreports, what `git commit` left behind, and the command map |
 | [27 — Phase 11 G](27-phase-11-search.md) | `docsai search`: why the unit is the block and not the addressed node, and the relative address prose gets |
+| [28 — Phase 11 H](28-phase-11-mcp.md) | The three primitives over MCP, `include_images` as a ladder of cost, and the phase close |
 
 ## Status in one line
 
@@ -49,19 +50,22 @@ identity (Phases 1–2, including floating DrawingML and footnote bodies), xlsx 
 DocMark plus xls read (Phase 3), odt/ods ⇄ DocMark (Phase 4), legacy `.doc`
 read (Phase 5: native degraded + optional LibreOffice → docx), the full CLI
 product surface (Phase 6: `inspect`, batch `--out-dir`, `--style-map`, stdin/stdout,
-`cargo-dist`), and the MCP stdio server (Phase 7: four tools, path/base64).
+`cargo-dist`), and the MCP stdio server (Phase 7: four tools, path/base64; three more in
+Phase 11).
 
 **Phase 10 of plan v2 is closed**: DocMark 1.1 stable node ids and derived etags, `docsai tokens`
 and `docsai outline` measured with a vendored BPE tokenizer, and the corpus token budget
 (`corpus/token-budget.md`) gated in CI.
 
-**Phase 11 is in progress**: raw-block bytes live in `assets/_raw/` sidecars (11-A) and
+**Phase 11 is closed**: raw-block bytes live in `assets/_raw/` sidecars (11-A) and
 `--fidelity agent` projects a document down to what a program can edit (11-B); no attribute
 the inheritance chain already implies is written (11-C), and a pattern that repeats anyway is
 written once in the front matter and referenced by class (11-D), and a length is written in the
 unit of what it measures, exactly (11-E). `docsai read --select` hands over part of a document as
 self-contained DocMark (11-F), and `docsai search` says where a document says something without
-handing over the document (11-G). Next is 11-H: the three primitives over MCP.
+handing over the document (11-G). All three are MCP tools (11-H), where `include_images` now
+defaults to `refs` instead of every image inline — a documented breaking change. Next is Phase
+12: the presentation spikes.
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives
@@ -80,5 +84,6 @@ cargo run -p docsai-cli -- inspect corpus/docx/basic-text.docx
 cargo run -p docsai-cli -- tokens corpus/docx/long-report.docx   # measured cost (Phase 10)
 cargo run -p docsai-cli -- outline corpus/docx/long-report.docx  # the map an agent reads first
 cargo run -p docsai-cli -- read corpus/docx/long-report.docx --select s2-s3  # part of it (Phase 11)
-cargo run -p docsai-cli -- mcp   # stdio MCP server (Phase 7)
+cargo run -p docsai-cli -- search corpus/docx/long-report.docx "rendimiento"  # where it says it
+cargo run -p docsai-cli -- mcp   # stdio MCP server (Phase 7; all of the above are tools since 11-H)
 ```

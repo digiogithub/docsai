@@ -20,8 +20,8 @@ use docsai_model::assets::AssetStore;
 use docsai_model::{Document, NodeId, NodeKind};
 use serde::Serialize;
 
-use crate::assets::DirAssetStore;
-use crate::pipeline::{read_path_with_options, ConvertOptions};
+use crate::pipeline::ConvertOptions;
+use crate::service::{with_scratch_document, SourceInput};
 use crate::tokens::{count, preview, ENCODING};
 use crate::ConvertError;
 
@@ -126,26 +126,21 @@ pub fn outline_path(
     options: &ConvertOptions,
     depth: Option<usize>,
 ) -> Result<Outline, ConvertError> {
-    // The links are written, the bytes are not: a throwaway directory is
-    // enough for the asset store.
-    let dir = tempfile::tempdir().map_err(|source| ConvertError::Io {
-        path: input.display().to_string(),
-        source,
-    })?;
-    let mut assets = DirAssetStore::new(dir.path());
-    let (doc, source_format, _) = read_path_with_options(input, &mut assets, options)?;
-    let docmark = DocMarkOptions {
-        fidelity: options.fidelity,
-        ids: options.id_policy(),
-        assets_dir: "assets".into(),
-        source_format,
-        raw: options.raw,
-        precision: options.precision,
-        dictionary: true,
-    };
-    let mut outline = outline(&doc, &assets, &docmark, depth);
-    outline.path = Some(input.display().to_string());
-    Ok(outline)
+    outline_input(SourceInput::Path(input), options, depth)
+}
+
+/// Outlines a path or in-memory document (the MCP `outline_document` tool).
+pub fn outline_input(
+    source: SourceInput<'_>,
+    options: &ConvertOptions,
+    depth: Option<usize>,
+) -> Result<Outline, ConvertError> {
+    let (mut result, label) =
+        with_scratch_document(source, options, true, |doc, assets, docmark| {
+            outline(doc, assets, docmark, depth)
+        })?;
+    result.path = label;
+    Ok(result)
 }
 
 /// Rebuilds the nodes of `fragments[start..end]` in document order.

@@ -22,14 +22,18 @@ pub use batch::{convert_batch, BatchOutcome, BatchReport};
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
 pub use inspect::{inspect_path, InspectReport};
 pub use loffice::UseLoffice;
-pub use outline::{outline, outline_path, Outline, OutlineNode};
+pub use outline::{outline, outline_input, outline_path, Outline, OutlineNode};
 pub use pipeline::{
     convert_bytes, convert_file, is_stdin_path, is_stdout_path, read_document,
     read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
     Outcome, RoundtripOutcome,
 };
-pub use search::{search, search_path, Hit, Location, Query, QueryError, SearchResults, Snippet};
-pub use select::{select, select_path, SelectedNode, Selection, Selector, SelectorError};
+pub use search::{
+    search, search_input, search_path, Hit, Location, Query, QueryError, SearchResults, Snippet,
+};
+pub use select::{
+    select, select_input, select_path, SelectedNode, Selection, Selector, SelectorError,
+};
 pub use service::{
     convert_from_markdown, convert_to_markdown, inspect_bytes, inspect_input, mime_type_for,
     parse_fidelity, validate_output_path, AssetBytes, AssetMode, FromMarkdownResult, SourceInput,

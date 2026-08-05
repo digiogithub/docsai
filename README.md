@@ -9,7 +9,7 @@
 > `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
 > Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
 > and `cargo-dist` release packaging. Phase 7 adds the MCP stdio server
-> (`docsai mcp`) with four tools. That plan
+> (`docsai mcp`), now with seven tools. That plan
 > ([`docs/development-plan.md`](docs/development-plan.md)) is **delivered and superseded**.
 >
 > **Next: [development plan v2](docs/development-plan-v2.md)** — agent-native docsai
@@ -276,11 +276,43 @@ Registration in an MCP client (e.g. Claude Desktop / Claude Code / MCP Inspector
 }
 ```
 
-Tools: `convert_to_markdown`, `convert_from_markdown`, `inspect_document`,
-`list_supported_formats`. Each tool accepts a filesystem `path` **or**
-`content_base64` + `filename`. Asset delivery defaults to `inline-base64`
-(optional `assets=files` with `assets_dir`). Logs always go to **stderr**;
-stdout is the JSON-RPC channel only.
+Tools: `outline_document`, `search_document`, `read_selection`,
+`convert_to_markdown`, `convert_from_markdown`, `inspect_document`,
+`list_supported_formats`. Each accepts a filesystem `path` **or**
+`content_base64` + `filename`. Logs always go to **stderr**; stdout is the
+JSON-RPC channel only.
+
+The first three are the ones to reach for. They are the MCP face of `docsai
+outline`, `docsai search` and `docsai read --select`, and together they answer
+"change the third heading of this report" without ever sending the report:
+
+```text
+outline_document { path }                     → n1 heading, n12 heading, … (3.8 % of the document)
+search_document  { path, query: "riesgo" }    → s12 #n12, select "#n12", the words around it
+read_selection   { path, select: "#n12" }     → that node as DocMark, with its etag
+convert_from_markdown { markdown, target_format: "docx" }
+```
+
+`convert_to_markdown` is the whole document, and the expensive path.
+Its `include_images` chooses what image payload comes back:
+
+| Value | The client gets |
+|---|---|
+| `none` | the count and the byte total, nothing else |
+| `refs` (**default**) | name, MIME type and size of each image |
+| `thumbnails` | the above plus a PNG downscaled to 256 px, to actually look at |
+| `full` | the original bytes, base64 |
+
+The markdown is identical at every rung — the body always keeps its
+`![](assets/…)` links — so the choice is about cost, never about fidelity. On a
+document with one 1200 × 900 screenshot the response goes from 906 709 bytes at
+`full` to 2 289 at `refs`. Media can still be written to disk with
+`assets=files` + `assets_dir`.
+
+> **Breaking change** (plan v2 Phase 11): `include_images` defaults to `refs`,
+> where `convert_to_markdown` used to return every image inline. Pass
+> `include_images: "full"` for the old behaviour; clients that already passed
+> `assets: "inline-base64"` keep working unchanged.
 
 Environment:
 

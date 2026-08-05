@@ -30,6 +30,24 @@ fn args_object(value: Value) -> Map<String, Value> {
     value.as_object().expect("object").clone()
 }
 
+/// Calls a tool and returns its structured content, failing on a tool error.
+async fn call(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    name: &'static str,
+    args: Value,
+) -> anyhow::Result<Value> {
+    let result = client
+        .call_tool(CallToolRequestParams::new(name).with_arguments(args_object(args)))
+        .await?;
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "{name} failed: {:?}",
+        result.content
+    );
+    Ok(result.structured_content.expect("structured content"))
+}
+
 async fn connect_duplex() -> (
     rmcp::service::RunningService<rmcp::RoleClient, ()>,
     JoinHandle<anyhow::Result<()>>,
@@ -46,7 +64,7 @@ async fn connect_duplex() -> (
 }
 
 #[tokio::test]
-async fn lists_the_four_tools() -> anyhow::Result<()> {
+async fn lists_every_tool_it_declares() -> anyhow::Result<()> {
     let (client, server) = connect_duplex().await;
     let listed = client.list_tools(None).await?;
     let names: Vec<_> = listed.tools.iter().map(|t| t.name.to_string()).collect();
@@ -107,6 +125,96 @@ async fn convert_docx_to_markdown_and_back() -> anyhow::Result<()> {
     let structured = back.structured_content.expect("structured");
     assert_eq!(structured["target_format"], "docx");
     assert!(structured["content_base64"].as_str().unwrap().len() > 16);
+
+    client.cancel().await?;
+    let _ = server.await;
+    Ok(())
+}
+
+/// The workflow Phase 11 exists for, over the real protocol: map the document,
+/// find the words in it, read back only that part — never the document.
+#[tokio::test]
+async fn outline_then_search_then_read_costs_a_fraction_of_the_document() -> anyhow::Result<()> {
+    let (client, server) = connect_duplex().await;
+    let path = corpus("long-report.docx").display().to_string();
+
+    let outline = call(&client, "outline_document", json!({ "path": path })).await?;
+    let document_tokens = outline["document-tokens"].as_u64().unwrap();
+    assert!(outline["nodes"].as_array().unwrap().len() > 10);
+    assert!(
+        outline["outline-tokens"].as_u64().unwrap() * 10 < document_tokens,
+        "the map has to be cheaper than the territory"
+    );
+
+    let hits = call(
+        &client,
+        "search_document",
+        json!({ "path": path, "query": "rendimiento", "limit": 5 }),
+    )
+    .await?;
+    assert!(hits["matches"].as_u64().unwrap() > 0);
+    assert!(hits["tokens"].as_u64().unwrap() * 5 < document_tokens);
+
+    // A hit that names a selector is a hit `read_selection` can act on: this is
+    // the join between the three tools, and it is checked, not assumed.
+    let select = hits["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|hit| hit["select"].as_str())
+        .expect("at least one addressed hit")
+        .to_string();
+    let matched = hits["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["select"].as_str() == Some(select.as_str()))
+        .and_then(|hit| hit["snippets"][0]["matched"].as_str())
+        .expect("the snippet it matched")
+        .to_lowercase();
+
+    let selection = call(
+        &client,
+        "read_selection",
+        json!({ "path": path, "select": select }),
+    )
+    .await?;
+    let docmark = selection["docmark"].as_str().unwrap();
+    assert!(
+        docmark.to_lowercase().contains(&matched),
+        "read_selection has to return what search found there:\n{docmark}"
+    );
+    assert!(docmark.contains("partial: true"), "{docmark}");
+    assert!(selection["tokens"].as_u64().unwrap() * 10 < document_tokens);
+
+    client.cancel().await?;
+    let _ = server.await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn images_are_not_sent_unless_they_are_asked_for() -> anyhow::Result<()> {
+    let (client, server) = connect_duplex().await;
+    let path = corpus("images-inline.docx").display().to_string();
+
+    let default = call(&client, "convert_to_markdown", json!({ "path": path })).await?;
+    assert_eq!(default["include_images"], "refs");
+    assert!(default["image_count"].as_u64().unwrap() > 0);
+    for row in default["assets"].as_array().unwrap() {
+        assert!(row.get("content_base64").is_none());
+    }
+
+    let full = call(
+        &client,
+        "convert_to_markdown",
+        json!({ "path": path, "include_images": "full" }),
+    )
+    .await?;
+    assert_eq!(default["markdown"], full["markdown"], "same document");
+    assert!(!full["assets"][0]["content_base64"]
+        .as_str()
+        .unwrap()
+        .is_empty());
 
     client.cancel().await?;
     let _ = server.await;

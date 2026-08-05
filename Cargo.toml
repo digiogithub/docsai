@@ -48,6 +48,15 @@ thiserror = "2"
 # Token counting for `docsai tokens` (plan v2 Phase 10). Vocabulary embedded in
 # the crate: no network, no Python. Rationale in docs/technical-analysis.md §4.4.
 tiktoken-rs = "0.12"
+# Thumbnails for the MCP `include_images=thumbnails` rung (plan v2 Phase 11 H).
+# Codecs limited to the raster formats Office packages actually embed; rationale
+# and the rejected alternatives in docs/technical-analysis.md §4.5.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "bmp",
+] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

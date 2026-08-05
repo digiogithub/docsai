@@ -41,9 +41,9 @@ use docsai_model::assets::AssetStore;
 use docsai_model::{Document, NodeId, NodeKind};
 use serde::Serialize;
 
-use crate::assets::DirAssetStore;
-use crate::pipeline::{read_path_with_options, ConvertOptions};
+use crate::pipeline::ConvertOptions;
 use crate::select::document_order;
+use crate::service::{with_scratch_document, SourceInput};
 use crate::tokens::{count, front_matter_end, strip_machinery};
 use crate::ConvertError;
 
@@ -367,27 +367,23 @@ pub fn search_path(
     options: &ConvertOptions,
     query: &Query,
 ) -> Result<SearchResults, ConvertError> {
-    // As for `outline`: the image links are written, the bytes are not.
-    let dir = tempfile::tempdir().map_err(|source| ConvertError::Io {
-        path: input.display().to_string(),
-        source,
-    })?;
-    let mut assets = DirAssetStore::new(dir.path());
-    let (doc, source_format, _) = read_path_with_options(input, &mut assets, options)?;
-    let docmark = DocMarkOptions {
-        fidelity: options.fidelity,
-        ids: options.id_policy(),
-        assets_dir: "assets".into(),
-        source_format,
-        raw: options.raw,
-        precision: options.precision,
-        // The dictionary rewrites attributes, which the matcher strips anyway;
-        // searching the document a conversion would actually write keeps the
-        // node costs reported here comparable with `outline`'s.
-        dictionary: true,
-    };
-    let mut results = search(&doc, &assets, &docmark, query);
-    results.path = Some(input.display().to_string());
+    search_input(SourceInput::Path(input), options, query)
+}
+
+/// Searches a path or an in-memory document (the MCP `search_document` tool).
+pub fn search_input(
+    source: SourceInput<'_>,
+    options: &ConvertOptions,
+    query: &Query,
+) -> Result<SearchResults, ConvertError> {
+    // The dictionary rewrites attributes, which the matcher strips anyway;
+    // searching the document a conversion would actually write keeps the node
+    // costs reported here comparable with `outline`'s.
+    let (mut results, label) =
+        with_scratch_document(source, options, true, |doc, assets, docmark| {
+            search(doc, assets, docmark, query)
+        })?;
+    results.path = label;
     Ok(results)
 }
 

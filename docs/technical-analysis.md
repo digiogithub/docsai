@@ -247,6 +247,31 @@ is a visible change in the golden, never a silent one.
 Cost accepted: the embedded vocabulary adds a few MB to the binary. `tiktoken-rs` loads each
 encoding lazily through a singleton, so only the one we ask for is built at runtime.
 
+### 4.5 Image decoding for MCP thumbnails (plan v2, Phase 11)
+
+Phase 11 task 8 asks the MCP server for `include_images=none|refs|thumbnails|full`. Three of
+the four rungs are byte slicing and need nothing; **`thumbnails` needs a decoder and a
+resizer**, which is the one place in the project that has to understand an image rather than
+carry it.
+
+| Option | What it costs | Verdict |
+|---|---|---|
+| **`image` 0.25**, `default-features = false`, features `png`, `jpeg`, `gif`, `bmp` | ~20 transitive crates (`png`, `zune-jpeg`, `gif`, `flate2`, `bytemuck`…), all pure Rust; `flate2` is already in the tree via `zip` | **Chosen** |
+| `image` with default features | adds TIFF, WebP, AVIF (`ravif`/`dav1d` bindings), EXR, DDS… | Rejected: C dependencies and codecs no Office package embeds |
+| Hand-rolled PNG/JPEG decoding | no new dependency | Rejected: writing image codecs to save a dependency is how a converter grows a memory-safety surface it did not need |
+| Shelling out to LibreOffice / ImageMagick | no Rust dependency | Rejected: a system dependency on the **main** path, which architecture §7 keeps free of one |
+
+**Decision**: `image` with the four raster formats Office packages actually embed, in
+`docsai-mcp` only — the format crates, the model and the CLI never link it, so a build that
+does not serve MCP does not pay for it. Vector formats (EMF, WMF, SVG) are not decoded and
+never will be here: they degrade to a ref with the reason stated on the row, which is the
+project's standing rule that a loss is reported rather than hidden.
+
+Cost accepted, and bounded: decoding attacker-supplied images is a denial-of-service surface
+(a few kB of PNG can declare 60 000 × 60 000 pixels), so the decoder runs under
+`image::Limits` with a 64 MB allocation ceiling and any failure — bomb, corruption,
+unsupported format — degrades that one image to a ref instead of failing the call.
+
 ---
 
 ## 5. Derived architecture decisions (summary)

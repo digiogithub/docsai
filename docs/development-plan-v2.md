@@ -147,6 +147,25 @@ Acceptance criteria:
       24 883 → 24 667 (−0.9 %) — small because the generated fixtures were already clean, which
       is why `docx/redundant-formatting.docx` was added to measure it on a document that is not
       (600 → 528).
+- [x] `docsai search` answers with an address and context, not the document (11-G): 35 matches
+      in a 9 000-token report cost 386 tokens (4.2 %). One decision the task did not anticipate
+      and that shaped the command: **the unit is the DocMark block, not the addressed node**,
+      because ordinary prose carries no id by design (spec §11.1) and a search over addressed
+      nodes would answer "where does it say X" with section titles and never the sentences. A
+      block with an id is reported at it with the selector that reads it back; a block without
+      one is reported relative to the last id before it (`n12.b2`) and deliberately names **no**
+      selector, since `read --select` has no `.bN` term and an address that would read a
+      different node is worse than none. Closing that loop needs relative-path *selection*,
+      which is Phase 17's machinery.
+- [x] MCP exposes `outline_document`, `search_document` and `read_selection` (11-H), checked
+      over the real protocol end to end: outline the report, search it, feed the hit's selector
+      to `read_selection`, and the DocMark that comes back contains the text the snippet
+      quoted. `include_images` defaults to `refs`; the breaking change and its migration are in
+      the CHANGELOG, and the ladder is a **payload** choice, never a conversion — the markdown
+      is byte-identical at all four rungs. The one thing the task list did not price is that
+      `thumbnails` needs an image decoder: `image` is taken as a dependency of `docsai-mcp`
+      alone, justified in `docs/technical-analysis.md` §4.5, sandboxed behind an allocation
+      limit, and every image it cannot read degrades to a ref that says why.
 
 ## Phase 12 — Presentation spikes (2–3 weeks)
 
