@@ -127,6 +127,17 @@ solves SmartArt, animations, OLE, theme and `tableStyles` in one move, and it is
 between "PowerPoint opens the file" and "PowerPoint offers to repair it". For generation from
 scratch, an embedded default template.
 
+**Spike P3 built it and it holds at the package boundary** — see
+[`spikes/P3-preserved-skeleton.md`](spikes/P3-preserved-skeleton.md). Over 48 packages, including
+twelve written by LibreOffice rather than by our own generator, no part was lost, added or
+reordered, and every one still opened. Two corrections to the paragraph above. First, the rule is
+not «preserve the non-slide parts»: it is **preserve everything and treat rebuilding as the
+exception**, with slide parts found through `[Content_Types].xml` and never by file name. Second,
+the skeleton is necessary and not sufficient — the spike's own writer silently dropped every run
+property *inside* the slides it rebuilt, so a writer may rebuild an element only when it can model
+or carry every child of it. Cost measured: holding a package in memory runs at 2.7× its size, so
+parts that are never inspected have to be streamed.
+
 ### 5.2 DocMark-P
 
 Slide as a `:::` container, semantic placeholders (`::: {.ph type=title idx=1}`) versus free
@@ -287,7 +298,7 @@ document handles.
 | # | Risk | Prob. | Impact | Mitigation |
 |---|---|---|---|---|
 | P1 | The slide→layout→master→theme cascade costs more than docx's | High | High | Spike (Phase 12); v1 resolves colour/font/size and leaves the rest to the layout reference |
-| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5) |
+| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **Open after spike P3**: the mechanism loses nothing over 48 packages in LibreOffice, but LibreOffice was measured to accept a deck with five dangling relationships, so it cannot stand in for PowerPoint. Steps to close it in [`spikes/P3-preserved-skeleton.md`](spikes/P3-preserved-skeleton.md) §6.2 |
 | P3 | Freeform shapes / SmartArt / animations fragment the effort | High | Medium | Aggressive raw-block from day one; only model what has a Markdown representation |
 | P4 | DocMark-P becomes unreadable (stops being Markdown, becomes XML with `:::`) | Medium | High | Golden rule: `--fidelity standard` must be hand-editable by a human; if it is not, the design failed |
 | P5 | Text overflow after an agent edit | High | Medium | Explicit `Warning::AutofitStale`; no measurement in v1 |

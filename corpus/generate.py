@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import os
 import struct
 import sys
@@ -136,14 +137,23 @@ CONTENT_TYPE = {
 }
 
 
-def write_package(path: Path, parts: dict[str, bytes]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+def package_bytes(parts: dict[str, bytes]) -> bytes:
+    """An OPC package as bytes. An embedded workbook lives *inside* another
+    package and so never has a path of its own; the fixed timestamp still
+    applies, or ``--check`` would see a new digest on every run."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in sorted(parts):
             info = zipfile.ZipInfo(name, date_time=FIXED_DATE)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o600 << 16
             zf.writestr(info, parts[name])
+    return buffer.getvalue()
+
+
+def write_package(path: Path, parts: dict[str, bytes]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(package_bytes(parts))
 
 
 def write_odf_package(path: Path, parts: dict[str, bytes]) -> None:
@@ -167,11 +177,15 @@ def rels_part(entries: list[tuple[str, str, str]], *, root: bool = False) -> byt
 
     A package-root part addresses core properties through a different namespace
     family than every other relationship, which is why ``root`` exists rather
-    than the caller spelling the full type out.
+    than the caller spelling the full type out. A ``kind`` that is already a URL
+    is taken as the whole type: the SmartArt drawing part hangs off a Microsoft
+    extension namespace that is not under ``REL_BASE`` at all.
     """
     out = []
     for rid, kind, target in entries:
-        if root and kind == "metadata/core-properties":
+        if kind.startswith("http"):
+            kind_url = kind
+        elif root and kind == "metadata/core-properties":
             kind_url = (
                 "http://schemas.openxmlformats.org/package/2006/relationships/"
                 "metadata/core-properties"
@@ -2923,6 +2937,269 @@ def pptx_autofit_stale() -> None:
     )
 
 
+DGM_NS = 'xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"'
+DGM_DRAWING_REL = (
+    "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
+)
+
+
+def embedded_workbook() -> bytes:
+    """The workbook a chart carries its own data in. Minimal on purpose: it is
+    not here to be read, it is here to be *preserved*. Spike P3 uses it as the
+    one part of a deck that is itself a package."""
+    rows = (
+        f'<row r="1">{c("A1", "0", t="s")}{c("B1", "1", t="s")}</row>'
+        f'<row r="2">{c("A2", "2", t="s")}{c("B2", "1200")}</row>'
+        f'<row r="3">{c("A3", "3", t="s")}{c("B3", "980")}</row>'
+        f'<row r="4">{c("A4", "4", t="s")}{c("B4", "1440")}</row>'
+    )
+    strings = ["Región", "Ventas", "Norte", "Sur", "Este"]
+    items = "".join(f"<si><t>{s}</t></si>" for s in strings)
+    parts = {
+        "[Content_Types].xml": content_types(
+            {"rels": "application/vnd.openxmlformats-package.relationships+xml",
+             "xml": "application/xml"},
+            [("/xl/workbook.xml",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"),
+             ("/xl/worksheets/sheet1.xml",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"),
+             ("/xl/sharedStrings.xml",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml")],
+        ),
+        "_rels/.rels": rels_part([("rId1", "officeDocument", "xl/workbook.xml")], root=True),
+        "xl/workbook.xml": (
+            XML_DECL
+            + f"<workbook {X_NS}><sheets>"
+            '<sheet name="Hoja1" sheetId="1" r:id="rIdSheet1"/>'
+            "</sheets></workbook>"
+        ).encode(),
+        "xl/_rels/workbook.xml.rels": rels_part([
+            ("rIdSheet1", "worksheet", "worksheets/sheet1.xml"),
+            ("rIdSst", "sharedStrings", "sharedStrings.xml"),
+        ]),
+        "xl/worksheets/sheet1.xml": (XML_DECL + sheet(rows, dim="A1:B4")).encode(),
+        "xl/sharedStrings.xml": (
+            XML_DECL
+            + f'<sst {X_NS} count="{len(strings)}" uniqueCount="{len(strings)}">{items}</sst>'
+        ).encode(),
+    }
+    return package_bytes(parts)
+
+
+def pptx_charts_embedded() -> None:
+    """`c:chart` and the workbook it keeps its numbers in. Two things no reader
+    of slide XML can reach: a part in a foreign schema, and a part that is a
+    whole package. Both have to come back out of a round trip untouched."""
+    def str_ref(formula: str, values: list[str]) -> str:
+        points = "".join(
+            f'<c:pt idx="{i}"><c:v>{v}</c:v></c:pt>' for i, v in enumerate(values)
+        )
+        return (
+            f"<c:strRef><c:f>{formula}</c:f><c:strCache>"
+            f'<c:ptCount val="{len(values)}"/>{points}</c:strCache></c:strRef>'
+        )
+
+    numbers = ["1200", "980", "1440"]
+    number_points = "".join(
+        f'<c:pt idx="{i}"><c:v>{v}</c:v></c:pt>' for i, v in enumerate(numbers)
+    )
+    chart = (
+        XML_DECL
+        + '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        "<c:chart><c:plotArea><c:layout/>"
+        '<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>'
+        '<c:ser><c:idx val="0"/><c:order val="0"/>'
+        f'<c:tx>{str_ref("Hoja1!$B$1", ["Ventas"])}</c:tx>'
+        f'<c:cat>{str_ref("Hoja1!$A$2:$A$4", ["Norte", "Sur", "Este"])}</c:cat>'
+        "<c:val><c:numRef><c:f>Hoja1!$B$2:$B$4</c:f><c:numCache>"
+        "<c:formatCode>General</c:formatCode>"
+        f'<c:ptCount val="{len(numbers)}"/>{number_points}'
+        "</c:numCache></c:numRef></c:val>"
+        "</c:ser>"
+        '<c:axId val="111111111"/><c:axId val="222222222"/>'
+        "</c:barChart>"
+        '<c:catAx><c:axId val="111111111"/>'
+        '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="b"/><c:crossAx val="222222222"/></c:catAx>'
+        '<c:valAx><c:axId val="222222222"/>'
+        '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="l"/><c:crossAx val="111111111"/></c:valAx>'
+        "</c:plotArea><c:plotVisOnly val=\"1\"/></c:chart>"
+        "</c:chartSpace>"
+    )
+    frame = (
+        "<p:graphicFrame>"
+        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Gráfico 1"/>'
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        '<p:xfrm><a:off x="838200" y="1825625"/><a:ext cx="7467600" cy="3600000"/></p:xfrm>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+        '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        'r:id="rIdChart"/>'
+        "</a:graphicData></a:graphic>"
+        "</p:graphicFrame>"
+    )
+    build_pptx(
+        "charts-embedded.pptx",
+        [slide(shape(2, "Title 1", a_p("Ventas por zona"), ph=ph("title")) + frame)],
+        slide_rels={1: [("rIdChart", "chart", "../charts/chart1.xml")]},
+        extra_parts={
+            "ppt/charts/chart1.xml": chart.encode(),
+            "ppt/charts/_rels/chart1.xml.rels": rels_part([
+                ("rIdWorkbook", "package", "../embeddings/workbook1.xlsx"),
+            ]),
+            "ppt/embeddings/workbook1.xlsx": embedded_workbook(),
+        },
+        extra_overrides=[
+            ("/ppt/charts/chart1.xml", f"{DML_TYPE}.chart+xml"),
+            ("/ppt/embeddings/workbook1.xlsx",
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ],
+        title="Gráfico incrustado",
+    )
+
+
+def pptx_smartart_fallback() -> None:
+    """SmartArt: four `dgm:` parts, a fifth in a Microsoft-only schema reached
+    through a Microsoft-only relationship type, and an `mc:AlternateContent`
+    that hands a plain shape to any consumer that cannot draw diagrams.
+
+    The fallback is what a reader is *allowed* to show. The five parts are what
+    it must not lose on the way back out, which is why this fixture is spike
+    P3's hardest input."""
+    def point(model_id: str, text: str = "", kind: str = "") -> str:
+        type_attr = f' type="{kind}"' if kind else ""
+        body = (
+            "<dgm:t><a:bodyPr/><a:lstStyle/>"
+            f'<a:p><a:r><a:rPr lang="es-ES"/><a:t>{text}</a:t></a:r></a:p></dgm:t>'
+            if text else "<dgm:t><a:bodyPr/><a:lstStyle/><a:p/></dgm:t>"
+        )
+        return (
+            f'<dgm:pt modelId="{model_id}"{type_attr}>'
+            "<dgm:prSet/><dgm:spPr/>"
+            f"{body}</dgm:pt>"
+        )
+
+    data = (
+        XML_DECL
+        + f'<dgm:dataModel {DGM_NS} '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        "<dgm:ptLst>"
+        + point("{00000000-0000-0000-0000-000000000001}", kind="doc")
+        + point("{00000000-0000-0000-0000-000000000002}", "Planificar")
+        + point("{00000000-0000-0000-0000-000000000003}", "Ejecutar")
+        + point("{00000000-0000-0000-0000-000000000004}", "Revisar")
+        + "</dgm:ptLst><dgm:cxnLst/><dgm:bg/><dgm:whole/>"
+        "</dgm:dataModel>"
+    )
+    layout = (
+        XML_DECL
+        + f'<dgm:layoutDef {DGM_NS} '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'uniqueId="urn:microsoft.com/office/officeart/2005/8/layout/process1">'
+        '<dgm:title val="Proceso básico"/><dgm:desc val=""/><dgm:catLst/>'
+        '<dgm:sampData><dgm:dataModel><dgm:ptLst/><dgm:cxnLst/><dgm:bg/><dgm:whole/>'
+        "</dgm:dataModel></dgm:sampData>"
+        '<dgm:layoutNode name="linear"><dgm:alg type="lin"/><dgm:shape/>'
+        "<dgm:presOf/><dgm:constrLst/></dgm:layoutNode>"
+        "</dgm:layoutDef>"
+    )
+    quick_style = (
+        XML_DECL
+        + f'<dgm:styleDef {DGM_NS} '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'uniqueId="urn:microsoft.com/office/officeart/2005/8/quickstyle/simple1">'
+        '<dgm:title val=""/><dgm:desc val=""/><dgm:catLst/>'
+        '<dgm:styleLbl name="node0"><dgm:scene3d><a:camera prst="orthographicFront"/>'
+        '<a:lightRig rig="threePt" dir="t"/></dgm:scene3d>'
+        "<dgm:sp3d/><dgm:txPr/><dgm:style/></dgm:styleLbl>"
+        "</dgm:styleDef>"
+    )
+    colours = (
+        XML_DECL
+        + f'<dgm:colorsDef {DGM_NS} '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'uniqueId="urn:microsoft.com/office/officeart/2005/8/colors/accent1_1">'
+        '<dgm:title val=""/><dgm:desc val=""/><dgm:catLst/>'
+        '<dgm:styleLbl name="node0">'
+        '<dgm:fillClrLst meth="repeat"><a:schemeClr val="accent1"/></dgm:fillClrLst>'
+        '<dgm:linClrLst meth="repeat"><a:schemeClr val="lt1"/></dgm:linClrLst>'
+        "<dgm:effectClrLst/><dgm:txLinClrLst/>"
+        '<dgm:txFillClrLst meth="repeat"><a:schemeClr val="lt1"/></dgm:txFillClrLst>'
+        "<dgm:txEffectClrLst/></dgm:styleLbl>"
+        "</dgm:colorsDef>"
+    )
+    drawing = (
+        XML_DECL
+        + '<dsp:drawing xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        "<dsp:spTree>"
+        '<dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr>'
+        "<dsp:grpSpPr/>"
+        '<dsp:sp modelId="{00000000-0000-0000-0000-000000000002}">'
+        '<dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>'
+        f'<dsp:spPr>{xfrm(838200, 2200000, 2000000, 900000)}'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr>'
+        f"<dsp:txBody><a:bodyPr/><a:lstStyle/>{a_p('Planificar')}</dsp:txBody>"
+        "</dsp:sp>"
+        "</dsp:spTree></dsp:drawing>"
+    )
+
+    diagram_frame = (
+        "<p:graphicFrame>"
+        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Diagrama 1"/>'
+        '<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr>'
+        "<p:nvPr/></p:nvGraphicFramePr>"
+        '<p:xfrm><a:off x="838200" y="1825625"/><a:ext cx="7467600" cy="3000000"/></p:xfrm>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">'
+        f'<dgm:relIds {DGM_NS} r:dm="rIdDgmData" r:lo="rIdDgmLayout" '
+        'r:qs="rIdDgmQuickStyle" r:cs="rIdDgmColors"/>'
+        "</a:graphicData></a:graphic>"
+        "</p:graphicFrame>"
+    )
+    alternate = (
+        '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+        '<mc:Choice xmlns:dgm14="http://schemas.microsoft.com/office/drawing/2010/diagram" '
+        'Requires="dgm14">'
+        f"{diagram_frame}"
+        "</mc:Choice>"
+        "<mc:Fallback>"
+        + shape(5, "Diagrama 1 (respaldo)", a_p("Planificar · Ejecutar · Revisar"),
+                frame=xfrm(838200, 1825625, 7467600, 3000000))
+        + "</mc:Fallback>"
+        "</mc:AlternateContent>"
+    )
+
+    build_pptx(
+        "smartart-fallback.pptx",
+        [slide(shape(2, "Title 1", a_p("Proceso"), ph=ph("title")) + alternate)],
+        slide_rels={1: [
+            ("rIdDgmData", "diagramData", "../diagrams/data1.xml"),
+            ("rIdDgmLayout", "diagramLayout", "../diagrams/layout1.xml"),
+            ("rIdDgmQuickStyle", "diagramQuickStyle", "../diagrams/quickStyle1.xml"),
+            ("rIdDgmColors", "diagramColors", "../diagrams/colors1.xml"),
+            ("rIdDgmDrawing", DGM_DRAWING_REL, "../diagrams/drawing1.xml"),
+        ]},
+        extra_parts={
+            "ppt/diagrams/data1.xml": data.encode(),
+            "ppt/diagrams/layout1.xml": layout.encode(),
+            "ppt/diagrams/quickStyle1.xml": quick_style.encode(),
+            "ppt/diagrams/colors1.xml": colours.encode(),
+            "ppt/diagrams/drawing1.xml": drawing.encode(),
+        },
+        extra_overrides=[
+            ("/ppt/diagrams/data1.xml", f"{DML_TYPE}.diagramData+xml"),
+            ("/ppt/diagrams/layout1.xml", f"{DML_TYPE}.diagramLayout+xml"),
+            ("/ppt/diagrams/quickStyle1.xml", f"{DML_TYPE}.diagramStyle+xml"),
+            ("/ppt/diagrams/colors1.xml", f"{DML_TYPE}.diagramColors+xml"),
+            ("/ppt/diagrams/drawing1.xml",
+             "application/vnd.ms-office.drawingml.diagramDrawing+xml"),
+        ],
+        title="SmartArt con respaldo",
+    )
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -2973,6 +3250,8 @@ GENERATORS = [
     pptx_images_anchored,
     pptx_shapes_geometry,
     pptx_autofit_stale,
+    pptx_charts_embedded,
+    pptx_smartart_fallback,
 ]
 
 

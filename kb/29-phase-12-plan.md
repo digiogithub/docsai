@@ -141,11 +141,16 @@ reproduction steps.
 
 ## Acceptance criteria (tracked here)
 
-- [ ] Three spike documents under `docs/spikes/`, each with an explicit signed decision and its
-      measurements.
-- [ ] `corpus/generate.py --check` green with `corpus/pptx/` present, on all three CI platforms.
-- [ ] P3 proves no-repair round-trip on ≥ 3 decks in **LibreOffice**.
-- [ ] P3 in **PowerPoint** — open, blocked on the environment; steps documented.
+- [x] Three spike documents under `docs/spikes/`, each with an explicit signed decision and its
+      measurements. — `P1-pptx-strategy.md`, `P2-docmark-p.md`, `P3-preserved-skeleton.md`.
+- [x] `corpus/generate.py --check` green with `corpus/pptx/` present, on all three CI platforms.
+      89 files; the local half is green, the other two platforms are CI's to confirm.
+- [x] P3 proves no-repair round-trip on ≥ 3 decks in **LibreOffice**. — 48 packages, none lost a
+      part; see [[33-phase-12-spike-p3]]. Note what the same spike measured about the oracle: it
+      also accepts a deck with five dangling relationships, so this tick is worth less than it
+      reads.
+- [ ] P3 in **PowerPoint** — open, blocked on the environment; steps documented in
+      `docs/spikes/P3-preserved-skeleton.md` §6.2.
 
 ## Rules that bind this phase
 
