@@ -26,7 +26,8 @@ install-path = "CARGO_HOME"
 install-updater = false
 # Publish jobs to run in CI
 # github-releases is automatic when ci = github and tags are pushed
-pr-run-mode = "plan"
+# Releases are cut from tags only; a PR builds nothing. CI already covers PRs.
+pr-run-mode = "skip"
 # Whether to consider the binaries as needing a built dependency on glibc
 unix-archive = ".tar.gz"
 windows-archive = ".zip"

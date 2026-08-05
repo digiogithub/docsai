@@ -38,15 +38,27 @@ permissions:
 #
 # If there's a prerelease-style suffix to the version, then the release(s)
 # will be marked as a prerelease.
+#
+# HAND-EDITED after generation, in two places. Re-run `dist init`/`dist generate`
+# and you must put both back:
+#   1. No `pull_request` trigger — a release is a tag, not a push.
+#   2. A `test` job calling `.github/workflows/test.yml`, which `plan` needs, so
+#      nothing is built or published until the suite is green on all three OSes.
 on:
-  pull_request:
   push:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
+  # The gate: the same suite CI runs, on the tagged commit. Everything below
+  # hangs off `plan`, and `plan` hangs off this.
+  test:
+    uses: ./.github/workflows/test.yml
+
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
+    needs:
+      - test
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}

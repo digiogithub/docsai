@@ -1,0 +1,16 @@
+# The goldens are compared byte-for-byte against output the converter always
+# writes with LF. A Windows checkout that rewrote them to CRLF would fail every
+# golden test for a reason that has nothing to do with the conversion.
+* text=auto eol=lf
+
+# Office documents are zip archives; line-ending translation corrupts them.
+*.docx binary
+*.xlsx binary
+*.doc   binary
+*.odt   binary
+*.ods   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary

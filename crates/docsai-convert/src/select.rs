@@ -221,7 +221,7 @@ impl Selection {
 /// Selects from an in-memory document.
 ///
 /// `options.ids` decides what can be selected at all, exactly as it does for
-/// [`crate::outline`]: a level that writes no id addresses nothing, so a
+/// [`crate::outline()`]: a level that writes no id addresses nothing, so a
 /// selector there matches nothing rather than something `outline` never showed.
 /// `options.dictionary` is overridden — the selection must depend on nothing
 /// outside itself.
@@ -330,7 +330,7 @@ pub fn select_input(
 /// Fragment indices in document order.
 ///
 /// The trace is in *finishing* order — a node arrives after everything inside
-/// it — so document order is recovered the way [`crate::outline`] rebuilds the
+/// it — so document order is recovered the way [`crate::outline()`] rebuilds the
 /// tree: walking a range backwards, the last fragment is the outermost node,
 /// and its `descendants` say how many before it are its own.
 pub(crate) fn document_order(fragments: &[NodeFragment]) -> Vec<usize> {

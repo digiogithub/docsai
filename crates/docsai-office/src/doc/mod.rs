@@ -302,7 +302,7 @@ pub(crate) fn image_ref_from_asset(
 
 /// Peeks an OLE2 container and returns whether it looks like `.doc` or `.xls`.
 ///
-/// Used by [`crate::detect`]. The reader is rewound to the start on return.
+/// Used by [`crate::detect()`]. The reader is rewound to the start on return.
 pub fn classify_ole2<R: Read + Seek>(reader: &mut R) -> Result<docsai_model::Format, ReadError> {
     struct IoRef<'a, R>(&'a mut R);
     impl<R: Read> Read for IoRef<'_, R> {

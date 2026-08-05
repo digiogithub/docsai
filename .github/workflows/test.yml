@@ -1,0 +1,68 @@
+# The test suite, factored out so two callers can share one definition: `ci.yml`
+# on every push and PR, and `release.yml` as the gate a tag has to pass before
+# any binary is built. A release that shipped without these having run would be
+# a release nobody checked.
+name: Test
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+      # The corpus is generated, not hand-committed: if the generator and the
+      # committed binaries ever disagree, the goldens are testing fiction.
+      - name: Corpus is up to date
+        run: python3 corpus/generate.py --check
+
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Named separately from `cargo test` so a blown token budget reads as a
+      # blown token budget in the checks list, not as "some test failed".
+      - name: Token budget
+        run: cargo test -p docsai-convert --test token_budget
+
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"

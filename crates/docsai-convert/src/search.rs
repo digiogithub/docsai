@@ -22,7 +22,7 @@
 //!   the document.
 //! - **A footnote is reported at the block that refers to it.** Its text is in
 //!   the document and has to be findable, but a footnote cannot be selected on
-//!   its own (see [`crate::select`]), so its selector names the referring block
+//!   its own (see [`mod@crate::select`]), so its selector names the referring block
 //!   rather than an id `read` would refuse.
 //!
 //! What this does *not* do is close the loop for a relative hit: `read
