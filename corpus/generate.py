@@ -2687,9 +2687,15 @@ def slide(shapes: str, *, show_master: bool = True) -> str:
 
 def notes_slide(index: int, text: str) -> str:
     """A notes slide. The body placeholder is what an agent actually wants to
-    read; the slide-image placeholder is what PowerPoint puts above it."""
+    read; the slide-image placeholder is what PowerPoint puts above it.
+
+    The root element is `p:notes`, not `p:notesSlide`: the part is named
+    `notesSlide` and so is its content type, but ECMA-376 binds `CT_NotesSlide`
+    to the element `notes`. Spike P1 found this the hard way — the reader
+    refused the part with `expected NotesSlide, found p:notesSlide`.
+    """
     return (
-        f'<p:notesSlide {P_NS}>'
+        f'<p:notes {P_NS}>'
         + sp_tree(
             '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/>'
             '<p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr>'
@@ -2699,7 +2705,7 @@ def notes_slide(index: int, text: str) -> str:
                     "".join(a_p(line) for line in text.split("\n")),
                     ph=ph("body", 1))
         )
-        + "</p:notesSlide>"
+        + "</p:notes>"
     )
 
 

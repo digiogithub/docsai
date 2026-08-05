@@ -91,6 +91,13 @@ no-panic behaviour on corrupt input.
 size, compile time) — if it wins, it removes months of pml/dml typing. That is spike **P1** in
 plan v2 Phase 12.
 
+**Spike P1 ran, and the decision above stands** — see
+[`spikes/P1-pptx-strategy.md`](spikes/P1-pptx-strategy.md). Two of this table's assumptions about
+`ooxmlsdk` were wrong in its favour: it reads every trait the corpus isolates, and it panics on
+zero of 1396 corrupt inputs. It was refused on the other two: a foreign-namespace element is
+dropped with no error and no warning, which makes the raw-block contract unimplementable, and
+linking it costs **+28.7 MB** stripped and **+311 s** per clean release build.
+
 ## 4. Legacy `.ppt` and `.odp`
 
 **`.ppt`** — the `.doc` decision (analysis §1.3) applies, with a better prognosis. No Rust crate
