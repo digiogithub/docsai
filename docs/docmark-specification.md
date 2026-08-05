@@ -653,6 +653,15 @@ Third document class, alongside text documents (§3) and spreadsheets (§4). Des
 enforced by test: **`--fidelity standard` must remain hand-editable by a human**, and a plain
 Markdown viewer must show, per slide, title + bullets + images and nothing else.
 
+**Spike P2 drafted this profile and the sketch below is superseded on two points** — see
+[`spikes/P2-docmark-p.md`](spikes/P2-docmark-p.md) §4, which is the draft Phase 14 finalises.
+Placeholders are **implicit**: the slide heading *is* the title placeholder (the sketch writes the
+title twice, which a plain viewer shows twice), and the layout's primary body placeholder is
+written as ordinary blocks under it, with `layouts:` naming which index each is. Containers stay
+for every other placeholder, for free shapes and for notes. Measured over `corpus/pptx` at
+`--fidelity standard`, that leaves **2.6 %** of what a plain viewer prints as syntax — 11.4 %
+counting the fixture whose whole content is free shapes, where the noise is the point.
+
 ````markdown
 ---
 docmark: "1.2"

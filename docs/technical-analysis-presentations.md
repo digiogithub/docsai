@@ -134,6 +134,13 @@ shapes with explicit geometry, notes as their own container, a layout catalogue 
 matter (parallel to the existing style catalogue), and a degradation rule: **a plain Markdown
 viewer must show title + bullets + images per slide and nothing else**.
 
+**Spike P2 ran and the degradation rule holds** — see
+[`spikes/P2-docmark-p.md`](spikes/P2-docmark-p.md). One correction to the paragraph above: a
+placeholder is *not* a container. The slide heading is the title and the primary body is written
+as plain blocks under it, which costs 20 % fewer tokens than the container form and leaves 2.6 %
+of a plain viewer's output as syntax, against 59.6 % for the containers. Free shapes are the one
+construct that stays noisy at every level, and stay so on purpose.
+
 ### 5.3 Deterministic, reversible reading order
 
 `spTree` gives z-order. We need a policy (placeholders first by type, then remaining shapes by
