@@ -6,6 +6,7 @@
 # Office documents are zip archives; line-ending translation corrupts them.
 *.docx binary
 *.xlsx binary
+*.pptx binary
 *.doc   binary
 *.odt   binary
 *.ods   binary

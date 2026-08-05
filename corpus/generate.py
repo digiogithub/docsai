@@ -162,6 +162,41 @@ def write_odf_package(path: Path, parts: dict[str, bytes]) -> None:
             zf.writestr(info, parts[name])
 
 
+def rels_part(entries: list[tuple[str, str, str]], *, root: bool = False) -> bytes:
+    """A `_rels` part. ``entries`` are ``(rId, type_suffix, target)``.
+
+    A package-root part addresses core properties through a different namespace
+    family than every other relationship, which is why ``root`` exists rather
+    than the caller spelling the full type out.
+    """
+    out = []
+    for rid, kind, target in entries:
+        if root and kind == "metadata/core-properties":
+            kind_url = (
+                "http://schemas.openxmlformats.org/package/2006/relationships/"
+                "metadata/core-properties"
+            )
+        else:
+            kind_url = f"{REL_BASE}/{kind}"
+        mode = ' TargetMode="External"' if target.startswith("http") else ""
+        out.append(f'<Relationship Id="{rid}" Type="{kind_url}" Target="{target}"{mode}/>')
+    return (XML_DECL + f"<Relationships {RELS_NS}>" + "".join(out) + "</Relationships>").encode()
+
+
+def content_types(defaults: dict[str, str], overrides: list[tuple[str, str]]) -> bytes:
+    """`[Content_Types].xml` from an extension→type map and a part→type list."""
+    return (
+        XML_DECL
+        + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        + "".join(
+            f'<Default Extension="{e}" ContentType="{t}"/>'
+            for e, t in sorted(defaults.items())
+        )
+        + "".join(f'<Override PartName="{p}" ContentType="{c}"/>' for p, c in sorted(overrides))
+        + "</Types>"
+    ).encode()
+
+
 def core_props(title: str, author: str = "docsai corpus", lang: str = "es-ES") -> bytes:
     return (
         XML_DECL
@@ -2314,6 +2349,574 @@ def doc_encrypted() -> None:
     _write_doc("encrypted.doc", ENCRYPTED_DOC_B64)
 
 
+# --------------------------------------------------------------------------
+# PPTX corpus (Phase 12 — the spikes read these; there is no reader yet)
+# --------------------------------------------------------------------------
+#
+# Built by hand like every other fixture here, not with `python-pptx`: the plan
+# named that library, but this generator is deliberately dependency-free on the
+# three CI platforms, and a fixture whose XML lives in an opaque library is a
+# fixture nobody can review. The rationale is written down in
+# `kb/29-phase-12-plan.md`.
+#
+# A slide is not a flow document: it is a canvas of positioned shapes whose
+# meaning comes from the placeholder cascade slide -> layout -> master. The
+# package below is the smallest one that carries a real cascade, because a
+# corpus that flattened it would answer none of the questions Phase 12 asks.
+
+P_NS = (
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+    'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+)
+
+PML_TYPE = "application/vnd.openxmlformats-officedocument.presentationml"
+DML_TYPE = "application/vnd.openxmlformats-officedocument.drawingml"
+
+# A 4:3 deck at 10 x 7.5 in. Round EMU numbers keep the geometry readable in a
+# diff, which is the point of generating the corpus rather than recording it.
+SLIDE_W = 9144000
+SLIDE_H = 6858000
+
+
+def _scheme_colour(tag: str, value: str) -> str:
+    return f'<a:{tag}><a:srgbClr val="{value}"/></a:{tag}>'
+
+
+# The theme is required by the master and PowerPoint validates it strictly: all
+# twelve scheme colours, both font slots, and three entries in each of the four
+# format lists. Anything less and the package opens with a repair dialog, which
+# is the exact failure Phase 12 exists to measure.
+THEME = (
+    '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="docsai">'
+    "<a:themeElements>"
+    '<a:clrScheme name="docsai">'
+    '<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>'
+    '<a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>'
+    + _scheme_colour("dk2", "1F3864")
+    + _scheme_colour("lt2", "E7E6E6")
+    + _scheme_colour("accent1", "1E5AC8")
+    + _scheme_colour("accent2", "C82828")
+    + _scheme_colour("accent3", "14A03C")
+    + _scheme_colour("accent4", "E0A000")
+    + _scheme_colour("accent5", "7030A0")
+    + _scheme_colour("accent6", "00B0B0")
+    + _scheme_colour("hlink", "0563C1")
+    + _scheme_colour("folHlink", "954F72")
+    + "</a:clrScheme>"
+    '<a:fontScheme name="docsai">'
+    '<a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>'
+    '<a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>'
+    "</a:fontScheme>"
+    '<a:fmtScheme name="docsai">'
+    "<a:fillStyleLst>"
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    "</a:fillStyleLst>"
+    "<a:lnStyleLst>"
+    '<a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>'
+    '<a:ln w="12700"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>'
+    '<a:ln w="19050"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>'
+    "</a:lnStyleLst>"
+    "<a:effectStyleLst>"
+    "<a:effectStyle><a:effectLst/></a:effectStyle>"
+    "<a:effectStyle><a:effectLst/></a:effectStyle>"
+    "<a:effectStyle><a:effectLst/></a:effectStyle>"
+    "</a:effectStyleLst>"
+    "<a:bgFillStyleLst>"
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    "</a:bgFillStyleLst>"
+    "</a:fmtScheme>"
+    "</a:themeElements>"
+    "</a:theme>"
+)
+
+
+def sp_tree(shapes: str) -> str:
+    """The shape tree every slide, layout and master part wraps its shapes in."""
+    return (
+        "<p:cSld><p:spTree>"
+        '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
+        '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>'
+        '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>'
+        f"{shapes}"
+        "</p:spTree></p:cSld>"
+    )
+
+
+def xfrm(x: int, y: int, cx: int, cy: int) -> str:
+    return f'<a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
+
+
+def a_p(text: str, *, lvl: int = 0, bullet: str = "") -> str:
+    """A DrawingML paragraph. An empty ``text`` gives an empty paragraph, which
+    is content: it holds its place in the box, exactly as the empty `w:p` the
+    Phase 1 reader used to drop did.
+
+    ``bullet`` is child content of `a:pPr`, not an attribute: a paragraph may
+    carry exactly one `a:pPr`, so the bullet override has to go inside the one
+    the level already needs.
+    """
+    if lvl or bullet:
+        attrs = f' lvl="{lvl}"' if lvl else ""
+        props = f"<a:pPr{attrs}>{bullet}</a:pPr>" if bullet else f"<a:pPr{attrs}/>"
+    else:
+        props = ""
+    if not text:
+        return f"<a:p>{props}<a:endParaRPr/></a:p>"
+    return f'<a:p>{props}<a:r><a:rPr lang="es-ES"/><a:t>{text}</a:t></a:r></a:p>'
+
+
+def tx_body(paragraphs: str, *, body_pr: str = "<a:bodyPr/>") -> str:
+    return f"<p:txBody>{body_pr}<a:lstStyle/>{paragraphs}</p:txBody>"
+
+
+def shape(
+    ident: int,
+    name: str,
+    paragraphs: str,
+    *,
+    ph: str = "",
+    geom: str = "rect",
+    frame: str = "",
+    body_pr: str = "<a:bodyPr/>",
+    sppr_extra: str = "",
+) -> str:
+    """A `p:sp`. With ``ph`` it is a placeholder and inherits from the layout;
+    without it, it is a free shape and must carry its own geometry."""
+    nv_pr = f"<p:nvPr>{ph}</p:nvPr>" if ph else "<p:nvPr/>"
+    return (
+        "<p:sp>"
+        f'<p:nvSpPr><p:cNvPr id="{ident}" name="{name}"/>'
+        f'<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>{nv_pr}</p:nvSpPr>'
+        f'<p:spPr>{frame}<a:prstGeom prst="{geom}"><a:avLst/></a:prstGeom>{sppr_extra}</p:spPr>'
+        f"{tx_body(paragraphs, body_pr=body_pr)}"
+        "</p:sp>"
+    )
+
+
+def ph(kind: str, idx: int | None = None) -> str:
+    attr = f' idx="{idx}"' if idx is not None else ""
+    return f'<p:ph type="{kind}"{attr}/>'
+
+
+# The master defines the two placeholder positions the whole corpus inherits,
+# plus the text styles a slide that emits no properties of its own falls back
+# to. `placeholders-cascade.pptx` is the fixture that proves the fall-back is
+# real, so these values have to be the only place they are stated.
+SLIDE_MASTER = (
+    f'<p:sldMaster {P_NS}>'
+    + sp_tree(
+        shape(2, "Title Placeholder 1", a_p("Click to edit Master title style"),
+              ph=ph("title"),
+              frame=xfrm(838200, 365125, 7467600, 1325563))
+        + shape(3, "Text Placeholder 2", a_p("Click to edit Master text styles"),
+                ph=ph("body", 1),
+                frame=xfrm(838200, 1825625, 7467600, 4351338))
+    )
+    + '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1"'
+    ' accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5"'
+    ' accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
+    '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rIdLayout1"/></p:sldLayoutIdLst>'
+    "<p:txStyles>"
+    '<p:titleStyle><a:lvl1pPr><a:defRPr sz="4400"><a:solidFill>'
+    '<a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/></a:defRPr></a:lvl1pPr></p:titleStyle>'
+    "<p:bodyStyle>"
+    + "".join(
+        f'<a:lvl{i}pPr marL="{342900 * i}" indent="-342900">'
+        f'<a:buChar char="•"/><a:defRPr sz="{2800 - 400 * (i - 1)}">'
+        '<a:solidFill><a:schemeClr val="tx1"/></a:solidFill>'
+        f'<a:latin typeface="+mn-lt"/></a:defRPr></a:lvl{i}pPr>'
+        for i in range(1, 5)
+    )
+    + "</p:bodyStyle>"
+    "<p:otherStyle><a:lvl1pPr><a:defRPr/></a:lvl1pPr></p:otherStyle>"
+    "</p:txStyles>"
+    "</p:sldMaster>"
+)
+
+SLIDE_LAYOUT = (
+    f'<p:sldLayout {P_NS} type="obj" preserve="1">'
+    + sp_tree(
+        shape(2, "Title 1", "", ph=ph("title"))
+        + shape(3, "Content Placeholder 2", "", ph=ph("body", 1))
+    )
+    + "</p:sldLayout>"
+)
+
+
+def build_pptx(
+    name: str,
+    slides: list[str],
+    *,
+    title: str,
+    order: list[int] | None = None,
+    media: dict[str, bytes] | None = None,
+    slide_rels: dict[int, list[tuple[str, str, str]]] | None = None,
+    notes: dict[int, str] | None = None,
+    extra_parts: dict[str, bytes] | None = None,
+    extra_overrides: list[tuple[str, str]] | None = None,
+    extra_defaults: dict[str, str] | None = None,
+) -> None:
+    """Assemble a .pptx package.
+
+    ``slides`` are the `p:sld` bodies in file order (`slide1.xml` first).
+    ``order`` is the presentation order as 1-based slide numbers; when it
+    differs from the file order it is `p:sldIdLst` that wins, which is the whole
+    point of the `slide-order` fixture. ``slide_rels`` entries are
+    ``(rId, type_suffix, target)`` relative to `ppt/slides/`.
+    """
+    media = media or {}
+    slide_rels = slide_rels or {}
+    notes = notes or {}
+    order = order or list(range(1, len(slides) + 1))
+
+    parts: dict[str, bytes] = {}
+    defaults = {
+        "rels": "application/vnd.openxmlformats-package.relationships+xml",
+        "xml": "application/xml",
+    }
+    defaults.update(extra_defaults or {})
+    overrides = [
+        ("/ppt/presentation.xml", f"{PML_TYPE}.presentation.main+xml"),
+        ("/ppt/slideMasters/slideMaster1.xml", f"{PML_TYPE}.slideMaster+xml"),
+        ("/ppt/slideLayouts/slideLayout1.xml", f"{PML_TYPE}.slideLayout+xml"),
+        ("/ppt/theme/theme1.xml", f"{DML_TYPE}.theme+xml"),
+        ("/docProps/core.xml", "application/vnd.openxmlformats-package.core-properties+xml"),
+        ("/docProps/app.xml", "application/vnd.openxmlformats-officedocument.extended-properties+xml"),
+    ]
+    overrides.extend(extra_overrides or [])
+
+    parts["docProps/core.xml"] = core_props(title)
+    parts["docProps/app.xml"] = APP_PROPS
+    parts["ppt/theme/theme1.xml"] = (XML_DECL + THEME).encode()
+    parts["ppt/slideMasters/slideMaster1.xml"] = (XML_DECL + SLIDE_MASTER).encode()
+    parts["ppt/slideLayouts/slideLayout1.xml"] = (XML_DECL + SLIDE_LAYOUT).encode()
+
+    parts["ppt/slideMasters/_rels/slideMaster1.xml.rels"] = rels_part([
+        ("rIdLayout1", "slideLayout", "../slideLayouts/slideLayout1.xml"),
+        ("rIdTheme", "theme", "../theme/theme1.xml"),
+    ])
+    parts["ppt/slideLayouts/_rels/slideLayout1.xml.rels"] = rels_part([
+        ("rIdMaster", "slideMaster", "../slideMasters/slideMaster1.xml"),
+    ])
+
+    presentation_rels = [("rIdMaster1", "slideMaster", "slideMasters/slideMaster1.xml")]
+    slide_ids = []
+    for position, number in enumerate(order):
+        rid = f"rIdSlide{number}"
+        presentation_rels.append((rid, "slide", f"slides/slide{number}.xml"))
+        slide_ids.append(f'<p:sldId id="{256 + position}" r:id="{rid}"/>')
+
+    for index, body in enumerate(slides, start=1):
+        part = f"ppt/slides/slide{index}.xml"
+        parts[part] = (XML_DECL + body).encode()
+        overrides.append((f"/{part}", f"{PML_TYPE}.slide+xml"))
+        entries = [("rIdLayout", "slideLayout", "../slideLayouts/slideLayout1.xml")]
+        entries.extend(slide_rels.get(index, []))
+        if index in notes:
+            entries.append(("rIdNotes", "notesSlide", f"../notesSlides/notesSlide{index}.xml"))
+        parts[f"ppt/slides/_rels/slide{index}.xml.rels"] = rels_part(entries)
+
+    if notes:
+        parts["ppt/notesMasters/notesMaster1.xml"] = (XML_DECL + NOTES_MASTER).encode()
+        parts["ppt/notesMasters/_rels/notesMaster1.xml.rels"] = rels_part([
+            ("rIdTheme", "theme", "../theme/theme1.xml"),
+        ])
+        overrides.append(("/ppt/notesMasters/notesMaster1.xml", f"{PML_TYPE}.notesMaster+xml"))
+        presentation_rels.append(("rIdNotesMaster", "notesMaster", "notesMasters/notesMaster1.xml"))
+        for index, body in sorted(notes.items()):
+            part = f"ppt/notesSlides/notesSlide{index}.xml"
+            parts[part] = (XML_DECL + body).encode()
+            overrides.append((f"/{part}", f"{PML_TYPE}.notesSlide+xml"))
+            parts[f"ppt/notesSlides/_rels/notesSlide{index}.xml.rels"] = rels_part([
+                ("rIdSlide", "slide", f"../slides/slide{index}.xml"),
+                ("rIdNotesMaster", "notesMaster", "../notesMasters/notesMaster1.xml"),
+            ])
+
+    for filename, blob in sorted(media.items()):
+        parts[f"ppt/media/{filename}"] = blob
+        extension = Path(filename).suffix
+        defaults[extension.lstrip(".")] = CONTENT_TYPE[extension]
+
+    for part, blob in sorted((extra_parts or {}).items()):
+        parts[part] = blob
+
+    parts["ppt/presentation.xml"] = (XML_DECL + (
+        f'<p:presentation {P_NS}>'
+        '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rIdMaster1"/></p:sldMasterIdLst>'
+        + ("<p:notesMasterIdLst><p:notesMasterId r:id=\"rIdNotesMaster\"/></p:notesMasterIdLst>"
+           if notes else "")
+        + f'<p:sldIdLst>{"".join(slide_ids)}</p:sldIdLst>'
+        f'<p:sldSz cx="{SLIDE_W}" cy="{SLIDE_H}"/>'
+        f'<p:notesSz cx="{SLIDE_H}" cy="{SLIDE_W}"/>'
+        "</p:presentation>"
+    )).encode()
+    parts["ppt/_rels/presentation.xml.rels"] = rels_part(presentation_rels)
+
+    parts["[Content_Types].xml"] = content_types(defaults, overrides)
+    parts["_rels/.rels"] = rels_part([
+        ("rId1", "officeDocument", "ppt/presentation.xml"),
+        ("rId2", "metadata/core-properties", "docProps/core.xml"),
+        ("rId3", "extended-properties", "docProps/app.xml"),
+    ], root=True)
+
+    write_package(ROOT / "pptx" / name, parts)
+
+
+NOTES_MASTER = (
+    f'<p:notesMaster {P_NS}>'
+    + sp_tree(
+        shape(2, "Notes Placeholder 1", "", ph=ph("body", 1),
+              frame=xfrm(685800, 2971800, 5486400, 4114800))
+    )
+    + '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1"'
+    ' accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5"'
+    ' accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
+    "</p:notesMaster>"
+)
+
+
+def slide(shapes: str, *, show_master: bool = True) -> str:
+    attr = "" if show_master else ' showMasterSp="0"'
+    return f'<p:sld {P_NS}{attr}>{sp_tree(shapes)}</p:sld>'
+
+
+def notes_slide(index: int, text: str) -> str:
+    """A notes slide. The body placeholder is what an agent actually wants to
+    read; the slide-image placeholder is what PowerPoint puts above it."""
+    return (
+        f'<p:notesSlide {P_NS}>'
+        + sp_tree(
+            '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/>'
+            '<p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr>'
+            '<p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr>'
+            "<p:spPr/></p:sp>"
+            + shape(3, "Notes Placeholder 2",
+                    "".join(a_p(line) for line in text.split("\n")),
+                    ph=ph("body", 1))
+        )
+        + "</p:notesSlide>"
+    )
+
+
+def title_body_slide(title: str, bullets: list[tuple[str, int]]) -> str:
+    """The shape every fixture that is not about geometry starts from: a title
+    placeholder and a body placeholder, neither carrying a single property of
+    its own so the cascade is what decides how they look."""
+    return slide(
+        shape(2, "Title 1", a_p(title), ph=ph("title"))
+        + shape(3, "Content Placeholder 2",
+                "".join(a_p(text, lvl=lvl) for text, lvl in bullets),
+                ph=ph("body", 1))
+    )
+
+
+def pptx_basic_slides() -> None:
+    """Two slides, title + body, nothing else. The floor of the format."""
+    build_pptx(
+        "basic-slides.pptx",
+        [
+            title_body_slide("Informe trimestral", [
+                ("Ingresos al alza", 0),
+                ("Costes estables", 0),
+            ]),
+            title_body_slide("Siguientes pasos", [("Cerrar el trimestre", 0)]),
+        ],
+        title="Presentación básica",
+    )
+
+
+def pptx_slide_order() -> None:
+    """`p:sldIdLst` disagrees with the file names on purpose: the reader that
+    trusts `slideN.xml` gets this deck backwards, and the golden would not say
+    so because both orders contain the same three slides."""
+    build_pptx(
+        "slide-order.pptx",
+        [
+            title_body_slide("Tercera en el orden", [("Va la última", 0)]),
+            title_body_slide("Primera en el orden", [("Va la primera", 0)]),
+            title_body_slide("Segunda en el orden", [("Va en medio", 0)]),
+        ],
+        order=[2, 3, 1],
+        title="Orden de diapositivas",
+    )
+
+
+def pptx_placeholders_cascade() -> None:
+    """A title and a body that state nothing: position, size, font and bullet
+    all come from the layout and the master. A reader that emits any attribute
+    for these shapes has failed the delta rule, and the writer that emits them
+    back destroys the design."""
+    build_pptx(
+        "placeholders-cascade.pptx",
+        [title_body_slide("Todo heredado", [
+            ("Sin posición propia", 0),
+            ("Sin tipografía propia", 0),
+        ])],
+        title="Cascada de placeholders",
+    )
+
+
+def pptx_placeholders_empty() -> None:
+    """An empty placeholder is content: it holds a position the layout gave it
+    and a user is expected to fill it. Phase 1 shipped a bug that dropped empty
+    paragraphs; this is where the same bug would land in a deck."""
+    build_pptx(
+        "placeholders-empty.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Título con cuerpo vacío"), ph=ph("title"))
+            + shape(3, "Content Placeholder 2", a_p(""), ph=ph("body", 1))
+            + shape(4, "Text Placeholder 3", a_p("Primera línea") + a_p("") + a_p("Tras el hueco"),
+                    ph=ph("body", 2), frame=xfrm(838200, 4500000, 7467600, 1500000))
+        )],
+        title="Placeholders vacíos",
+    )
+
+
+def pptx_bullets_levels() -> None:
+    """`a:pPr@lvl` nesting with both bullet kinds. Levels map to Markdown list
+    depth, which is the one part of a slide that is genuinely a flow document."""
+    build_pptx(
+        "bullets-levels.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Niveles de viñeta"), ph=ph("title"))
+            + shape(3, "Content Placeholder 2",
+                    a_p("Primer nivel", lvl=0)
+                    + a_p("Segundo nivel", lvl=1)
+                    + a_p("Tercer nivel", lvl=2)
+                    + a_p("Vuelve al primero", lvl=0),
+                    ph=ph("body", 1))
+            + shape(4, "Text Placeholder 3",
+                    a_p("Uno", bullet='<a:buAutoNum type="arabicPeriod"/>')
+                    + a_p("Dos", bullet='<a:buAutoNum type="arabicPeriod"/>'),
+                    ph=ph("body", 2), frame=xfrm(838200, 5200000, 7467600, 1000000))
+        )],
+        title="Viñetas y niveles",
+    )
+
+
+def pptx_notes_speaker() -> None:
+    """Speaker notes: the cheapest part of a deck to read and the densest in
+    intent. An agent asked what a slide is *for* answers from here."""
+    build_pptx(
+        "notes-speaker.pptx",
+        [
+            title_body_slide("Resultados", [("Crecimiento del 12 %", 0)]),
+            title_body_slide("Riesgos", [("Dependencia de un proveedor", 0)]),
+        ],
+        notes={
+            1: notes_slide(1, "Insistir en que el 12 % es interanual.\nNo entrar en el desglose por región."),
+            2: notes_slide(2, "Si preguntan por el proveedor, remitir al anexo."),
+        },
+        title="Notas del ponente",
+    )
+
+
+def pptx_tables_simple() -> None:
+    """`p:graphicFrame` -> `a:tbl`: a different XML model from `w:tbl`, but the
+    IR `Table` already covers it, so this fixture is about the wrapper."""
+    def tc(text: str) -> str:
+        return f"<a:tc>{tx_body(a_p(text))}<a:tcPr/></a:tc>"
+
+    rows = (
+        f'<a:tr h="370840">{tc("Región")}{tc("Ventas")}</a:tr>'
+        f'<a:tr h="370840">{tc("Norte")}{tc("1 200")}</a:tr>'
+        f'<a:tr h="370840">{tc("Sur")}{tc("980")}</a:tr>'
+    )
+    table = (
+        "<p:graphicFrame>"
+        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Tabla 1"/>'
+        '<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr>'
+        "<p:nvPr/></p:nvGraphicFramePr>"
+        f'<p:xfrm><a:off x="838200" y="1825625"/><a:ext cx="7467600" cy="1112520"/></p:xfrm>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
+        '<a:tbl><a:tblPr firstRow="1" bandRow="1"/>'
+        '<a:tblGrid><a:gridCol w="3733800"/><a:gridCol w="3733800"/></a:tblGrid>'
+        f"{rows}</a:tbl>"
+        "</a:graphicData></a:graphic>"
+        "</p:graphicFrame>"
+    )
+    build_pptx(
+        "tables-simple.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Ventas por región"), ph=ph("title")) + table
+        )],
+        title="Tabla simple",
+    )
+
+
+def pptx_images_anchored() -> None:
+    """A DrawingML picture with explicit geometry. The model is the one already
+    implemented for docx and xlsx — this fixture proves it transfers."""
+    picture = (
+        "<p:pic>"
+        '<p:nvPicPr><p:cNvPr id="4" name="Imagen 1" descr="Gráfico de barras azul"/>'
+        '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
+        '<p:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+        f'<p:spPr>{xfrm(1524000, 2286000, px(120), px(90))}'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        "</p:pic>"
+    )
+    build_pptx(
+        "images-anchored.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Con imagen"), ph=ph("title")) + picture
+        )],
+        media={"image1.png": BLUE_PNG},
+        slide_rels={1: [("rIdImg", "image", "../media/image1.png")]},
+        title="Imagen anclada",
+    )
+
+
+def pptx_shapes_geometry() -> None:
+    """Free shapes with `prstGeom` and a connector. None has a Markdown
+    equivalent, so all of them are raw-block candidates with a visible stub —
+    the decision `docs/technical-analysis-presentations.md` §2 takes up front."""
+    connector = (
+        "<p:cxnSp>"
+        '<p:nvCxnSpPr><p:cNvPr id="6" name="Conector 1"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>'
+        f'<p:spPr>{xfrm(3000000, 3000000, 1200000, 0)}'
+        '<a:prstGeom prst="line"><a:avLst/></a:prstGeom></p:spPr>'
+        "</p:cxnSp>"
+    )
+    build_pptx(
+        "shapes-geometry.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Formas libres"), ph=ph("title"))
+            + shape(4, "Rectángulo 1", a_p("Dentro del rectángulo"),
+                    geom="roundRect", frame=xfrm(838200, 2000000, 2000000, 900000))
+            + shape(5, "Flecha 1", "", geom="rightArrow",
+                    frame=xfrm(3200000, 2200000, 1400000, 500000))
+            + connector
+        )],
+        title="Geometría de formas",
+    )
+
+
+def pptx_autofit_stale() -> None:
+    """`a:normAutofit` with a `fontScale` PowerPoint computed for text that is
+    no longer there. This is risk P5 in a file: an agent that adds a line has
+    no way to recompute the scale, and PowerPoint will not until the box is
+    edited by hand. The fixture exists so `Warning::AutofitStale` has something
+    to fire on."""
+    build_pptx(
+        "autofit-stale.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Texto que no cabe"), ph=ph("title"))
+            + shape(3, "Content Placeholder 2",
+                    "".join(a_p(f"Línea {i} de un cuerpo deliberadamente largo", lvl=0)
+                            for i in range(1, 9)),
+                    ph=ph("body", 1),
+                    body_pr='<a:bodyPr><a:normAutofit fontScale="62500" lnSpcReduction="20000"/></a:bodyPr>')
+        )],
+        title="Autofit obsoleto",
+    )
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -2354,12 +2957,22 @@ GENERATORS = [
     ods_images_anchored,
     doc_basic_text,
     doc_encrypted,
+    pptx_basic_slides,
+    pptx_slide_order,
+    pptx_placeholders_cascade,
+    pptx_placeholders_empty,
+    pptx_bullets_levels,
+    pptx_notes_speaker,
+    pptx_tables_simple,
+    pptx_images_anchored,
+    pptx_shapes_geometry,
+    pptx_autofit_stale,
 ]
 
 
 def digest_tree() -> dict[str, str]:
     out = {}
-    for sub in ("docx", "xlsx", "odt", "ods", "doc"):
+    for sub in ("docx", "xlsx", "odt", "ods", "doc", "pptx"):
         d = ROOT / sub
         if not d.exists():
             continue
