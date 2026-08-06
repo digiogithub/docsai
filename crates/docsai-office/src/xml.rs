@@ -222,8 +222,22 @@ impl Element {
     }
 
     /// An integer attribute, or `None` when absent or unparsable.
+    ///
+    /// The schema says these are integers, but real producers emit floating
+    /// point where they computed a value — Google Docs writes
+    /// `w:left="1440.0000000000002"` for a one-inch margin. A strict parse
+    /// silently loses those, so a decimal is accepted and rounded.
     pub fn attr_i64(&self, local: &str) -> Option<i64> {
-        self.attr(local)?.trim().parse().ok()
+        let raw = self.attr(local)?.trim();
+        if let Ok(n) = raw.parse::<i64>() {
+            return Some(n);
+        }
+        let f = raw.parse::<f64>().ok()?;
+        if f.is_finite() {
+            Some(f.round() as i64)
+        } else {
+            None
+        }
     }
 }
 
@@ -316,6 +330,19 @@ mod tests {
         assert!(root.child("b").unwrap().ooxml_flag());
         assert!(!root.child("i").unwrap().ooxml_flag());
         assert!(root.child("strike").unwrap().ooxml_flag());
+    }
+
+    #[test]
+    fn integer_attributes_tolerate_the_decimals_google_docs_writes() {
+        // Google Docs exports a one-inch margin as 1440.0000000000002 twips.
+        let xml = r#"<w:pgMar xmlns:w="urn:w" w:top="0" w:left="1440.0000000000002"
+                     w:right="-1439.6" w:bottom="nope"/>"#;
+        let root = Element::parse("t.xml", xml.as_bytes()).unwrap();
+        assert_eq!(root.attr_i64("top"), Some(0));
+        assert_eq!(root.attr_i64("left"), Some(1440));
+        assert_eq!(root.attr_i64("right"), Some(-1440));
+        assert_eq!(root.attr_i64("bottom"), None);
+        assert_eq!(root.attr_i64("header"), None);
     }
 
     #[test]

@@ -66,14 +66,27 @@ struct Rel {
     external: bool,
 }
 
+/// Relationships owned by one part. Every part that carries `r:id`/`r:embed`
+/// references needs its own `_rels` file: a header may not borrow the ids of
+/// `document.xml.rels`, Word resolves them against the referencing part.
+#[derive(Default)]
+struct RelScope {
+    rels: Vec<Rel>,
+    next_rid: u32,
+}
+
+/// Owning part of the `document.xml` relationship scope.
+const DOC_PART: &str = "document.xml";
+
 struct WriterCtx<'a> {
     assets: &'a dyn AssetStore,
     report: &'a mut ConversionReport,
-    /// document.xml relationships (styles, numbering, media, headers…).
-    doc_rels: Vec<Rel>,
-    next_rid: u32,
-    /// asset id → (rId, part name)
-    media: BTreeMap<String, (String, String)>,
+    /// part name (relative to `word/`) → relationships declared by that part.
+    rel_scopes: BTreeMap<String, RelScope>,
+    /// part that `add_rel` currently writes into.
+    current_part: String,
+    /// asset id → media part name
+    media: BTreeMap<String, String>,
     media_seq: u32,
     /// header/footer parts: part name → xml
     header_parts: BTreeMap<String, String>,
@@ -93,8 +106,8 @@ impl<'a> WriterCtx<'a> {
         Self {
             assets,
             report,
-            doc_rels: Vec::new(),
-            next_rid: 1,
+            rel_scopes: BTreeMap::new(),
+            current_part: DOC_PART.to_string(),
             media: BTreeMap::new(),
             media_seq: 0,
             header_parts: BTreeMap::new(),
@@ -108,21 +121,54 @@ impl<'a> WriterCtx<'a> {
     }
 
     fn add_rel(&mut self, kind_suffix: &str, target: &str, external: bool) -> String {
-        let id = format!("rId{}", self.next_rid);
-        self.next_rid += 1;
-        self.doc_rels.push(Rel {
+        let kind = format!("{REL_OFFICE}/{kind_suffix}");
+        let scope = self
+            .rel_scopes
+            .entry(self.current_part.clone())
+            .or_insert_with(|| RelScope {
+                rels: Vec::new(),
+                next_rid: 1,
+            });
+        let id = format!("rId{}", scope.next_rid);
+        scope.next_rid += 1;
+        scope.rels.push(Rel {
             id: id.clone(),
-            kind: format!("{REL_OFFICE}/{kind_suffix}"),
+            kind,
             target: target.to_string(),
             external,
         });
         id
     }
 
+    /// Relationship id for `target` inside the current part, reusing the one
+    /// already declared there if any. Media parts are shared package-wide but
+    /// each referencing part needs its own id for them.
+    fn part_rel(&mut self, kind_suffix: &str, target: &str) -> String {
+        let kind = format!("{REL_OFFICE}/{kind_suffix}");
+        if let Some(scope) = self.rel_scopes.get(&self.current_part) {
+            if let Some(rel) = scope
+                .rels
+                .iter()
+                .find(|r| !r.external && r.kind == kind && r.target == target)
+            {
+                return rel.id.clone();
+            }
+        }
+        self.add_rel(kind_suffix, target, false)
+    }
+
+    /// Renders `f` with relationships routed to `part` instead of the current one.
+    fn in_part<T>(&mut self, part: &str, f: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = std::mem::replace(&mut self.current_part, part.to_string());
+        let out = f(self);
+        self.current_part = previous;
+        out
+    }
+
     fn ensure_media(&mut self, image: &ImageRef) -> Option<(String, i64, i64)> {
         let asset_key = image.asset.as_str().to_string();
-        let (rid, _) = if let Some(entry) = self.media.get(&asset_key) {
-            entry.clone()
+        let part = if let Some(part) = self.media.get(&asset_key) {
+            part.clone()
         } else {
             let _bytes = match self.assets.get(&image.asset) {
                 Some(b) => b,
@@ -140,13 +186,10 @@ impl<'a> WriterCtx<'a> {
                 .unwrap_or_else(|| "bin".into());
             self.media_seq += 1;
             let part = format!("media/image{}.{}", self.media_seq, ext);
-            let rid = self.add_rel("image", &part, false);
-            // store bytes later via package — keep mapping of rid→part; bytes via asset id
-            self.media
-                .insert(asset_key.clone(), (rid.clone(), part.clone()));
-            // stash bytes under a side channel: part name is enough; package build pulls assets
-            (rid, part)
+            self.media.insert(asset_key.clone(), part.clone());
+            part
         };
+        let rid = self.part_rel("image", &part);
         let cx = image.geometry.display_size.width.emu().max(1);
         let cy = image.geometry.display_size.height.emu().max(1);
         Some((rid, cx, cy))
@@ -199,7 +242,6 @@ fn build_package(
 
     // Document
     package.insert("word/document.xml", document_xml(&body_xml));
-    package.insert("word/_rels/document.xml.rels", document_rels_xml(&ctx));
 
     // Styles + numbering
     package.insert("word/styles.xml", styles_xml(&doc.styles));
@@ -223,8 +265,20 @@ fn build_package(
         package.insert(format!("word/{name}"), xml.clone());
     }
 
+    // One `_rels` part per owning part: document.xml always, header/footer and
+    // footnotes only when they actually reference something.
+    for (owner, scope) in &ctx.rel_scopes {
+        if scope.rels.is_empty() && owner != DOC_PART {
+            continue;
+        }
+        package.insert(format!("word/_rels/{owner}.rels"), rels_xml(&scope.rels));
+    }
+    if !ctx.rel_scopes.contains_key(DOC_PART) {
+        package.insert(format!("word/_rels/{DOC_PART}.rels"), rels_xml(&[]));
+    }
+
     // Media
-    for (asset_id, (_rid, part)) in &ctx.media {
+    for (asset_id, part) in &ctx.media {
         let id = docsai_model::assets::AssetId::new(asset_id.clone());
         if let Some(bytes) = assets.get(&id) {
             package.insert(format!("word/{part}"), bytes.to_vec());
@@ -481,9 +535,11 @@ fn write_inlines(inlines: &[Inline], ctx: &mut WriterCtx<'_>, out: &mut String, 
                 let id = ctx.next_footnote;
                 ctx.next_footnote += 1;
                 let mut body = String::new();
-                for block in &note.blocks {
-                    write_block(block, ctx, &mut body, None);
-                }
+                ctx.in_part("footnotes.xml", |ctx| {
+                    for block in &note.blocks {
+                        write_block(block, ctx, &mut body, None);
+                    }
+                });
                 if body.is_empty() {
                     body.push_str("<w:p/>");
                 }
@@ -1141,9 +1197,11 @@ fn register_hf(
     let rid = ctx.add_rel(kind, &file, false);
 
     let mut body = String::new();
-    for b in &hf.blocks {
-        write_block(b, ctx, &mut body, None);
-    }
+    ctx.in_part(&file, |ctx| {
+        for b in &hf.blocks {
+            write_block(b, ctx, &mut body, None);
+        }
+    });
     if body.is_empty() {
         body.push_str("<w:p/>");
     }
@@ -1178,12 +1236,12 @@ fn document_xml(body: &str) -> String {
     )
 }
 
-fn document_rels_xml(ctx: &WriterCtx<'_>) -> String {
+fn rels_xml(rels: &[Rel]) -> String {
     let mut s = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="{NS_PKG_REL}">"#
     );
-    for rel in &ctx.doc_rels {
+    for rel in rels {
         if rel.external {
             s.push_str(&format!(
                 r#"<Relationship Id="{}" Type="{}" Target="{}" TargetMode="External"/>"#,
@@ -1737,6 +1795,97 @@ mod tests {
         assert!(
             found_bold_note,
             "footnote bold formatting lost on write/read"
+        );
+    }
+
+    /// An image inside a header is referenced from `header1.xml`, so its
+    /// relationship has to live in `word/_rels/header1.xml.rels`. Registering
+    /// it in `document.xml.rels` instead leaves Word with a dangling
+    /// `r:embed` and the picture disappears.
+    #[test]
+    fn header_images_get_their_relationship_in_the_header_part() {
+        use docsai_model::image::{Anchor, ImageGeometry, ImageRef};
+        use docsai_model::text::{HeaderFooter, HeaderScope, Inline};
+        use docsai_model::units::{Length, Size};
+
+        let png = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xFE,
+            0xD4, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let mut assets = MemoryAssetStore::new();
+        let asset = assets.put(&png).expect("asset");
+        let image = ImageRef {
+            id: None,
+            asset,
+            geometry: ImageGeometry {
+                display_size: Size::new(Length::from_cm(21.0), Length::from_cm(29.7)),
+                native_size_px: Some((1, 1)),
+                dpi: None,
+                anchor: Anchor::Inline,
+                rotation_deg: 0.0,
+                flip: Default::default(),
+                crop: None,
+                border: None,
+                z_index: None,
+            },
+            alt: String::new(),
+            title: None,
+            name: Some("fondo".into()),
+            link: None,
+            external_src: None,
+            effects_raw: None,
+        };
+        let doc = Document::Text(TextDocument {
+            sections: vec![Section {
+                headers: vec![HeaderFooter {
+                    scope: HeaderScope::First,
+                    blocks: vec![Block::Paragraph(Paragraph {
+                        id: None,
+                        format: Default::default(),
+                        content: vec![Inline::Image(Box::new(image))],
+                    })],
+                }],
+                blocks: vec![Block::Paragraph(Paragraph::text("cuerpo"))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        let mut buf = Cursor::new(Vec::new());
+        write_docx(&doc, &assets, &mut buf).expect("write");
+        let mut zip = zip::ZipArchive::new(buf).expect("zip");
+        let read = |zip: &mut zip::ZipArchive<Cursor<Vec<u8>>>, name: &str| -> String {
+            use std::io::Read;
+            let mut s = String::new();
+            zip.by_name(name)
+                .unwrap_or_else(|_| panic!("missing part {name}"))
+                .read_to_string(&mut s)
+                .expect("utf8");
+            s
+        };
+        let header = read(&mut zip, "word/header1.xml");
+        let header_rels = read(&mut zip, "word/_rels/header1.xml.rels");
+        let doc_rels = read(&mut zip, "word/_rels/document.xml.rels");
+
+        let embed = header
+            .split(r#"r:embed=""#)
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .expect("header embeds an image");
+        assert!(
+            header_rels.contains(&format!(r#"Id="{embed}""#)),
+            "header rels {header_rels} must declare {embed}"
+        );
+        assert!(
+            header_rels.contains("/image"),
+            "header rels must carry the image relationship: {header_rels}"
+        );
+        assert!(
+            !doc_rels.contains("relationships/image"),
+            "the image belongs to the header, not to document.xml.rels: {doc_rels}"
         );
     }
 }
