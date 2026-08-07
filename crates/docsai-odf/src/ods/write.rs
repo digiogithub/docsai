@@ -36,10 +36,11 @@ pub fn write_ods<W: Write + Seek>(
 ) -> Result<ConversionReport, WriteError> {
     let book = match document {
         Document::Workbook(w) => w,
-        Document::Text(_) => {
-            return Err(WriteError::Invalid(
-                "cannot write a text document as .ods".into(),
-            ));
+        other => {
+            return Err(WriteError::Invalid(format!(
+                "cannot write {} as .ods",
+                other.shape_name()
+            )));
         }
     };
     let mut report = ConversionReport::new();

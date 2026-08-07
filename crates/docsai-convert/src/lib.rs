@@ -132,6 +132,12 @@ pub const SUPPORT: &[FormatSupport] = &[
         note: "Phase 4",
     },
     FormatSupport {
+        format: Format::Pptx,
+        read: false,
+        write: false,
+        note: "Phase 13: the IR root exists, the reader does not yet",
+    },
+    FormatSupport {
         format: Format::DocMark,
         read: true,
         write: true,
@@ -181,6 +187,9 @@ mod tests {
         assert!(can_write(Format::Ods));
         assert!(can_read(Format::DocMark));
         assert!(can_write(Format::DocMark));
+        // Recognised, and honestly reported as not yet readable.
+        assert!(!can_read(Format::Pptx));
+        assert!(!can_write(Format::Pptx));
     }
 
     #[test]
@@ -190,6 +199,6 @@ mod tests {
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), total);
-        assert_eq!(total, 7);
+        assert_eq!(total, 8);
     }
 }

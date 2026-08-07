@@ -166,7 +166,12 @@ measured token budget), then presentations (`.pptx` ⇄ DocMark, charts, `.odp`,
 then patch editing (`apply_edits`), then hardening — which absorbs the open items of v1 Phases
 8–9 (fuzzing, adversarial suite, benchmarks, audit).
 
-Next up is **Phase 10**: stable addressing and token budget.
+**Phases 11 and 12 of plan v2 are closed** too: the raw-block sidecar, `--fidelity agent`,
+`read --select`, `search` and the three addressing primitives over MCP; then the three
+presentation spikes (`docs/spikes/P1`–`P3`) and the `corpus/pptx` deck corpus.
+
+Current work is **Phase 13**: `.pptx` reading into the IR. `Document::Presentation` exists
+(`docsai-model::presentation`); the reader does not yet, and `docsai formats` says so.
 
 ## 2. Documents you must read before implementing
 

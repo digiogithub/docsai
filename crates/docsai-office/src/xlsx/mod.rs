@@ -784,7 +784,7 @@ mod tests {
     fn book(doc: &Document) -> &Workbook {
         match doc {
             Document::Workbook(w) => w,
-            Document::Text(_) => panic!("expected workbook"),
+            other => panic!("expected a workbook, got {}", other.shape_name()),
         }
     }
 

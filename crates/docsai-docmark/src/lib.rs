@@ -292,6 +292,19 @@ fn render_body(
             report.stats.styles = book.styles.styles.len() as u32;
             (body, report)
         }
+        // The presentation profile arrives with its serializer in Phase 14.
+        // Until then a deck produces no body — and says so loudly, because a
+        // silently empty document is exactly the failure this project refuses.
+        Document::Presentation(deck) => {
+            let mut report = ConversionReport::new();
+            report.warn(Warning::UnsupportedElement {
+                kind: "presentation".into(),
+                location: "document".into(),
+                action: "skipped: DocMark-P is not implemented yet".into(),
+            });
+            report.stats.styles = deck.styles.styles.len() as u32;
+            (String::new(), report)
+        }
     };
     (ids, body, report)
 }

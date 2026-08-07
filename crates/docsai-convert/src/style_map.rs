@@ -137,10 +137,13 @@ pub fn apply_style_map(document: &mut Document, style_map: &StyleMap) -> Vec<War
     }];
 
     match document {
-        Document::Workbook(_) => {
+        Document::Workbook(_) | Document::Presentation(_) => {
             warnings.push(Warning::Degraded {
                 what: "style-map".into(),
-                why: "style maps apply to text documents only; workbook left unchanged".into(),
+                why: format!(
+                    "style maps apply to text documents only; {} left unchanged",
+                    document.shape_name()
+                ),
             });
         }
         Document::Text(text) => {

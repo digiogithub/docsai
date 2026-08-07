@@ -129,10 +129,7 @@ pub fn parse_with_base(
     // A hand-written id can sit above `next-id`; the counter must dominate
     // every id in the document before anything is allocated again.
     observe_ids(&mut doc);
-    report.stats.styles = match &doc {
-        Document::Text(t) => t.styles.styles.len() as u32,
-        Document::Workbook(w) => w.styles.styles.len() as u32,
-    };
+    report.stats.styles = doc.styles().styles.len() as u32;
     Ok((doc, report))
 }
 

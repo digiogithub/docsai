@@ -47,10 +47,11 @@ pub fn write_docx<W: Write + Seek>(
 ) -> Result<ConversionReport, WriteError> {
     let text = match document {
         Document::Text(t) => t,
-        Document::Workbook(_) => {
-            return Err(WriteError::Invalid(
-                "cannot write a workbook as .docx".into(),
-            ));
+        other => {
+            return Err(WriteError::Invalid(format!(
+                "cannot write {} as .docx",
+                other.shape_name()
+            )));
         }
     };
     let mut report = ConversionReport::new();

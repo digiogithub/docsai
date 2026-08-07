@@ -171,6 +171,22 @@ pub fn build_report(
                 stats_from_workbook(book, document.styles().styles.len()),
             )
         }
+        // The slide inventory an agent needs — layout, shape count, notes —
+        // lands with the reader that can fill it (plan v2 Phase 13 task 11).
+        Document::Presentation(deck) => {
+            for slide in &deck.slides {
+                for block in slide.blocks() {
+                    count_block_images(std::slice::from_ref(block), &mut ref_counts);
+                }
+                count_shape_images(&slide.shapes, &mut ref_counts);
+            }
+            (
+                "presentation",
+                None,
+                None,
+                stats_from_presentation(deck, document.styles().styles.len()),
+            )
+        }
     };
 
     let media = assets
@@ -233,6 +249,54 @@ fn stats_from_text(text: &TextDocument, style_count: usize) -> ConversionStats {
         }
     }
     stats
+}
+
+fn stats_from_presentation(
+    deck: &docsai_model::Presentation,
+    style_count: usize,
+) -> ConversionStats {
+    let mut stats = ConversionStats {
+        styles: style_count as u32,
+        slides: deck.slides.len() as u32,
+        ..Default::default()
+    };
+    for slide in &deck.slides {
+        for block in slide.blocks() {
+            tally_blocks(std::slice::from_ref(block), &mut stats);
+        }
+        stats.images = stats
+            .images
+            .saturating_add(count_slide_pictures(&slide.shapes));
+    }
+    stats
+}
+
+/// Pictures are shapes, not blocks, so neither the block tally nor the
+/// reference count sees them.
+fn count_slide_pictures(shapes: &[docsai_model::presentation::Shape]) -> u32 {
+    use docsai_model::presentation::ShapeKind;
+    shapes
+        .iter()
+        .map(|shape| match &shape.kind {
+            ShapeKind::Picture(_) => 1,
+            ShapeKind::Group(children) => count_slide_pictures(children),
+            _ => 0,
+        })
+        .sum()
+}
+
+fn count_shape_images(
+    shapes: &[docsai_model::presentation::Shape],
+    counts: &mut std::collections::BTreeMap<String, usize>,
+) {
+    use docsai_model::presentation::ShapeKind;
+    for shape in shapes {
+        match &shape.kind {
+            ShapeKind::Picture(image) => bump_image(image, counts),
+            ShapeKind::Group(children) => count_shape_images(children, counts),
+            _ => {}
+        }
+    }
 }
 
 fn stats_from_workbook(book: &docsai_model::Workbook, style_count: usize) -> ConversionStats {

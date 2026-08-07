@@ -42,10 +42,11 @@ pub fn write_xlsx<W: Write + Seek>(
 ) -> Result<ConversionReport, WriteError> {
     let book = match document {
         Document::Workbook(w) => w,
-        Document::Text(_) => {
-            return Err(WriteError::Invalid(
-                "cannot write a text document as .xlsx".into(),
-            ));
+        other => {
+            return Err(WriteError::Invalid(format!(
+                "cannot write {} as .xlsx",
+                other.shape_name()
+            )));
         }
     };
     let mut report = ConversionReport::new();

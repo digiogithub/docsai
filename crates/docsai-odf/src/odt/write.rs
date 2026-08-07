@@ -45,10 +45,11 @@ pub fn write_odt<W: Write + Seek>(
 ) -> Result<ConversionReport, WriteError> {
     let text = match document {
         Document::Text(t) => t,
-        Document::Workbook(_) => {
-            return Err(WriteError::Invalid(
-                "cannot write a workbook as .odt".into(),
-            ));
+        other => {
+            return Err(WriteError::Invalid(format!(
+                "cannot write {} as .odt",
+                other.shape_name()
+            )));
         }
     };
     let mut report = ConversionReport::new();

@@ -551,6 +551,7 @@ pub fn roundtrip_file(
         Format::DocMark => match &document1 {
             Document::Workbook(_) => Format::Xlsx,
             Document::Text(_) => Format::Docx,
+            Document::Presentation(_) => Format::Pptx,
         },
         other => {
             return Err(ConvertError::Unsupported {

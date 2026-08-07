@@ -10,7 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::image::{Anchor, ImageRef};
-use crate::text::{Block, Inline, TextDocument};
+use crate::presentation::{Presentation, Shape, ShapeKind};
+use crate::text::{Block, Inline, Table, TextDocument};
 use crate::Document;
 
 /// A violated invariant.
@@ -21,6 +22,9 @@ pub enum ValidationError {
     SheetAnchorInTextDocument { location: String, anchor: String },
     /// A document anchor was found on a sheet image.
     DocumentAnchorInSheet { sheet: String, anchor: String },
+    /// A spreadsheet anchor was found on a slide. A shape is positioned on the
+    /// canvas, never against a cell.
+    SheetAnchorInPresentation { location: String, anchor: String },
     /// A table row has more cells than the table's grid.
     RowWiderThanGrid {
         table: String,
@@ -42,6 +46,10 @@ impl std::fmt::Display for ValidationError {
             ValidationError::DocumentAnchorInSheet { sheet, anchor } => write!(
                 f,
                 "document anchor `{anchor}` on an image of sheet `{sheet}`"
+            ),
+            ValidationError::SheetAnchorInPresentation { location, anchor } => write!(
+                f,
+                "sheet anchor `{anchor}` on an image of a presentation, at {location}"
             ),
             ValidationError::RowWiderThanGrid {
                 table,
@@ -69,6 +77,7 @@ pub fn validate(doc: &Document) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
     match doc {
         Document::Text(text) => validate_text(text, &mut errors),
+        Document::Presentation(deck) => validate_presentation(deck, &mut errors),
         Document::Workbook(book) => {
             for sheet in &book.sheets {
                 for image in &sheet.images {
@@ -90,14 +99,51 @@ pub fn validate(doc: &Document) -> Result<(), Vec<ValidationError>> {
     }
 }
 
+/// Which root the blocks being walked belong to. The anchor rules differ per
+/// root (architecture §3.1) and so does the error that names the violation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Root {
+    Text,
+    Presentation,
+}
+
+fn validate_presentation(deck: &Presentation, errors: &mut Vec<ValidationError>) {
+    for (si, slide) in deck.slides.iter().enumerate() {
+        let path = format!("slide {si}");
+        for shape in &slide.shapes {
+            walk_shape(shape, &path, errors);
+        }
+        if let Some(notes) = &slide.notes {
+            walk_blocks(notes, &format!("{path}/notes"), Root::Presentation, errors);
+        }
+    }
+}
+
+fn walk_shape(shape: &Shape, path: &str, errors: &mut Vec<ValidationError>) {
+    let path = format!("{path}/shape {}", shape.z_index);
+    match &shape.kind {
+        ShapeKind::Placeholder(ph) => walk_blocks(&ph.body, &path, Root::Presentation, errors),
+        ShapeKind::TextBox { body } => walk_blocks(body, &path, Root::Presentation, errors),
+        ShapeKind::Picture(image) => check_image(image, &path, Root::Presentation, errors),
+        ShapeKind::Table(table) => check_table(table, &path, Root::Presentation, errors),
+        ShapeKind::Group(children) => {
+            for child in children {
+                walk_shape(child, &path, errors);
+            }
+        }
+        ShapeKind::Chart(_) | ShapeKind::Raw(_) => {}
+    }
+}
+
 fn validate_text(doc: &TextDocument, errors: &mut Vec<ValidationError>) {
     for (si, section) in doc.sections.iter().enumerate() {
         let path = format!("section {si}");
-        walk_blocks(&section.blocks, &path, errors);
+        walk_blocks(&section.blocks, &path, Root::Text, errors);
         for h in &section.headers {
             walk_blocks(
                 &h.blocks,
                 &format!("{path} header {}", h.scope.as_str()),
+                Root::Text,
                 errors,
             );
         }
@@ -105,69 +151,75 @@ fn validate_text(doc: &TextDocument, errors: &mut Vec<ValidationError>) {
             walk_blocks(
                 &f.blocks,
                 &format!("{path} footer {}", f.scope.as_str()),
+                Root::Text,
                 errors,
             );
         }
     }
 }
 
-fn walk_blocks(blocks: &[Block], path: &str, errors: &mut Vec<ValidationError>) {
+fn walk_blocks(blocks: &[Block], path: &str, root: Root, errors: &mut Vec<ValidationError>) {
     for (bi, block) in blocks.iter().enumerate() {
         let path = format!("{path}/block {bi}");
         match block {
-            Block::Paragraph(p) => walk_inlines(&p.content, &path, errors),
-            Block::Heading(h) => walk_inlines(&h.paragraph.content, &path, errors),
-            Block::Image(image) => check_image(image, &path, errors),
+            Block::Paragraph(p) => walk_inlines(&p.content, &path, root, errors),
+            Block::Heading(h) => walk_inlines(&h.paragraph.content, &path, root, errors),
+            Block::Image(image) => check_image(image, &path, root, errors),
             Block::List(list) => {
                 for (ii, item) in list.items.iter().enumerate() {
-                    walk_blocks(&item.blocks, &format!("{path}/item {ii}"), errors);
+                    walk_blocks(&item.blocks, &format!("{path}/item {ii}"), root, errors);
                 }
             }
-            Block::Table(table) => {
-                let grid = table.width();
-                for (ri, row) in table.rows.iter().enumerate() {
-                    let width: usize = row.cells.iter().map(|c| c.colspan.max(1) as usize).sum();
-                    if width > grid {
-                        errors.push(ValidationError::RowWiderThanGrid {
-                            table: path.clone(),
-                            row: ri,
-                            width,
-                            grid,
-                        });
-                    }
-                    for (ci, cell) in row.cells.iter().enumerate() {
-                        walk_blocks(&cell.blocks, &format!("{path}/r{ri}c{ci}"), errors);
-                    }
-                }
-            }
-            Block::TextBox(tb) => walk_blocks(&tb.blocks, &path, errors),
+            Block::Table(table) => check_table(table, &path, root, errors),
+            Block::TextBox(tb) => walk_blocks(&tb.blocks, &path, root, errors),
             Block::Raw(_) => {}
         }
     }
 }
 
-fn walk_inlines(inlines: &[Inline], path: &str, errors: &mut Vec<ValidationError>) {
+fn check_table(table: &Table, path: &str, root: Root, errors: &mut Vec<ValidationError>) {
+    let grid = table.width();
+    for (ri, row) in table.rows.iter().enumerate() {
+        let width: usize = row.cells.iter().map(|c| c.colspan.max(1) as usize).sum();
+        if width > grid {
+            errors.push(ValidationError::RowWiderThanGrid {
+                table: path.to_string(),
+                row: ri,
+                width,
+                grid,
+            });
+        }
+        for (ci, cell) in row.cells.iter().enumerate() {
+            walk_blocks(&cell.blocks, &format!("{path}/r{ri}c{ci}"), root, errors);
+        }
+    }
+}
+
+fn walk_inlines(inlines: &[Inline], path: &str, root: Root, errors: &mut Vec<ValidationError>) {
     for inline in inlines {
         match inline {
-            Inline::Image(image) => check_image(image, path, errors),
+            Inline::Image(image) => check_image(image, path, root, errors),
             Inline::Styled { content, .. } | Inline::Link { content, .. } => {
-                walk_inlines(content, path, errors)
+                walk_inlines(content, path, root, errors)
             }
             Inline::Footnote(note) => {
-                walk_blocks(&note.blocks, &format!("{path}/footnote"), errors)
+                walk_blocks(&note.blocks, &format!("{path}/footnote"), root, errors)
             }
             _ => {}
         }
     }
 }
 
-fn check_image(image: &ImageRef, path: &str, errors: &mut Vec<ValidationError>) {
-    if image.geometry.anchor.is_sheet() {
-        errors.push(ValidationError::SheetAnchorInTextDocument {
-            location: path.to_string(),
-            anchor: image.geometry.anchor.keyword().into(),
-        });
+fn check_image(image: &ImageRef, path: &str, root: Root, errors: &mut Vec<ValidationError>) {
+    if !image.geometry.anchor.is_sheet() {
+        return;
     }
+    let location = path.to_string();
+    let anchor = image.geometry.anchor.keyword().into();
+    errors.push(match root {
+        Root::Text => ValidationError::SheetAnchorInTextDocument { location, anchor },
+        Root::Presentation => ValidationError::SheetAnchorInPresentation { location, anchor },
+    });
 }
 
 fn check_two_cell(image: &ImageRef, path: &str, errors: &mut Vec<ValidationError>) {
@@ -257,6 +309,45 @@ mod tests {
             errors[0],
             ValidationError::DocumentAnchorInSheet { .. }
         ));
+    }
+
+    #[test]
+    fn sheet_anchors_are_rejected_on_slides_too() {
+        use crate::presentation::{Placeholder, Presentation, Shape, ShapeKind, Slide};
+        let anchor = Anchor::SheetOneCell {
+            from: CellAnchor::new(CellRef::new(0, 0), Length::ZERO, Length::ZERO),
+        };
+        let doc = Document::Presentation(Presentation {
+            slides: vec![Slide {
+                shapes: vec![
+                    Shape::new(0, ShapeKind::Picture(image_with(anchor.clone()))),
+                    Shape::new(
+                        1,
+                        ShapeKind::Placeholder(Placeholder {
+                            body: vec![Block::Image(image_with(anchor))],
+                            ..Default::default()
+                        }),
+                    ),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let errors = validate(&doc).unwrap_err();
+        assert_eq!(errors.len(), 2, "both the shape and the block are checked");
+        assert!(errors
+            .iter()
+            .all(|e| matches!(e, ValidationError::SheetAnchorInPresentation { .. })));
+    }
+
+    #[test]
+    fn a_plain_presentation_validates() {
+        use crate::presentation::{Presentation, Slide};
+        let doc = Document::Presentation(Presentation {
+            slides: vec![Slide::default()],
+            ..Default::default()
+        });
+        assert!(validate(&doc).is_ok());
     }
 
     #[test]

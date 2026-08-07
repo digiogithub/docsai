@@ -329,6 +329,157 @@ fn round_trips_a_workbook_with_every_anchor_kind() {
     assert_json_round_trip(&doc);
 }
 
+#[test]
+fn round_trips_a_presentation_using_every_shape_kind() {
+    use docsai_model::presentation::*;
+
+    let asset = AssetId::new("deadbeefcafe0003");
+    let picture = ImageRef::new(
+        asset.clone(),
+        ImageGeometry::inline(Size::new(Length::from_cm(8.0), Length::from_cm(4.5))),
+    );
+
+    let mut layouts = LayoutCatalog::default();
+    layouts.masters.insert(
+        MasterId::new("M1"),
+        Master {
+            name: "Office Theme".into(),
+            theme: Some("ppt/theme/theme1.xml".into()),
+            placeholders: vec![LayoutPlaceholder {
+                ph_type: PhType::Title,
+                ..Default::default()
+            }],
+        },
+    );
+    layouts.layouts.insert(
+        LayoutId::new("L1"),
+        Layout {
+            name: "Title and Content".into(),
+            master: Some(MasterId::new("M1")),
+            placeholders: vec![
+                LayoutPlaceholder {
+                    ph_type: PhType::Title,
+                    geometry: ShapeGeometry::at(
+                        Point::new(Length::from_emu(838_200), Length::from_emu(365_125)),
+                        Size::new(Length::from_emu(10_515_600), Length::from_emu(1_325_563)),
+                    ),
+                    ..Default::default()
+                },
+                LayoutPlaceholder {
+                    ph_type: PhType::Body,
+                    idx: Some(1),
+                    props: ShapeProps {
+                        font: FontProps {
+                            size: Some(Length::from_pt(18.0)),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ],
+        },
+    );
+
+    let mut geometry = ShapeGeometry::at(
+        Point::new(Length::from_emu(3_200_000), Length::from_emu(2_200_000)),
+        Size::new(Length::from_emu(1_400_000), Length::from_emu(500_000)),
+    );
+    geometry.rotation_deg = 27.0;
+    geometry.flip = Flip::H;
+
+    let slide = Slide {
+        id: Some(docsai_model::NodeId::new("n1")),
+        layout: Some(LayoutId::new("L1")),
+        name: Some("Resultados".into()),
+        shapes: vec![
+            Shape::new(
+                0,
+                ShapeKind::Placeholder(Placeholder {
+                    ph_type: PhType::CenterTitle,
+                    body: vec![Block::Paragraph(Paragraph::text("Resultados"))],
+                    ..Default::default()
+                }),
+            ),
+            Shape::new(
+                1,
+                ShapeKind::Placeholder(Placeholder {
+                    ph_type: PhType::Body,
+                    idx: Some(1),
+                    body: vec![Block::Paragraph(Paragraph::text("Crecimiento del 12 %"))],
+                    delta: ShapeProps {
+                        fill: Some("#ffffff".into()),
+                        font_scale: Some(92.5),
+                        ..Default::default()
+                    },
+                }),
+            ),
+            Shape::new(2, ShapeKind::TextBox { body: vec![] }),
+            Shape::new(3, ShapeKind::Picture(picture)),
+            Shape::new(
+                4,
+                ShapeKind::Table(Table {
+                    rows: vec![TableRow {
+                        cells: vec![TableCell::text("Región")],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+            ),
+            Shape::new(
+                5,
+                ShapeKind::Chart(ChartRef {
+                    kind: Some("barChart".into()),
+                    title: Some("Ingresos".into()),
+                    workbook: Some(AssetId::new("deadbeefcafe0004")),
+                    raw: Some(RawId::new("raw-0007")),
+                }),
+            ),
+            Shape {
+                id: None,
+                name: Some("Arrow 1".into()),
+                z_index: 6,
+                geometry,
+                kind: ShapeKind::Raw(RawShape {
+                    kind: RawShapeKind::Connector,
+                    raw: Some(RawId::new("raw-0008")),
+                    text: "hacia el anexo".into(),
+                }),
+            },
+            Shape::new(
+                7,
+                ShapeKind::Group(vec![Shape::new(
+                    0,
+                    ShapeKind::TextBox {
+                        body: vec![Block::Paragraph(Paragraph::text("dentro"))],
+                    },
+                )]),
+            ),
+        ],
+        notes: Some(vec![Block::Paragraph(Paragraph::text("hablar despacio"))]),
+        hidden: true,
+        section: Some("Cierre".into()),
+        raw: vec![RawId::new("raw-0009")],
+    };
+
+    let doc = Document::Presentation(Presentation {
+        meta: DocumentMeta {
+            title: Some("Q3".into()),
+            ..Default::default()
+        },
+        layouts,
+        slide_size: Size::new(Length::from_emu(12_192_000), Length::from_emu(6_858_000)),
+        slides: vec![slide, Slide::default()],
+        skeleton: Some(SkeletonRef {
+            asset: AssetId::new("deadbeefcafe0005"),
+            rebuilt_parts: vec!["ppt/slides/slide1.xml".into()],
+        }),
+        ..Default::default()
+    });
+
+    assert_json_round_trip(&doc);
+}
+
 // --------------------------------------------------------------------------
 // Property testing
 // --------------------------------------------------------------------------

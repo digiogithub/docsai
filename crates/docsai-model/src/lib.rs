@@ -32,6 +32,7 @@ pub mod addressing;
 pub mod assets;
 pub mod image;
 pub mod list;
+pub mod presentation;
 pub mod report;
 pub mod sheet;
 pub mod style;
@@ -43,6 +44,7 @@ use serde::{Deserialize, Serialize};
 
 pub use addressing::{Addressable, Addressing, Etag, IdPolicy, NodeId, NodeKind};
 pub use assets::{AssetId, AssetInfo, AssetStore, MemoryAssetStore};
+pub use presentation::Presentation;
 pub use report::{ConversionReport, ConversionStats, Severity, Warning};
 pub use sheet::Workbook;
 pub use style::{StyleCatalog, StyleId};
@@ -56,7 +58,7 @@ pub const DOCMARK_VERSION: &str = "1.0";
 /// additive: a 1.0 document parses unchanged, and ids appear on the next write.
 pub const DOCMARK_VERSION_ADDRESSED: &str = "1.1";
 
-/// The two shapes a document can take.
+/// The three shapes a document can take.
 ///
 /// Externally tagged on purpose: an internally tagged enum makes serde buffer
 /// the payload through `Content`, which rewrites every map key as a string and
@@ -66,6 +68,7 @@ pub const DOCMARK_VERSION_ADDRESSED: &str = "1.1";
 pub enum Document {
     Text(TextDocument),
     Workbook(Workbook),
+    Presentation(Presentation),
 }
 
 impl Document {
@@ -74,6 +77,7 @@ impl Document {
         match self {
             Document::Text(d) => &d.meta,
             Document::Workbook(w) => &w.meta,
+            Document::Presentation(p) => &p.meta,
         }
     }
 
@@ -81,6 +85,7 @@ impl Document {
         match self {
             Document::Text(d) => &mut d.meta,
             Document::Workbook(w) => &mut w.meta,
+            Document::Presentation(p) => &mut p.meta,
         }
     }
 
@@ -89,6 +94,7 @@ impl Document {
         match self {
             Document::Text(d) => &d.addressing,
             Document::Workbook(w) => &w.addressing,
+            Document::Presentation(p) => &p.addressing,
         }
     }
 
@@ -96,6 +102,7 @@ impl Document {
         match self {
             Document::Text(d) => &mut d.addressing,
             Document::Workbook(w) => &mut w.addressing,
+            Document::Presentation(p) => &mut p.addressing,
         }
     }
 
@@ -104,6 +111,7 @@ impl Document {
         match self {
             Document::Text(d) => &d.styles,
             Document::Workbook(w) => &w.styles,
+            Document::Presentation(p) => &p.styles,
         }
     }
 
@@ -113,6 +121,21 @@ impl Document {
 
     pub fn is_workbook(&self) -> bool {
         matches!(self, Document::Workbook(_))
+    }
+
+    pub fn is_presentation(&self) -> bool {
+        matches!(self, Document::Presentation(_))
+    }
+
+    /// What this document is, as a message to a human names it: the writers
+    /// all have to say «cannot write a presentation as .docx» and they should
+    /// say it the same way.
+    pub fn shape_name(&self) -> &'static str {
+        match self {
+            Document::Text(_) => "a text document",
+            Document::Workbook(_) => "a workbook",
+            Document::Presentation(_) => "a presentation",
+        }
     }
 }
 
@@ -126,6 +149,7 @@ pub enum Format {
     Xls,
     Odt,
     Ods,
+    Pptx,
     /// The DocMark pivot itself.
     DocMark,
 }
@@ -140,6 +164,7 @@ impl Format {
             Format::Xls => "xls",
             Format::Odt => "odt",
             Format::Ods => "ods",
+            Format::Pptx => "pptx",
             Format::DocMark => "docmark",
         }
     }
@@ -158,6 +183,7 @@ impl Format {
             "xls" => Some(Format::Xls),
             "odt" => Some(Format::Odt),
             "ods" => Some(Format::Ods),
+            "pptx" | "pptm" => Some(Format::Pptx),
             "docmark" | "dmk" | "md" | "markdown" => Some(Format::DocMark),
             _ => None,
         }
@@ -166,6 +192,11 @@ impl Format {
     /// True when documents of this format become a [`Document::Workbook`].
     pub fn is_spreadsheet(self) -> bool {
         matches!(self, Format::Xlsx | Format::Xls | Format::Ods)
+    }
+
+    /// True when documents of this format become a [`Document::Presentation`].
+    pub fn is_presentation(self) -> bool {
+        matches!(self, Format::Pptx)
     }
 }
 
@@ -188,6 +219,7 @@ mod tests {
             Format::Xls,
             Format::Odt,
             Format::Ods,
+            Format::Pptx,
             Format::DocMark,
         ] {
             assert_eq!(Format::parse(f.as_str()), Some(f));

@@ -231,3 +231,148 @@ fn etag_ignores_the_id_itself() {
         "assigning an id must not churn the etag"
     );
 }
+
+// --------------------------------------------------------------------------
+// Presentations (plan v2 Phase 13)
+// --------------------------------------------------------------------------
+
+/// A deck of one slide: title, primary body, a second body and a free shape.
+fn deck() -> Document {
+    use docsai_model::presentation::*;
+
+    let mut layouts = LayoutCatalog::default();
+    layouts.layouts.insert(
+        LayoutId::new("L1"),
+        Layout {
+            name: "Title and Content".into(),
+            master: None,
+            placeholders: vec![
+                LayoutPlaceholder {
+                    ph_type: PhType::Title,
+                    ..Default::default()
+                },
+                LayoutPlaceholder {
+                    ph_type: PhType::Body,
+                    idx: Some(1),
+                    ..Default::default()
+                },
+            ],
+        },
+    );
+
+    let ph = |z: u32, ph_type: PhType, idx: Option<u32>, text: &str| {
+        Shape::new(
+            z,
+            ShapeKind::Placeholder(Placeholder {
+                ph_type,
+                idx,
+                body: vec![paragraph(text)],
+                delta: ShapeProps::default(),
+            }),
+        )
+    };
+
+    Document::Presentation(Presentation {
+        layouts,
+        slides: vec![Slide {
+            layout: Some(LayoutId::new("L1")),
+            shapes: vec![
+                ph(0, PhType::Title, None, "Resultados"),
+                ph(1, PhType::Body, Some(1), "Crecimiento del 12 %"),
+                ph(2, PhType::Body, Some(2), "Churn plano"),
+                Shape::new(
+                    3,
+                    ShapeKind::Raw(RawShape {
+                        kind: RawShapeKind::Connector,
+                        raw: None,
+                        text: String::new(),
+                    }),
+                ),
+            ],
+            notes: Some(vec![paragraph("empezar por el churn")]),
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+}
+
+#[test]
+fn the_implicit_title_and_body_get_no_id_of_their_own() {
+    // Spike P2: those two are written as the slide heading and as plain blocks
+    // under it, so there is nowhere to put an id — and an id that cannot be
+    // written moves on every round trip.
+    use docsai_model::addressing::{implicit_shapes, NodeKind};
+    use docsai_model::presentation::ShapeKind;
+
+    let mut doc = deck();
+    assign_ids(&mut doc, IdPolicy::Assign);
+    let Document::Presentation(deck) = &doc else {
+        unreachable!()
+    };
+    let slide = &deck.slides[0];
+
+    assert_eq!(
+        implicit_shapes(slide, &deck.layouts),
+        vec![0, 1],
+        "the title and the layout's primary body are the implicit ones"
+    );
+    assert!(slide.id.is_some(), "the slide itself is always addressed");
+    assert!(slide.shapes[0].id.is_none());
+    assert!(slide.shapes[1].id.is_none());
+    assert!(
+        slide.shapes[2].id.is_some(),
+        "the second body needs a container, so it needs an id"
+    );
+    assert!(slide.shapes[3].id.is_some(), "so does the free shape");
+
+    // The blocks inside the implicit shapes are addressed as usual: it is the
+    // container that has nowhere to live, not its content.
+    let mut kinds = Vec::new();
+    docsai_model::addressing::for_each_addressable(&doc, &mut |node| kinds.push(node.node_kind()));
+    assert_eq!(kinds[0], NodeKind::Slide);
+    assert!(kinds.contains(&NodeKind::Shape));
+    // The primary body is still a placeholder — just an unaddressed one.
+    assert!(matches!(slide.shapes[1].kind, ShapeKind::Placeholder(_)));
+}
+
+#[test]
+fn ids_across_a_deck_are_unique_and_stable() {
+    let mut doc = deck();
+    assign_ids(&mut doc, IdPolicy::Assign);
+    let first = node_ids(&doc);
+    assert!(unique(&first), "ids repeat: {first:?}");
+
+    // Assigning again changes nothing: everything already has an id.
+    assign_ids(&mut doc, IdPolicy::Assign);
+    assert_eq!(first, node_ids(&doc));
+
+    clear_ids(&mut doc);
+    assert!(node_ids(&doc).is_empty());
+}
+
+#[test]
+fn a_slide_etag_follows_its_content_and_its_notes() {
+    use docsai_model::presentation::{Placeholder, ShapeKind};
+
+    let mut doc = deck();
+    let Document::Presentation(deck_mut) = &mut doc else {
+        unreachable!()
+    };
+    let before = deck_mut.slides[0].etag();
+
+    // Moving a shape is not a content change.
+    deck_mut.slides[0].shapes[3].geometry.rotation_deg = 90.0;
+    assert_eq!(before, deck_mut.slides[0].etag());
+
+    // Editing a bullet is.
+    if let ShapeKind::Placeholder(Placeholder { body, .. }) = &mut deck_mut.slides[0].shapes[1].kind
+    {
+        *body = vec![paragraph("Crecimiento del 13 %")];
+    }
+    let after_edit = deck_mut.slides[0].etag();
+    assert_ne!(before, after_edit);
+
+    // And so is editing the notes.
+    deck_mut.slides[0].notes = Some(vec![paragraph("otra nota")]);
+    assert_ne!(after_edit, deck_mut.slides[0].etag());
+}

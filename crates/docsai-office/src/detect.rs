@@ -70,6 +70,14 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
                 let _ = reader.seek(SeekFrom::Start(0));
                 return (Format::Xlsx, DetectScore::Certain);
             }
+            // Recognised before it is readable (plan v2 Phase 13): telling a
+            // user their deck is an unsupported format is an answer; telling
+            // them it is an unknown file is not.
+            if has("ppt/presentation.xml") {
+                drop(zip);
+                let _ = reader.seek(SeekFrom::Start(0));
+                return (Format::Pptx, DetectScore::Certain);
+            }
             if has("content.xml") && has("mimetype") {
                 // Prefer the mandatory `mimetype` part over the file name so
                 // a misnamed package is still classified correctly (Phase 4).
@@ -169,6 +177,16 @@ mod tests {
         assert_eq!(
             detect(corpus("xlsx/values-types.xlsx"), Some("values-types.xlsx")),
             (Format::Xlsx, DetectScore::Certain)
+        );
+    }
+
+    #[test]
+    fn a_deck_is_recognised_even_though_it_cannot_be_read_yet() {
+        // `docsai formats` lists pptx as read: no; detection still has to name
+        // it, so the user gets "unsupported conversion" and not "unknown file".
+        assert_eq!(
+            detect(corpus("pptx/basic-slides.pptx"), Some("basic-slides.pptx")),
+            (Format::Pptx, DetectScore::Certain)
         );
     }
 

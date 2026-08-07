@@ -76,6 +76,10 @@ pub fn write(
                 write_styles(out, &book.styles, options.precision);
             }
         }
+        // DocMark-P (spec §11.2) is Phase 14: a presentation carries no front
+        // matter of its own yet, and the body writer says so with a warning
+        // rather than emitting half a profile.
+        Document::Presentation(_) => {}
     }
     write_attr_sets(out, dict);
 

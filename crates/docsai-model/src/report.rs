@@ -107,6 +107,7 @@ pub struct ConversionStats {
     pub tables: u32,
     pub images: u32,
     pub footnotes: u32,
+    pub slides: u32,
     pub sheets: u32,
     pub cells: u32,
     pub formulas: u32,
@@ -163,6 +164,7 @@ impl ConversionReport {
         self.stats.tables += s.tables;
         self.stats.images += s.images;
         self.stats.footnotes += s.footnotes;
+        self.stats.slides += s.slides;
         self.stats.sheets += s.sheets;
         self.stats.cells += s.cells;
         self.stats.formulas += s.formulas;

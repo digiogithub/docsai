@@ -372,7 +372,7 @@ mod tests {
     fn text_doc(doc: &Document) -> &TextDocument {
         match doc {
             Document::Text(d) => d,
-            Document::Workbook(_) => panic!("expected a text document"),
+            other => panic!("expected a text document, got {}", other.shape_name()),
         }
     }
 

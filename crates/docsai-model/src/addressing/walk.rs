@@ -11,6 +11,7 @@
 
 use crate::addressing::{Addressing, Etag, EtagHasher, IdPolicy, NodeId};
 use crate::image::ImageRef;
+use crate::presentation::{LayoutCatalog, Shape, ShapeKind, Slide};
 use crate::sheet::Sheet;
 use crate::text::{Block, Footnote, Heading, Inline, List, Paragraph, Section, Table, TableRow};
 use crate::Document;
@@ -27,6 +28,8 @@ pub enum NodeKind {
     Image,
     Footnote,
     Sheet,
+    Slide,
+    Shape,
 }
 
 /// Serialised as the spec's own name for the kind (`row`, not `TableRow`),
@@ -49,6 +52,8 @@ impl NodeKind {
             NodeKind::Image => "image",
             NodeKind::Footnote => "footnote",
             NodeKind::Sheet => "sheet",
+            NodeKind::Slide => "slide",
+            NodeKind::Shape => "shape",
         }
     }
 }
@@ -160,6 +165,51 @@ addressable!(
     NodeKind::Footnote,
     |f: &Footnote, h: &mut EtagHasher| { hash_blocks(&f.blocks, h) }
 );
+addressable!(Slide, NodeKind::Slide, |s: &Slide, h: &mut EtagHasher| {
+    for shape in &s.shapes {
+        h.token("shape");
+        shape.hash_content(h);
+    }
+    if let Some(notes) = &s.notes {
+        h.token("notes");
+        hash_blocks(notes, h);
+    }
+});
+addressable!(Shape, NodeKind::Shape, |s: &Shape, h: &mut EtagHasher| {
+    // Position is not content: dragging a box does not change what it says.
+    match &s.kind {
+        ShapeKind::Placeholder(ph) => {
+            h.token(ph.ph_type.as_str());
+            hash_blocks(&ph.body, h);
+        }
+        ShapeKind::TextBox { body } => {
+            h.token("textbox");
+            hash_blocks(body, h);
+        }
+        ShapeKind::Picture(image) => {
+            h.token("img");
+            image.hash_content(h);
+        }
+        ShapeKind::Table(table) => {
+            h.token("table");
+            table.hash_content(h);
+        }
+        ShapeKind::Chart(chart) => {
+            h.token("chart");
+            h.text(chart.title.as_deref().unwrap_or_default());
+        }
+        ShapeKind::Group(children) => {
+            h.token("group");
+            for child in children {
+                child.hash_content(h);
+            }
+        }
+        ShapeKind::Raw(raw) => {
+            h.token(raw.kind.as_str());
+            h.text(&raw.text);
+        }
+    }
+});
 addressable!(Sheet, NodeKind::Sheet, |s: &Sheet, h: &mut EtagHasher| {
     h.text(&s.name);
     for (at, cell) in &s.cells {
@@ -242,6 +292,18 @@ pub fn for_each_addressable(doc: &Document, f: &mut dyn FnMut(&dyn Addressable))
                 f(sheet);
                 for image in &sheet.images {
                     f(image);
+                }
+            }
+        }
+        Document::Presentation(deck) => {
+            for slide in &deck.slides {
+                f(slide);
+                let implicit = implicit_shapes(slide, &deck.layouts);
+                for (index, shape) in slide.shapes.iter().enumerate() {
+                    each_shape(shape, !implicit.contains(&index), f);
+                }
+                if let Some(notes) = &slide.notes {
+                    each_blocks(notes, f);
                 }
             }
         }
@@ -344,7 +406,115 @@ fn visit(doc: &mut Document, f: &mut dyn FnMut(&mut dyn Addressable)) {
                 }
             }
         }
+        Document::Presentation(deck) => {
+            for slide in &mut deck.slides {
+                f(slide);
+                let implicit = implicit_shapes(slide, &deck.layouts);
+                for (index, shape) in slide.shapes.iter_mut().enumerate() {
+                    visit_shape(shape, !implicit.contains(&index), f);
+                }
+                if let Some(notes) = &mut slide.notes {
+                    visit_blocks(notes, f);
+                }
+            }
+        }
     }
+}
+
+fn each_shape(shape: &Shape, addressable: bool, f: &mut dyn FnMut(&dyn Addressable)) {
+    if addressable {
+        f(shape);
+    }
+    match &shape.kind {
+        ShapeKind::Placeholder(ph) => each_blocks(&ph.body, f),
+        ShapeKind::TextBox { body } => each_blocks(body, f),
+        // A picture shape carries the id of its own container, so the
+        // `ImageRef` inside it is not addressed twice.
+        ShapeKind::Picture(_) | ShapeKind::Chart(_) | ShapeKind::Raw(_) => {}
+        ShapeKind::Table(table) => {
+            let addressable_rows = table.is_complex();
+            for row in &table.rows {
+                if addressable_rows {
+                    f(row);
+                }
+                for cell in &row.cells {
+                    each_blocks(&cell.blocks, f);
+                }
+            }
+        }
+        // Every shape inside a group is addressable: a group is a container,
+        // not a substitute for its children.
+        ShapeKind::Group(children) => {
+            for child in children {
+                each_shape(child, true, f);
+            }
+        }
+    }
+}
+
+fn visit_shape(shape: &mut Shape, addressable: bool, f: &mut dyn FnMut(&mut dyn Addressable)) {
+    if addressable {
+        f(shape);
+    }
+    match &mut shape.kind {
+        ShapeKind::Placeholder(ph) => visit_blocks(&mut ph.body, f),
+        ShapeKind::TextBox { body } => visit_blocks(body, f),
+        ShapeKind::Picture(_) | ShapeKind::Chart(_) | ShapeKind::Raw(_) => {}
+        ShapeKind::Table(table) => {
+            let addressable_rows = table.is_complex();
+            for row in &mut table.rows {
+                if addressable_rows {
+                    f(row);
+                }
+                for cell in &mut row.cells {
+                    visit_blocks(&mut cell.blocks, f);
+                }
+            }
+        }
+        ShapeKind::Group(children) => {
+            for child in children {
+                visit_shape(child, true, f);
+            }
+        }
+    }
+}
+
+/// Indices of the shapes DocMark-P writes **without** a container: the title,
+/// which becomes the slide heading, and the layout's primary body, which
+/// becomes plain blocks under it (spike P2 §3.2).
+///
+/// They are not addressable for the reason the module doc gives — there is
+/// nowhere to write their id, and an id that cannot be written changes on every
+/// round trip. The slide's own id lives on the heading; the blocks of the body
+/// carry theirs as usual.
+///
+/// The serializer of Phase 14 must ask this same function, so that what is
+/// implicit and what is addressable can never disagree.
+pub fn implicit_shapes(slide: &Slide, layouts: &LayoutCatalog) -> Vec<usize> {
+    let mut implicit = Vec::new();
+    let title = slide.shapes.iter().position(
+        |shape| matches!(&shape.kind, ShapeKind::Placeholder(ph) if ph.ph_type.is_title()),
+    );
+    implicit.extend(title);
+
+    // The layout says which body is the primary one; without a layout the
+    // first body-like placeholder in reading order is the best available
+    // answer, and it is the one the writer will use too.
+    let primary_idx = slide
+        .layout
+        .as_ref()
+        .and_then(|id| layouts.layout(id))
+        .and_then(|layout| layout.body())
+        .map(|ph| ph.idx);
+    let body = slide.shapes.iter().position(|shape| match &shape.kind {
+        ShapeKind::Placeholder(ph) if ph.ph_type.is_body() => match primary_idx {
+            Some(idx) => ph.idx == idx,
+            None => true,
+        },
+        _ => false,
+    });
+    implicit.extend(body);
+    implicit
 }
 
 fn visit_blocks(blocks: &mut [Block], f: &mut dyn FnMut(&mut dyn Addressable)) {

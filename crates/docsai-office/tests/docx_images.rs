@@ -19,7 +19,7 @@ fn read(name: &str) -> (TextDocument, ConversionReport, MemoryAssetStore) {
     let (document, report) = docsai_office::read_docx(file, &mut assets).expect("reads");
     match document {
         Document::Text(doc) => (doc, report, assets),
-        Document::Workbook(_) => panic!("expected a text document"),
+        other => panic!("expected a text document, got {}", other.shape_name()),
     }
 }
 

@@ -289,41 +289,66 @@ pub enum Document {
 
 pub struct Presentation {
     pub meta: DocumentMeta,
+    pub addressing: Addressing,
     pub styles: StyleCatalog,
     pub layouts: LayoutCatalog,      // slide layouts + masters, as reference targets
+    pub slide_size: Size,            // p:sldSz, the canvas geometry is relative to
     pub slides: Vec<Slide>,
-    pub skeleton: Option<SkeletonRef>, // opaque non-slide package parts (§9.4)
+    pub skeleton: Option<SkeletonRef>, // the opaque original package (§9.4)
 }
 
 pub struct Slide {
-    pub id: NodeId,
-    pub layout_ref: LayoutId,
-    pub shapes: Vec<Shape>,          // reading order, with original spTree index preserved
+    pub id: Option<NodeId>,
+    pub layout: Option<LayoutId>,
+    pub name: Option<String>,
+    pub shapes: Vec<Shape>,          // reading order; source spTree index on each shape
     pub notes: Option<Vec<Block>>,
+    pub hidden: bool,
+    pub section: Option<String>,     // p14:sectionLst
     pub raw: Vec<RawId>,             // transition/timing subtrees, sidecar-stored
 }
 
-pub enum Shape {
-    Placeholder { ph_type: PhType, idx: Option<u32>, body: Vec<Block>, delta: ShapeProps },
-    TextBox { body: Vec<Block>, geometry: ShapeGeometry },
+pub struct Shape {                   // identity and position belong to every shape
+    pub id: Option<NodeId>,
+    pub name: Option<String>,        // p:cNvPr@name
+    pub z_index: u32,                // index in the source p:spTree
+    pub geometry: ShapeGeometry,
+    pub kind: ShapeKind,
+}
+
+pub enum ShapeKind {
+    Placeholder(Placeholder),        // ph_type + idx + body + delta
+    TextBox { body: Vec<Block> },
     Picture(ImageRef),               // reuses the existing image model unchanged
     Table(Table),
-    Chart(ChartRef),                 // series data + embedded workbook + raw chart XML
+    Chart(ChartRef),                 // embedded workbook + raw chart XML (Phase 16 fills it)
     Group(Vec<Shape>),
-    RawStub { kind: RawShapeKind, geometry: ShapeGeometry, raw: RawId },
+    Raw(RawShape),                   // kind + sidecar payload + the text it shows
 }
 ```
 
 Rules, consistent with §3:
 - **The placeholder cascade is stored as reference + delta**, never flattened: a placeholder
-  keeps its `layout_ref` and only the properties that differ from the resolved layout/master/
+  keeps the slide's `layout` and only the properties that differ from the resolved layout/master/
   theme chain.
 - `ShapeGeometry` reuses `Length`/EMU and the existing `ImageGeometry` primitives; DrawingML in
-  `.pptx` is the same model already implemented for `.docx`/`.xlsx`.
+  `.pptx` is the same model already implemented for `.docx`/`.xlsx`. Absent position and size
+  mean *inherited*, which is the same reference-plus-delta rule the styles follow.
 - Reading order is a **policy** (placeholders by type, then top-left), and the original z-order
   index travels as data so the round trip is reversible.
+- **A layout names its title and its primary body** (`Layout::title()`, `Layout::body()`).
+  Spike P2 made placeholders implicit in DocMark-P — the heading *is* the title — and that is
+  resolvable only because the catalogue says which placeholder is which.
+- **Addressability follows what DocMark-P can write.** A slide always carries an id; the title
+  and the primary body do not, because they are written as a heading and as plain blocks with
+  nowhere to put one. `addressing::implicit_shapes` is the single answer to that question, shared
+  by the id walker and the serializer so the two cannot disagree.
 - No new crate: `.pptx`/`.ppt` live in `docsai-office::pptx`, `.odp` in `docsai-odf::odp`. The
   crate dependency rules of `AGENTS.md` §3 are unchanged.
+
+> `Shape` is a struct with a `kind`, where the sketch above originally had a bare enum:
+> identity, name, geometry and source z-order belong to *every* shape, and repeating those four
+> fields across seven variants is how they drift apart.
 
 ### 9.2 Node addressing (`NodeId` + etag)
 

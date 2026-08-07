@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Document::Presentation`, the third IR root** (plan v2 Phase 13, first increment): a
+  `Presentation` of layouts, masters and slides, with `Shape` carrying identity, name, geometry
+  and its index in the source `p:spTree` so the reading-order policy is reversible. The
+  placeholder cascade is stored the way styles already are — **reference plus delta** — and a
+  layout names its title and its primary body, which is what lets DocMark-P write the title as
+  the slide heading (spike P2). Slides carry a stable id; the title and primary body do not,
+  because there is nowhere in the profile to write one, and `addressing::implicit_shapes` is the
+  single rule that says so for both the id walker and the future serializer.
+  `pptx`/`pptm` is now a recognised format, honestly reported by `docsai formats` as **not yet
+  readable** — the reader is the next increment. Converting a presentation to DocMark produces
+  an empty body and a severe warning until DocMark-P lands in Phase 14; it never fails silently.
+  `ConversionStats` gains `slides`, and `inspect` reports `kind: "presentation"`.
+
 - **The three addressing primitives over MCP** (plan v2 Phase 11, closing the phase):
   `outline_document`, `search_document` and `read_selection`, the same answers as
   `docsai outline`, `docsai search` and `docsai read --select`, over a filesystem `path` or
