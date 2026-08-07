@@ -18,12 +18,12 @@ use docsai_model::sheet::{
     Cell, CellRange, CellRef, CellValue, ColProps, DefinedName, Formula, FormulaDialect, Pane,
     RowProps, Sheet, Workbook,
 };
-use docsai_model::text::{DocumentMeta, RawFragment};
+use docsai_model::text::RawFragment;
 use docsai_model::units::Length;
 use docsai_model::Document;
 
 use crate::error::ReadError;
-use crate::package::Package;
+use crate::package::{read_meta, Package};
 use crate::xml::Element;
 
 use styles::{is_date_format, Styles};
@@ -633,42 +633,6 @@ fn read_defined_names(workbook: &Element) -> Vec<DefinedName> {
         });
     }
     out
-}
-
-fn read_meta(package: &Package) -> DocumentMeta {
-    let mut meta = DocumentMeta::default();
-
-    if let Ok(Some(core)) = package.optional_xml("docProps/core.xml") {
-        let text = |name: &str| core.child(name).map(|e| e.text()).filter(|t| !t.is_empty());
-        meta.title = text("title");
-        meta.author = text("creator");
-        meta.last_modified_by = text("lastModifiedBy");
-        meta.created = text("created");
-        meta.modified = text("modified");
-        meta.language = text("language");
-        meta.subject = text("subject");
-        meta.keywords = text("keywords");
-        meta.description = text("description");
-    }
-
-    if let Ok(Some(app)) = package.optional_xml("docProps/app.xml") {
-        meta.application = app
-            .child("Application")
-            .map(|e| e.text())
-            .filter(|t| !t.is_empty());
-    }
-
-    if let Ok(Some(custom)) = package.optional_xml("docProps/custom.xml") {
-        for property in custom.children_named("property") {
-            let Some(name) = property.attr("name") else {
-                continue;
-            };
-            let value = property.children().map(|v| v.text()).collect::<String>();
-            meta.custom.insert(name.to_string(), value);
-        }
-    }
-
-    meta
 }
 
 fn parse_range(text: &str) -> Option<CellRange> {

@@ -374,6 +374,10 @@ regenerated slides into that skeleton rather than rebuilding masters, layouts an
 the raw-block hatch lifted to package level, and it is the mitigation for the "PowerPoint offers
 to repair this file" failure mode.
 
+Part names are conventions, so the reader never trusts them: a part is what `[Content_Types].xml`
+declares it to be, reached through the relationship graph, and slide order comes from
+`p:sldIdLst` alone. `slide3.xml` first in the deck is what PowerPoint writes after a reorder.
+
 ### 9.5 CLI surface v2
 
 ```

@@ -73,7 +73,7 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
             // Recognised before it is readable (plan v2 Phase 13): telling a
             // user their deck is an unsupported format is an answer; telling
             // them it is an unknown file is not.
-            if has("ppt/presentation.xml") {
+            if has(crate::pptx::PRESENTATION_PART) {
                 drop(zip);
                 let _ = reader.seek(SeekFrom::Start(0));
                 return (Format::Pptx, DetectScore::Certain);

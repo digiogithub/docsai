@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The pptx package layer** (plan v2 Phase 13, second increment): `docsai-office::pptx` opens a
+  deck, resolves `[Content_Types].xml`, walks `ppt/presentation.xml` and its relationships, and
+  produces a `Presentation` whose slides are ordered, named, layout-referenced and assigned to
+  their `p14:sectionLst` section — with the layout and master catalogue behind them, placeholder
+  positions included. **Parts are found by content type, never by file name**, and order comes
+  from `p:sldIdLst`, never from `slideN.xml` (spike P3). The slides are still empty: shapes are
+  the next increment, so `read_pptx` is deliberately kept out of the `read` dispatch and
+  `docsai formats` still says `pptx: no`. A deck that converted to an empty document would be
+  worse than one the tool honestly refuses. `read_meta` and the new `ContentTypes` are shared by
+  the docx, xlsx and pptx readers rather than copied a third time.
+
 - **`Document::Presentation`, the third IR root** (plan v2 Phase 13, first increment): a
   `Presentation` of layouts, masters and slides, with `Shape` carrying identity, name, geometry
   and its index in the source `p:spTree` so the reading-order policy is reversible. The

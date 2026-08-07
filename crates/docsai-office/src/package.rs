@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Seek};
 
+use docsai_model::text::DocumentMeta;
+
 use crate::error::ReadError;
 use crate::xml::Element;
 
@@ -208,6 +210,129 @@ impl Relationships {
     pub fn of_kind<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Relationship> + 'a {
         self.map.values().filter(move |r| r.kind == kind)
     }
+}
+
+/// `[Content_Types].xml`: what every part of the package *is*.
+///
+/// OPC part names are conventional, not normative. `ppt/slides/slide1.xml` is
+/// where PowerPoint puts a slide, but the only thing that makes a part a slide
+/// is its content type, and spike P3 made this the rule for the pptx reader:
+/// parts are found through their type, never through their name.
+#[derive(Debug, Default, Clone)]
+pub struct ContentTypes {
+    /// Extension (lowercase, no dot) to content type.
+    defaults: BTreeMap<String, String>,
+    /// Part name (package-absolute, no leading slash) to content type.
+    overrides: BTreeMap<String, String>,
+}
+
+impl ContentTypes {
+    /// Reads the package's content types.
+    ///
+    /// A package with no readable `[Content_Types].xml` is malformed, but it is
+    /// not this function's job to say so: it returns an empty map and the
+    /// caller decides whether the parts it needs are still identifiable.
+    pub fn read(package: &Package) -> ContentTypes {
+        let Ok(Some(root)) = package.optional_xml("[Content_Types].xml") else {
+            return ContentTypes::default();
+        };
+        let mut types = ContentTypes::default();
+        for child in root.children() {
+            match child.name.as_str() {
+                "Default" => {
+                    if let (Some(ext), Some(kind)) =
+                        (child.attr("Extension"), child.attr("ContentType"))
+                    {
+                        types
+                            .defaults
+                            .insert(ext.to_ascii_lowercase(), kind.trim().to_string());
+                    }
+                }
+                "Override" => {
+                    if let (Some(name), Some(kind)) =
+                        (child.attr("PartName"), child.attr("ContentType"))
+                    {
+                        // `PartName` is package-absolute (`/ppt/slides/slide1.xml`);
+                        // part names in the ZIP are not.
+                        if let Some(name) = normalise_part_name(name.trim_start_matches('/')) {
+                            types.overrides.insert(name, kind.trim().to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        types
+    }
+
+    /// The content type of a part: its override, or the default for its
+    /// extension.
+    pub fn of(&self, part: &str) -> Option<&str> {
+        if let Some(kind) = self.overrides.get(part) {
+            return Some(kind.as_str());
+        }
+        let ext = part.rsplit('.').next()?.to_ascii_lowercase();
+        self.defaults.get(&ext).map(|s| s.as_str())
+    }
+
+    /// True when the part is declared as `kind`. An **undeclared** part is not
+    /// rejected: a package whose content types are missing is degraded, and
+    /// refusing to read it would be worse than reading it.
+    pub fn is(&self, part: &str, kind: &str) -> bool {
+        match self.of(part) {
+            Some(declared) => declared == kind,
+            None => true,
+        }
+    }
+
+    /// Every part explicitly declared as `kind`, in part-name order.
+    pub fn parts_of<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.overrides
+            .iter()
+            .filter(move |(_, declared)| declared.as_str() == kind)
+            .map(|(name, _)| name.as_str())
+    }
+}
+
+/// The `docProps/*` metadata every OOXML package carries.
+///
+/// Shared by the docx, xlsx and pptx readers: the parts are identical across
+/// the three formats, and three copies of this function is three places for
+/// them to drift.
+pub fn read_meta(package: &Package) -> DocumentMeta {
+    let mut meta = DocumentMeta::default();
+
+    if let Ok(Some(core)) = package.optional_xml("docProps/core.xml") {
+        let text = |name: &str| core.child(name).map(|e| e.text()).filter(|t| !t.is_empty());
+        meta.title = text("title");
+        meta.author = text("creator");
+        meta.last_modified_by = text("lastModifiedBy");
+        meta.created = text("created");
+        meta.modified = text("modified");
+        meta.language = text("language");
+        meta.subject = text("subject");
+        meta.keywords = text("keywords");
+        meta.description = text("description");
+    }
+
+    if let Ok(Some(app)) = package.optional_xml("docProps/app.xml") {
+        meta.application = app
+            .child("Application")
+            .map(|e| e.text())
+            .filter(|t| !t.is_empty());
+    }
+
+    if let Ok(Some(custom)) = package.optional_xml("docProps/custom.xml") {
+        for property in custom.children_named("property") {
+            let Some(name) = property.attr("name") else {
+                continue;
+            };
+            let value = property.children().map(|v| v.text()).collect::<String>();
+            meta.custom.insert(name.to_string(), value);
+        }
+    }
+
+    meta
 }
 
 /// Normalises a ZIP member name, rejecting anything that escapes the package.

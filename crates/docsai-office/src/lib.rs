@@ -21,6 +21,7 @@ mod doc;
 mod docx;
 mod error;
 mod package;
+mod pptx;
 mod write_error;
 mod xls;
 mod xlsx;
@@ -65,6 +66,19 @@ pub fn read_xlsx<R: Read + Seek>(
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
     xlsx::read(reader, assets)
+}
+
+/// Reads a `.pptx` presentation.
+///
+/// Deliberately **not** in [`READABLE`] yet: Phase 13 is building this reader
+/// increment by increment, and a deck that converted to an empty document would
+/// be worse than one the tool honestly refuses. It joins the dispatch in
+/// [`read`] when the slides are full.
+pub fn read_pptx<R: Read + Seek>(
+    reader: R,
+    assets: &mut dyn AssetStore,
+) -> Result<(Document, ConversionReport), ReadError> {
+    pptx::read(reader, assets)
 }
 
 /// Reads a legacy `.xls` workbook (values and formulas only).

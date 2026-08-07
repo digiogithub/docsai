@@ -135,7 +135,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Pptx,
         read: false,
         write: false,
-        note: "Phase 13: the IR root exists, the reader does not yet",
+        note: "Phase 13: the reader is under construction, slide by slide",
     },
     FormatSupport {
         format: Format::DocMark,
