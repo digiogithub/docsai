@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Slide text** (plan v2 Phase 13, third increment): `p:sp` becomes a `Placeholder` or a
+  `TextBox`, and `p:txBody` becomes blocks — `a:p`/`a:r` with the same run-property model the
+  docx reader uses, `a:br`, `a:fld` (a slide number is `FieldKind::Page`, and the DrawingML type
+  travels as the instruction so the writer puts back the same field), hyperlinks, and `a:pPr`
+  properties in DrawingML's units. **A body placeholder bullets by inheritance**: the master's
+  `bodyStyle` carries the `a:buChar` and the slide says nothing, so body paragraphs become a
+  list, `a:pPr@lvl` nests it, `a:buAutoNum` numbers it and `a:buNone` opts out. An **empty
+  paragraph is content and never a bullet**. `a:normAutofit@fontScale` is read now so that the
+  increment that warns about it has a number to warn about. Shape kinds this reader does not
+  model yet — pictures, tables, groups, connectors — each produce a warning naming what was
+  skipped; none of them disappears quietly.
+
 - **The pptx package layer** (plan v2 Phase 13, second increment): `docsai-office::pptx` opens a
   deck, resolves `[Content_Types].xml`, walks `ppt/presentation.xml` and its relationships, and
   produces a `Presentation` whose slides are ordered, named, layout-referenced and assigned to

@@ -1,9 +1,13 @@
 //! The `.pptx` reader (Phase 13).
 //!
 //! A sibling of `docx/` and `xlsx/`, on the same `zip` + `quick-xml` foundation
-//! spike P1 chose over `ooxmlsdk`. This module is the **package layer**: it
-//! answers which parts exist, what they are, and in what order the slides come.
-//! Filling those slides with shapes is the increment after this one.
+//! spike P1 chose over `ooxmlsdk`. This module is the **package layer** — which
+//! parts exist, what they are, in what order the slides come — plus the shapes
+//! of a slide's `p:spTree`; the text inside them lives in [`text`].
+//!
+//! Shape kinds this reader does not model yet (pictures, tables, groups,
+//! connectors) are **reported, not skipped in silence**: a slide that quietly
+//! loses its table is the failure this project exists to avoid.
 //!
 //! Two rules from spike P3 are enforced here rather than assumed:
 //!
@@ -15,13 +19,15 @@
 //!   being the first slide of the deck is legal and common after a reorder in
 //!   PowerPoint.
 
+mod text;
+
 use std::collections::BTreeMap;
 use std::io::{Read, Seek};
 
 use docsai_model::assets::AssetStore;
 use docsai_model::presentation::{
-    Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, Master, MasterId, PhType, Presentation,
-    ShapeGeometry, Slide,
+    Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, Master, MasterId, PhType, Placeholder,
+    Presentation, Shape, ShapeGeometry, ShapeKind, ShapeProps, Slide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::units::{Length, Point, Size};
@@ -295,17 +301,139 @@ fn read_slide(
         });
     }
 
+    let shapes = match root.path(&["cSld", "spTree"]) {
+        Some(tree) => read_shapes(tree, part, &rels, report),
+        None => {
+            report.warn(Warning::Degraded {
+                what: format!("slide `{part}`"),
+                why: "no shape tree".into(),
+            });
+            Vec::new()
+        }
+    };
+
     Ok(Slide {
         id: None,
         layout,
         name: csld_name(&root),
-        // Shapes, notes and raw payloads are the increments after this one.
-        shapes: Vec::new(),
+        shapes,
         notes: None,
         hidden: root.attr("show") == Some("0"),
         section: sections.get(&entry.id).cloned(),
         raw: Vec::new(),
     })
+}
+
+/// The `p:spTree` children this increment reads. Everything else is a shape
+/// too, and each is named here so the increment that reads it has to remove its
+/// line rather than discover it was never handled.
+const UNREAD_SHAPES: &[(&str, &str)] = &[
+    ("pic", "picture"),
+    ("graphicFrame", "table, chart or diagram"),
+    ("grpSp", "shape group"),
+    ("cxnSp", "connector"),
+    ("AlternateContent", "alternate content"),
+];
+
+/// Reads the shapes of a slide's `p:spTree`, in source order.
+///
+/// The reading-order policy (placeholders by type, then the rest by top-left)
+/// is increment 13-G; until then the order *is* the source order, and every
+/// shape already carries the `z_index` that makes the reordering reversible.
+fn read_shapes(
+    tree: &Element,
+    part: &str,
+    rels: &crate::package::Relationships,
+    report: &mut ConversionReport,
+) -> Vec<Shape> {
+    let mut shapes = Vec::new();
+    let mut z_index = 0u32;
+    for child in tree.children() {
+        match child.name.as_str() {
+            // The group's own identity and transform, not a shape on the slide.
+            "nvGrpSpPr" | "grpSpPr" => continue,
+            "sp" => {
+                shapes.push(read_shape(child, z_index, rels, report));
+            }
+            name => {
+                if let Some((_, what)) = UNREAD_SHAPES.iter().find(|(tag, _)| *tag == name) {
+                    report.warn(Warning::UnsupportedElement {
+                        kind: format!("p:{name} ({what})"),
+                        location: part.to_string(),
+                        action: "skipped: read in a later increment of Phase 13".into(),
+                    });
+                } else {
+                    report.warn(Warning::UnsupportedElement {
+                        kind: format!("p:{name}"),
+                        location: part.to_string(),
+                        action: "skipped: unknown shape element".into(),
+                    });
+                }
+            }
+        }
+        z_index += 1;
+    }
+    shapes
+}
+
+/// One `p:sp`: a placeholder when it fills a slot the layout declares, a free
+/// text box when it does not.
+fn read_shape(
+    sp: &Element,
+    z_index: u32,
+    rels: &crate::package::Relationships,
+    report: &mut ConversionReport,
+) -> Shape {
+    let ph = sp.path(&["nvSpPr", "nvPr", "ph"]);
+    let ph_type = ph.map(|ph| PhType::parse(ph.attr("type").unwrap_or_default()));
+    let ctx = text::TextCtx {
+        rels,
+        // A body placeholder bullets by inheritance; a title and a free text
+        // box do not.
+        bulleted: ph_type.as_ref().is_some_and(PhType::is_body),
+    };
+    let body = match sp.child("txBody") {
+        Some(tx_body) => text::read_body(tx_body, &ctx, report),
+        None => Vec::new(),
+    };
+
+    let kind = match ph_type {
+        Some(ph_type) => ShapeKind::Placeholder(Placeholder {
+            ph_type,
+            idx: ph
+                .and_then(|ph| ph.attr_i64("idx"))
+                .and_then(|n| u32::try_from(n).ok()),
+            body,
+            delta: shape_props(sp),
+        }),
+        None => ShapeKind::TextBox { body },
+    };
+
+    Shape {
+        id: None,
+        name: sp
+            .path(&["nvSpPr", "cNvPr"])
+            .and_then(|nv| nv.attr("name"))
+            .filter(|name| !name.is_empty())
+            .map(str::to_string),
+        z_index,
+        geometry: read_geometry(sp.path(&["spPr", "xfrm"])),
+        kind,
+    }
+}
+
+/// The shape's own formatting. The cascade delta proper is increment 13-D;
+/// what this reads is the one property that is a fact about the shape and not
+/// about what it inherits.
+fn shape_props(sp: &Element) -> ShapeProps {
+    ShapeProps {
+        // `a:normAutofit@fontScale` is in thousandths of a percent.
+        font_scale: sp
+            .path(&["txBody", "bodyPr", "normAutofit"])
+            .and_then(|fit| fit.attr_i64("fontScale"))
+            .map(|scale| scale as f32 / 1000.0),
+        ..Default::default()
+    }
 }
 
 /// Reads a slide master, returning it with the layout parts it declares.
@@ -430,6 +558,7 @@ fn parse(package: &Package, part: &str) -> Result<Element, ReadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use docsai_model::text::Block;
     use docsai_model::MemoryAssetStore;
 
     fn read_fixture(name: &str) -> (Presentation, ConversionReport) {
@@ -543,11 +672,107 @@ mod tests {
     }
 
     #[test]
-    fn slides_start_empty_in_this_increment() {
-        // 13-B is the package layer. The assertion is here so the increment that
-        // fills the shapes has to come back and change it deliberately.
-        let (deck, _) = read_fixture("basic-slides");
-        assert!(deck.slides.iter().all(|s| s.shapes.is_empty()));
+    fn a_slide_carries_its_placeholders_with_their_identity_and_text() {
+        let (deck, report) = read_fixture("basic-slides");
+        let slide = &deck.slides[0];
+        assert_eq!(slide.shapes.len(), 2);
+        assert_eq!(slide.title().as_deref(), Some("Informe trimestral"));
+
+        let title = &slide.shapes[0];
+        assert_eq!(title.name.as_deref(), Some("Title 1"));
+        assert_eq!(title.z_index, 0);
+        let ph = title.placeholder().expect("a title placeholder");
+        assert_eq!(ph.ph_type, PhType::Title);
+        assert!(
+            title.geometry.is_inherited() && ph.delta.is_empty(),
+            "the slide states nothing of its own: it inherits from the layout"
+        );
+
+        let body = deck.slides[0].shapes[1]
+            .placeholder()
+            .expect("a body placeholder");
+        assert_eq!(body.idx, Some(1));
+        // The master's `bodyStyle` bullets it; the slide says nothing at all.
+        let [Block::List(list)] = body.body.as_slice() else {
+            panic!("expected the body to be one list, got {:?}", body.body);
+        };
+        assert_eq!(list.items.len(), 2);
+        assert_eq!(report.stats.lists, 2, "one body list per slide");
+    }
+
+    #[test]
+    fn an_empty_placeholder_keeps_its_place_on_the_slide() {
+        // The pptx echo of the Phase 1 empty-paragraph bug: an empty box is a
+        // box a user is expected to fill, not an absence.
+        let (deck, _) = read_fixture("placeholders-empty");
+        let empty = deck.slides[0].shapes[1]
+            .placeholder()
+            .expect("the empty body is still a placeholder");
+        assert_eq!(empty.idx, Some(1));
+        assert_eq!(empty.body.len(), 1, "one empty paragraph, not zero blocks");
+        assert!(matches!(&empty.body[0], Block::Paragraph(p) if p.is_empty()));
+    }
+
+    #[test]
+    fn a_free_text_box_is_not_a_placeholder() {
+        let (deck, _) = read_fixture("shapes-geometry");
+        let boxes: Vec<&Shape> = deck.slides[0]
+            .shapes
+            .iter()
+            .filter(|shape| matches!(shape.kind, ShapeKind::TextBox { .. }))
+            .collect();
+        assert_eq!(boxes.len(), 2, "a rectangle with text and an empty arrow");
+        assert_eq!(boxes[0].name.as_deref(), Some("Rectángulo 1"));
+        assert_eq!(boxes[0].geometry.pos.unwrap().y.emu(), 2_000_000);
+        let ShapeKind::TextBox { body } = &boxes[0].kind else {
+            unreachable!()
+        };
+        // A free text box has no master to bullet it.
+        assert!(matches!(&body[0], Block::Paragraph(_)), "{body:?}");
+    }
+
+    #[test]
+    fn bullet_levels_become_a_nested_list_and_autonum_its_own() {
+        let (deck, _) = read_fixture("bullets-levels");
+        let slide = &deck.slides[0];
+        let body = slide.shapes[1].placeholder().expect("the first body");
+        let [Block::List(list)] = body.body.as_slice() else {
+            panic!("expected one list, got {:?}", body.body);
+        };
+        assert_eq!(list.items.len(), 2, "two level-0 items, the rest nested");
+        assert!(!list.ordered);
+
+        let numbered = slide.shapes[2].placeholder().expect("the second body");
+        let [Block::List(list)] = numbered.body.as_slice() else {
+            panic!("expected one list, got {:?}", numbered.body);
+        };
+        assert!(list.ordered, "`a:buAutoNum` is a numbered list");
+    }
+
+    #[test]
+    fn a_stale_autofit_scale_is_read_rather_than_dropped() {
+        // Risk P5: the scale PowerPoint computed for text that is no longer
+        // there. `Warning::AutofitStale` is increment 13-I; losing the number
+        // before then would leave that increment nothing to warn about.
+        let (deck, _) = read_fixture("autofit-stale");
+        let body = deck.slides[0].shapes[1].placeholder().expect("the body");
+        assert_eq!(body.delta.font_scale, Some(62.5));
+    }
+
+    #[test]
+    fn the_unread_shape_kinds_are_reported_and_not_dropped() {
+        // Pictures, tables and connectors are later increments. Until then the
+        // reader says so out loud, because a slide that quietly loses its table
+        // is the failure this project exists to avoid.
+        let (_, report) = read_fixture("tables-simple");
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::UnsupportedElement { kind, .. } if kind.starts_with("p:graphicFrame")
+            )),
+            "{:?}",
+            report.warnings
+        );
     }
 
     #[test]
@@ -573,11 +798,25 @@ mod tests {
                 "{name}: no layout catalogue to inherit from"
             );
             assert!(
-                report.warnings.is_empty(),
+                slide_shapes(&deck) > 0,
+                "{name}: slides without a single shape"
+            );
+            // Unsupported-element warnings are the shape kinds later increments
+            // read. A *degraded* warning is the package layer failing, and
+            // there must be none.
+            assert!(
+                !report
+                    .warnings
+                    .iter()
+                    .any(|w| matches!(w, Warning::Degraded { .. })),
                 "{name} degrades at the package layer: {:?}",
                 report.warnings
             );
         }
+    }
+
+    fn slide_shapes(deck: &Presentation) -> usize {
+        deck.slides.iter().map(|s| s.shapes.len()).sum()
     }
 
     #[test]
