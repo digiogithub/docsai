@@ -3,7 +3,13 @@
 //! A sibling of `docx/` and `xlsx/`, on the same `zip` + `quick-xml` foundation
 //! spike P1 chose over `ooxmlsdk`. This module is the **package layer** — which
 //! parts exist, what they are, in what order the slides come — plus the shapes
-//! of a slide's `p:spTree`; the text inside them lives in [`text`].
+//! of a slide's `p:spTree`; the text inside them lives in [`text`] and what they
+//! inherit in [`cascade`].
+//!
+//! Masters are read before layouts and layouts before slides, and that order is
+//! load-bearing: a slide's properties are stored as a **delta** over what its
+//! layout, master and theme already decided, so the references have to exist
+//! before the text that measures itself against them.
 //!
 //! Shape kinds this reader does not model yet (pictures, tables, groups,
 //! connectors) are **reported, not skipped in silence**: a slide that quietly
@@ -19,6 +25,7 @@
 //!   being the first slide of the deck is legal and common after a reorder in
 //!   PowerPoint.
 
+mod cascade;
 mod text;
 
 use std::collections::BTreeMap;
@@ -34,8 +41,10 @@ use docsai_model::units::{Length, Point, Size};
 use docsai_model::Document;
 
 use crate::error::ReadError;
-use crate::package::{read_meta, ContentTypes, Package};
+use crate::package::{read_meta, ContentTypes, Package, Relationships};
 use crate::xml::Element;
+
+use cascade::{Cascade, Theme};
 
 /// Where PowerPoint puts the presentation part. Used to *detect* a deck and as
 /// the last resort when the content types are unreadable; the reader itself
@@ -85,8 +94,12 @@ pub(crate) fn read_package(
     };
 
     let mut layouts = LayoutCatalog::default();
+    let mut cascade = Cascade::default();
     let mut wanted_layouts: Vec<String> = Vec::new();
 
+    // Masters first, layouts second, slides last: a slide's runs are read as a
+    // delta over what its layout and master already decided, so the references
+    // have to exist before the text does.
     for master_part in targets(&root, "sldMasterIdLst", "sldMasterId", &rels) {
         if !types.is(&master_part, &format!("{PML}.slideMaster+xml")) {
             report.warn(Warning::Degraded {
@@ -95,10 +108,12 @@ pub(crate) fn read_package(
             });
             continue;
         }
-        let (id, master, own_layouts) = read_master(package, &master_part, &mut report)?;
+        let (id, master, own_layouts) =
+            read_master(package, &master_part, &mut cascade, &mut report)?;
         wanted_layouts.extend(own_layouts);
         layouts.masters.insert(id, master);
     }
+    cascade.add_default_text(&root, &mut report);
 
     let sections = read_sections(&root);
     let mut slides = Vec::new();
@@ -125,32 +140,53 @@ pub(crate) fn read_package(
             });
             continue;
         }
-        let slide = read_slide(package, &rel.target, &entry, &sections, &mut report)?;
-        if let Some(layout) = &slide.layout {
+        // A slide's own layout is loaded before the slide, even when no master
+        // declared it: it is the first reference in the chain and reading the
+        // text without it would silently store inherited properties as deltas.
+        let slide_rels = package.relationships(&rel.target);
+        let layout = slide_rels
+            .of_kind("slideLayout")
+            .find(|rel| !rel.external)
+            .map(|rel| LayoutId::new(rel.target.clone()));
+        if let Some(layout) = &layout {
             wanted_layouts.push(layout.as_str().to_string());
+            load_layout(
+                package,
+                &types,
+                layout.as_str(),
+                &mut layouts,
+                &mut cascade,
+                &mut report,
+            )?;
         }
+
+        let slide = read_slide(
+            package,
+            &rel.target,
+            &slide_rels,
+            layout,
+            &entry,
+            &sections,
+            &cascade,
+            &mut report,
+        )?;
         report.stats.slides = report.stats.slides.saturating_add(1);
         slides.push(slide);
     }
 
+    // The layouts a master declares but no slide uses. They are part of the
+    // deck — a slide added later picks one — so they are catalogued too.
     wanted_layouts.sort();
     wanted_layouts.dedup();
     for layout_part in wanted_layouts {
-        if layouts
-            .layouts
-            .contains_key(&LayoutId::new(layout_part.clone()))
-        {
-            continue;
-        }
-        if !types.is(&layout_part, &format!("{PML}.slideLayout+xml")) {
-            report.warn(Warning::Degraded {
-                what: format!("slide layout `{layout_part}`"),
-                why: "the package declares it as something else".into(),
-            });
-            continue;
-        }
-        let (id, layout) = read_layout(package, &layout_part, &mut report)?;
-        layouts.layouts.insert(id, layout);
+        load_layout(
+            package,
+            &types,
+            &layout_part,
+            &mut layouts,
+            &mut cascade,
+            &mut report,
+        )?;
     }
 
     let presentation = Presentation {
@@ -280,20 +316,19 @@ fn read_sections(root: &Element) -> BTreeMap<i64, String> {
     sections
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_slide(
     package: &Package,
     part: &str,
+    rels: &Relationships,
+    layout: Option<LayoutId>,
     entry: &SlideEntry,
     sections: &BTreeMap<i64, String>,
+    cascade: &Cascade,
     report: &mut ConversionReport,
 ) -> Result<Slide, ReadError> {
     let root = parse(package, part)?;
-    let rels = package.relationships(part);
 
-    let layout = rels
-        .of_kind("slideLayout")
-        .find(|rel| !rel.external)
-        .map(|rel| LayoutId::new(rel.target.clone()));
     if layout.is_none() {
         report.warn(Warning::Degraded {
             what: format!("slide `{part}`"),
@@ -302,7 +337,7 @@ fn read_slide(
     }
 
     let shapes = match root.path(&["cSld", "spTree"]) {
-        Some(tree) => read_shapes(tree, part, &rels, report),
+        Some(tree) => read_shapes(tree, part, rels, layout.as_ref(), cascade, report),
         None => {
             report.warn(Warning::Degraded {
                 what: format!("slide `{part}`"),
@@ -343,7 +378,9 @@ const UNREAD_SHAPES: &[(&str, &str)] = &[
 fn read_shapes(
     tree: &Element,
     part: &str,
-    rels: &crate::package::Relationships,
+    rels: &Relationships,
+    layout: Option<&LayoutId>,
+    cascade: &Cascade,
     report: &mut ConversionReport,
 ) -> Vec<Shape> {
     let mut shapes = Vec::new();
@@ -353,7 +390,7 @@ fn read_shapes(
             // The group's own identity and transform, not a shape on the slide.
             "nvGrpSpPr" | "grpSpPr" => continue,
             "sp" => {
-                shapes.push(read_shape(child, z_index, rels, report));
+                shapes.push(read_shape(child, z_index, rels, layout, cascade, report));
             }
             name => {
                 if let Some((_, what)) = UNREAD_SHAPES.iter().find(|(tag, _)| *tag == name) {
@@ -381,16 +418,38 @@ fn read_shapes(
 fn read_shape(
     sp: &Element,
     z_index: u32,
-    rels: &crate::package::Relationships,
+    rels: &Relationships,
+    layout: Option<&LayoutId>,
+    cascade: &Cascade,
     report: &mut ConversionReport,
 ) -> Shape {
     let ph = sp.path(&["nvSpPr", "nvPr", "ph"]);
     let ph_type = ph.map(|ph| PhType::parse(ph.attr("type").unwrap_or_default()));
+    let idx = ph
+        .and_then(|ph| ph.attr_i64("idx"))
+        .and_then(|n| u32::try_from(n).ok());
+    let theme = cascade.theme_of(layout);
+
+    // What this shape inherits, before it says anything itself.
+    let inherited = match &ph_type {
+        Some(ph_type) => cascade.inherited(layout, ph_type, idx),
+        None => cascade.inherited_text_box(layout),
+    };
+    // The shape's own `a:lstStyle` sits between the layout and the runs: it is
+    // this shape's delta, and it is also what its runs inherit.
+    let own = match sp.path(&["txBody", "lstStyle"]) {
+        Some(style) => cascade::read_levels(style, theme, report),
+        None => Default::default(),
+    };
+    let font = own.at(0).minus(&inherited.at(0));
+    let runs_inherit = own.over(&inherited);
     let ctx = text::TextCtx {
         rels,
         // A body placeholder bullets by inheritance; a title and a free text
         // box do not.
         bulleted: ph_type.as_ref().is_some_and(PhType::is_body),
+        theme,
+        inherited: &runs_inherit,
     };
     let body = match sp.child("txBody") {
         Some(tx_body) => text::read_body(tx_body, &ctx, report),
@@ -400,11 +459,12 @@ fn read_shape(
     let kind = match ph_type {
         Some(ph_type) => ShapeKind::Placeholder(Placeholder {
             ph_type,
-            idx: ph
-                .and_then(|ph| ph.attr_i64("idx"))
-                .and_then(|n| u32::try_from(n).ok()),
+            idx,
             body,
-            delta: shape_props(sp),
+            delta: ShapeProps {
+                font,
+                ..shape_props(sp)
+            },
         }),
         None => ShapeKind::TextBox { body },
     };
@@ -422,9 +482,9 @@ fn read_shape(
     }
 }
 
-/// The shape's own formatting. The cascade delta proper is increment 13-D;
-/// what this reads is the one property that is a fact about the shape and not
-/// about what it inherits.
+/// The shape's own formatting that is a fact about the shape rather than a
+/// delta over what it inherits. The delta proper is layered on top of this by
+/// the caller, which is the only place that knows the cascade.
 fn shape_props(sp: &Element) -> ShapeProps {
     ShapeProps {
         // `a:normAutofit@fontScale` is in thousandths of a percent.
@@ -440,6 +500,7 @@ fn shape_props(sp: &Element) -> ShapeProps {
 fn read_master(
     package: &Package,
     part: &str,
+    cascade: &mut Cascade,
     report: &mut ConversionReport,
 ) -> Result<(MasterId, Master, Vec<String>), ReadError> {
     let root = parse(package, part)?;
@@ -451,20 +512,61 @@ fn read_master(
             why: "declares no layouts".into(),
         });
     }
+
+    // The theme is a reference the IR keeps by name, and the values every
+    // `a:schemeClr` and `+mj-lt` below resolves through.
+    let theme_part = rels
+        .of_kind("theme")
+        .find(|rel| !rel.external)
+        .map(|rel| rel.target.clone());
+    let theme = match &theme_part {
+        Some(part) => Theme::read(&parse(package, part)?).with_map(&root),
+        None => Theme::default().with_map(&root),
+    };
+    cascade.add_master(part, &root, theme, report);
+
     let master = Master {
         name: csld_name(&root).unwrap_or_else(|| part_stem(part)),
-        theme: rels
-            .of_kind("theme")
-            .find(|rel| !rel.external)
-            .map(|rel| rel.target.clone()),
-        placeholders: read_placeholders(&root),
+        theme: theme_part,
+        placeholders: read_placeholders(&root, |ph_type, idx| {
+            cascade.master_placeholder(part, ph_type, idx)
+        }),
     };
     Ok((MasterId::new(part.to_string()), master, layouts))
+}
+
+/// Reads a layout into both the catalogue and the cascade, unless it is already
+/// there or the package says it is not a layout at all.
+fn load_layout(
+    package: &Package,
+    types: &ContentTypes,
+    part: &str,
+    layouts: &mut LayoutCatalog,
+    cascade: &mut Cascade,
+    report: &mut ConversionReport,
+) -> Result<(), ReadError> {
+    if layouts
+        .layouts
+        .contains_key(&LayoutId::new(part.to_string()))
+    {
+        return Ok(());
+    }
+    if !types.is(part, &format!("{PML}.slideLayout+xml")) {
+        report.warn(Warning::Degraded {
+            what: format!("slide layout `{part}`"),
+            why: "the package declares it as something else".into(),
+        });
+        return Ok(());
+    }
+    let (id, layout) = read_layout(package, part, cascade, report)?;
+    layouts.layouts.insert(id, layout);
+    Ok(())
 }
 
 fn read_layout(
     package: &Package,
     part: &str,
+    cascade: &mut Cascade,
     report: &mut ConversionReport,
 ) -> Result<(LayoutId, Layout), ReadError> {
     let root = parse(package, part)?;
@@ -479,28 +581,45 @@ fn read_layout(
             why: "no slide master: the cascade stops here".into(),
         });
     }
+    cascade.add_layout(part, &root, master.as_ref().map(MasterId::as_str), report);
+
+    let id = LayoutId::new(part.to_string());
     let layout = Layout {
         name: csld_name(&root).unwrap_or_else(|| part_stem(part)),
         master,
-        placeholders: read_placeholders(&root),
+        placeholders: read_placeholders(&root, |ph_type, idx| {
+            cascade.inherited(Some(&id), ph_type, idx)
+        }),
     };
-    Ok((LayoutId::new(part.to_string()), layout))
+    Ok((id, layout))
 }
 
 /// The placeholders a layout or master declares, in `p:spTree` order.
-fn read_placeholders(root: &Element) -> Vec<LayoutPlaceholder> {
+///
+/// `resolved` answers what a slide inherits from each of them: unlike a slide
+/// placeholder, which stores a delta, a layout or master placeholder stores the
+/// resolved values, because it is the reference the delta is measured against.
+fn read_placeholders(
+    root: &Element,
+    resolved: impl Fn(&PhType, Option<u32>) -> cascade::LevelStyles,
+) -> Vec<LayoutPlaceholder> {
     let Some(tree) = root.path(&["cSld", "spTree"]) else {
         return Vec::new();
     };
     tree.children_named("sp")
         .filter_map(|shape| {
             let ph = shape.path(&["nvSpPr", "nvPr", "ph"])?;
+            let ph_type = PhType::parse(ph.attr("type").unwrap_or_default());
+            let idx = ph.attr_i64("idx").and_then(|n| u32::try_from(n).ok());
+            let font = cascade::reference_font(&resolved(&ph_type, idx));
             Some(LayoutPlaceholder {
-                ph_type: PhType::parse(ph.attr("type").unwrap_or_default()),
-                idx: ph.attr_i64("idx").and_then(|n| u32::try_from(n).ok()),
+                ph_type,
+                idx,
                 geometry: read_geometry(shape.path(&["spPr", "xfrm"])),
-                // The delta over the cascade is increment 13-D.
-                props: Default::default(),
+                props: ShapeProps {
+                    font,
+                    ..Default::default()
+                },
             })
         })
         .collect()
@@ -698,6 +817,104 @@ mod tests {
         };
         assert_eq!(list.items.len(), 2);
         assert_eq!(report.stats.lists, 2, "one body list per slide");
+    }
+
+    #[test]
+    fn a_placeholder_that_inherits_everything_stores_nothing() {
+        // The acceptance test of the cascade, and the one the on-ramp asks for
+        // by name: `placeholders-cascade` states no geometry, no font, no size
+        // and no colour anywhere on its slide. Every one of those is decided by
+        // the layout, the master and the theme, so the slide must come back
+        // empty of properties — a reader that copied the resolved cascade onto
+        // the shape would round-trip a deck no theme change could ever restyle.
+        let (deck, report) = read_fixture("placeholders-cascade");
+        let slide = &deck.slides[0];
+        assert_eq!(slide.shapes.len(), 2);
+
+        for shape in &slide.shapes {
+            let ph = shape.placeholder().expect("a placeholder");
+            assert!(
+                shape.geometry.is_inherited(),
+                "{:?} states geometry of its own",
+                shape.name
+            );
+            assert!(
+                ph.delta.is_empty(),
+                "{:?} states properties of its own: {:?}",
+                shape.name,
+                ph.delta
+            );
+            for block in &ph.body {
+                assert!(
+                    block_is_unstyled(block),
+                    "{:?} carries run properties it inherits: {block:?}",
+                    shape.name
+                );
+            }
+        }
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::Degraded { .. })),
+            "nothing was lost resolving the cascade: {:?}",
+            report.warnings
+        );
+    }
+
+    /// True when no run in the block carries any direct formatting.
+    fn block_is_unstyled(block: &Block) -> bool {
+        fn paragraph_is_unstyled(p: &docsai_model::text::Paragraph) -> bool {
+            p.format.run_direct.is_empty()
+                && p.content
+                    .iter()
+                    .all(|inline| !matches!(inline, docsai_model::text::Inline::Styled { .. }))
+        }
+        match block {
+            Block::Paragraph(p) => paragraph_is_unstyled(p),
+            Block::List(list) => list
+                .items
+                .iter()
+                .flat_map(|item| item.blocks.iter())
+                .all(block_is_unstyled),
+            _ => true,
+        }
+    }
+
+    #[test]
+    fn the_layout_resolves_the_references_the_slide_leaves_open() {
+        // The other half of reference + delta: the slide stores nothing because
+        // the layout stores the answer. `+mj-lt` and `tx1` are resolved here,
+        // once, instead of on every run of every slide.
+        let (deck, _) = read_fixture("placeholders-cascade");
+        let id = deck.slides[0].layout.clone().expect("a layout");
+        let layout = deck
+            .layouts
+            .layout(&id)
+            .expect("the layout in the catalogue");
+
+        let title = layout.title().expect("a title placeholder");
+        assert_eq!(title.props.font.name.as_deref(), Some("Calibri Light"));
+        assert_eq!(title.props.font.size, Some(Length::from_pt(44.0)));
+        assert_eq!(title.props.font.color.as_deref(), Some("#000000"));
+
+        let body = layout.body().expect("a body placeholder");
+        assert_eq!(body.props.font.name.as_deref(), Some("Calibri"));
+        assert_eq!(body.props.font.size, Some(Length::from_pt(28.0)));
+
+        // The master says the same thing, because that is where it is written.
+        let master = deck
+            .layouts
+            .master_of(&id)
+            .expect("the master behind the layout");
+        assert_eq!(
+            master
+                .placeholders
+                .iter()
+                .find(|p| p.ph_type.is_title())
+                .map(|p| p.props.font.size),
+            Some(Some(Length::from_pt(44.0)))
+        );
     }
 
     #[test]

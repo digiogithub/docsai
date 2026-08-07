@@ -13,6 +13,12 @@
 //! flat paragraphs and lose the structure spike P2 measured DocMark-P against.
 //! The rule is therefore: explicit `a:buNone` wins, then an explicit
 //! `a:buAutoNum`/`a:buChar`, then the shape's own default.
+//!
+//! Run properties are **resolved and then subtracted**: `+mj-lt` and
+//! `a:schemeClr` become the font and the colour the theme names, and whatever
+//! the shape's cascade already decided at that outline level is dropped. What a
+//! run stores is its delta, which for most slides is nothing at all. The
+//! resolution itself lives in [`cascade`](super::cascade).
 
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{Align, FontProps, LineHeight, ParaProps, Underline, VertAlign};
@@ -24,12 +30,19 @@ use docsai_model::units::Length;
 use crate::package::Relationships;
 use crate::xml::Element;
 
+use super::cascade::{LevelStyles, Theme};
+
 /// What a shape's text needs from around it.
 pub(super) struct TextCtx<'a> {
     pub rels: &'a Relationships,
     /// True when this shape's paragraphs are bullets unless they say
     /// otherwise: what a body placeholder inherits from the master.
     pub bulleted: bool,
+    /// The theme `+mj-lt` and `a:schemeClr` resolve against.
+    pub theme: &'a Theme,
+    /// What this shape's runs inherit, per outline level. What a run states and
+    /// the cascade already decided is not a delta and is not stored.
+    pub inherited: &'a LevelStyles,
 }
 
 /// Reads a `p:txBody` into blocks.
@@ -60,6 +73,14 @@ enum Flat {
 
 fn read_paragraph(p: &Element, ctx: &TextCtx<'_>, report: &mut ConversionReport) -> Flat {
     let p_pr = p.child("pPr");
+    // The outline level decides what the paragraph inherits, so it is read
+    // before the runs rather than after them.
+    let level = p_pr
+        .and_then(|pr| pr.attr_i64("lvl"))
+        .unwrap_or(0)
+        .clamp(0, 8) as u8;
+    let inherited = ctx.inherited.at(level);
+
     let mut paragraph = Paragraph {
         id: None,
         format: ParaFormat {
@@ -67,7 +88,7 @@ fn read_paragraph(p: &Element, ctx: &TextCtx<'_>, report: &mut ConversionReport)
             direct: p_pr.map(para_props).unwrap_or_default(),
             run_direct: p
                 .child("endParaRPr")
-                .map(|rpr| font_props(rpr, report))
+                .map(|rpr| font_props(rpr, ctx.theme, report).minus(&inherited))
                 .unwrap_or_default(),
         },
         content: Vec::new(),
@@ -79,7 +100,7 @@ fn read_paragraph(p: &Element, ctx: &TextCtx<'_>, report: &mut ConversionReport)
                 let props = RunProps::direct(
                     child
                         .child("rPr")
-                        .map(|rpr| font_props(rpr, report))
+                        .map(|rpr| font_props(rpr, ctx.theme, report).minus(&inherited))
                         .unwrap_or_default(),
                 );
                 let text = child.child("t").map(|t| t.deep_text()).unwrap_or_default();
@@ -101,10 +122,6 @@ fn read_paragraph(p: &Element, ctx: &TextCtx<'_>, report: &mut ConversionReport)
         }
     }
 
-    let level = p_pr
-        .and_then(|pr| pr.attr_i64("lvl"))
-        .unwrap_or(0)
-        .clamp(0, 8) as u8;
     match bullet_of(p_pr, ctx, &paragraph) {
         Some(ordered) => Flat::Item {
             ordered,
@@ -170,8 +187,11 @@ fn link_target(rpr: &Element, ctx: &TextCtx<'_>) -> Option<String> {
     Some(ctx.rels.get(id)?.target.clone())
 }
 
-/// Reads `a:rPr`/`a:endParaRPr` into character-level deltas.
-fn font_props(rpr: &Element, report: &mut ConversionReport) -> FontProps {
+/// Reads `a:rPr`/`a:endParaRPr` into character-level properties, **resolved**
+/// against the theme but not yet subtracted from what the run inherits: the
+/// cascade reads `a:defRPr` through this same function, and a reference has to
+/// mean the same thing on both sides of the comparison.
+pub(super) fn font_props(rpr: &Element, theme: &Theme, report: &mut ConversionReport) -> FontProps {
     let mut font = FontProps::default();
 
     if let Some(size) = rpr.attr_i64("sz") {
@@ -211,33 +231,55 @@ fn font_props(rpr: &Element, report: &mut ConversionReport) -> FontProps {
     font.name = rpr
         .child("latin")
         .and_then(|latin| latin.attr("typeface"))
-        // `+mj-lt` and `+mn-lt` are theme references, not font names; resolving
-        // them is the cascade's job (increment 13-D).
-        .filter(|name| !name.starts_with('+') && !name.is_empty())
-        .map(str::to_string);
+        // `+mj-lt` and `+mn-lt` are theme references, not font names: what is
+        // stored is the font the theme names, because writing `+mj-lt` as a
+        // typeface would ask for a font nobody has installed.
+        .and_then(|typeface| theme.font(typeface));
     font.color = rpr
         .child("solidFill")
-        .and_then(|fill| solid_colour(fill, report));
+        .and_then(|fill| solid_colour(fill, theme, report));
     font.highlight = rpr
         .child("highlight")
-        .and_then(|fill| solid_colour(fill, report));
+        .and_then(|fill| solid_colour(fill, theme, report));
 
     font
 }
 
-/// The `#rrggbb` of a fill, when it states one outright.
+/// The `#rrggbb` of a fill.
 ///
-/// `a:schemeClr` is a reference into the theme and is left for the cascade
-/// (13-D) to resolve; it is *not* dropped here, because nothing consumes the
-/// colour yet — but a fill this reader cannot classify at all is reported.
-fn solid_colour(fill: &Element, report: &mut ConversionReport) -> Option<String> {
+/// `a:srgbClr` states it outright; `a:schemeClr` names a slot the master maps
+/// into the theme, and resolving it is what makes a slide's colour comparable
+/// with the one it inherits. A colour model this reader cannot resolve is
+/// reported rather than dropped in silence.
+fn solid_colour(fill: &Element, theme: &Theme, report: &mut ConversionReport) -> Option<String> {
     if let Some(srgb) = fill.child("srgbClr").and_then(|c| c.attr("val")) {
         if srgb.len() == 6 && srgb.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some(format!("#{}", srgb.to_ascii_lowercase()));
         }
     }
-    if fill.child("schemeClr").is_some() {
-        return None;
+    if let Some(scheme) = fill.child("schemeClr") {
+        let val = scheme.attr("val").unwrap_or_default();
+        // A transform — `a:lumMod`, `a:alpha`, `a:tint` — changes the colour the
+        // slot resolves to. The base colour still travels; the shade it was
+        // shifted to does not, and that is a loss worth naming.
+        if let Some(transform) = scheme.children().next() {
+            report.warn(Warning::Degraded {
+                what: format!("a:schemeClr val=\"{val}\""),
+                why: format!("the `a:{}` transform is not applied", transform.name),
+            });
+        }
+        let resolved = theme.colour(val);
+        if resolved.is_none() {
+            report.warn(Warning::Degraded {
+                what: format!("a:schemeClr val=\"{val}\""),
+                why: if theme.is_empty() {
+                    "the deck declares no theme to resolve it against".into()
+                } else {
+                    "the theme does not define that colour".into()
+                },
+            });
+        }
+        return resolved;
     }
     if let Some(other) = fill.children().next() {
         report.warn(Warning::Degraded {
@@ -385,12 +427,23 @@ mod tests {
     const NS: &str = r#"xmlns:a="urn:a" xmlns:r="urn:r""#;
 
     fn read(xml: &str, bulleted: bool) -> (Vec<Block>, ConversionReport) {
+        read_with(xml, bulleted, &Theme::default(), &LevelStyles::default())
+    }
+
+    fn read_with(
+        xml: &str,
+        bulleted: bool,
+        theme: &Theme,
+        inherited: &LevelStyles,
+    ) -> (Vec<Block>, ConversionReport) {
         let root = Element::parse("t.xml", xml.as_bytes()).unwrap();
         let rels = Relationships::default();
         let mut report = ConversionReport::new();
         let ctx = TextCtx {
             rels: &rels,
             bulleted,
+            theme,
+            inherited,
         };
         let blocks = read_body(&root, &ctx, &mut report);
         (blocks, report)
@@ -517,24 +570,85 @@ mod tests {
         assert!(matches!(p.content[1], Inline::Break(BreakKind::Line)));
     }
 
+    /// A theme with a major font and one scheme colour, enough to resolve
+    /// against.
+    fn theme() -> Theme {
+        let xml = r#"<a:theme xmlns:a="urn:a"><a:themeElements>
+              <a:clrScheme name="t"><a:dk1><a:srgbClr val="1F3864"/></a:dk1></a:clrScheme>
+              <a:fontScheme name="t">
+                <a:majorFont><a:latin typeface="Calibri Light"/></a:majorFont>
+                <a:minorFont><a:latin typeface="Calibri"/></a:minorFont>
+              </a:fontScheme>
+            </a:themeElements></a:theme>"#;
+        Theme::read(&Element::parse("theme.xml", xml.as_bytes()).unwrap())
+    }
+
     #[test]
-    fn a_theme_font_reference_is_not_a_font_name() {
-        // `+mj-lt` says "whatever the theme's major font is"; storing it as a
-        // typeface would write a font nobody has installed.
+    fn theme_references_resolve_to_what_the_theme_names() {
+        // `+mj-lt` says "whatever the theme's major font is" and `dk1` is a
+        // slot; storing either verbatim would write a font nobody has
+        // installed and a colour no renderer understands.
         let xml = format!(
             r#"<p:txBody {NS} xmlns:p="urn:p"><a:bodyPr/><a:p><a:r>
-                <a:rPr><a:latin typeface="+mj-lt"/></a:rPr><a:t>Título</a:t>
+                <a:rPr><a:solidFill><a:schemeClr val="dk1"/></a:solidFill>
+                <a:latin typeface="+mj-lt"/></a:rPr><a:t>Título</a:t>
             </a:r></a:p></p:txBody>"#
         );
-        let (blocks, _) = read(&xml, false);
+        let (blocks, _) = read_with(&xml, false, &theme(), &LevelStyles::default());
         let Block::Paragraph(p) = &blocks[0] else {
             panic!("expected a paragraph");
         };
-        assert!(
-            matches!(&p.content[0], Inline::Text(t) if t == "Título"),
-            "no formatting to carry: {:?}",
-            p.content[0]
+        let Inline::Styled { props, .. } = &p.content[0] else {
+            panic!("expected a styled run, got {:?}", p.content[0]);
+        };
+        assert_eq!(props.direct.name.as_deref(), Some("Calibri Light"));
+        assert_eq!(props.direct.color.as_deref(), Some("#1f3864"));
+    }
+
+    #[test]
+    fn what_the_run_inherits_is_not_a_delta_and_is_not_stored() {
+        // The run states exactly what the cascade already decided, spelled with
+        // references rather than values. Resolved, the two are the same thing,
+        // and the shape stores nothing — the economy rule, applied to slides.
+        let master = r#"<a:lstStyle xmlns:a="urn:a"><a:lvl1pPr><a:defRPr sz="2800">
+              <a:solidFill><a:schemeClr val="dk1"/></a:solidFill>
+              <a:latin typeface="+mn-lt"/></a:defRPr></a:lvl1pPr></a:lstStyle>"#;
+        let mut report = ConversionReport::new();
+        let inherited = super::super::cascade::read_levels(
+            &Element::parse("m.xml", master.as_bytes()).unwrap(),
+            &theme(),
+            &mut report,
         );
+
+        let xml = format!(
+            r#"<p:txBody {NS} xmlns:p="urn:p"><a:bodyPr/>
+                <a:p><a:r><a:rPr sz="2800"><a:solidFill><a:schemeClr val="dk1"/></a:solidFill>
+                  <a:latin typeface="+mn-lt"/></a:rPr><a:t>Heredado</a:t></a:r></a:p>
+                <a:p><a:r><a:rPr sz="1800"><a:latin typeface="Georgia"/></a:rPr>
+                  <a:t>Propio</a:t></a:r></a:p>
+            </p:txBody>"#
+        );
+        let (blocks, _) = read_with(&xml, false, &theme(), &inherited);
+
+        let Block::Paragraph(first) = &blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        assert!(
+            matches!(&first.content[0], Inline::Text(t) if t == "Heredado"),
+            "nothing to store: {:?}",
+            first.content[0]
+        );
+
+        // What differs survives, and only that: the colour is still inherited.
+        let Block::Paragraph(second) = &blocks[1] else {
+            panic!("expected a paragraph");
+        };
+        let Inline::Styled { props, .. } = &second.content[0] else {
+            panic!("expected a styled run, got {:?}", second.content[0]);
+        };
+        assert_eq!(props.direct.size, Some(Length::from_pt(18.0)));
+        assert_eq!(props.direct.name.as_deref(), Some("Georgia"));
+        assert_eq!(props.direct.color, None);
     }
 
     #[test]

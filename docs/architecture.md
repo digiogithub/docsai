@@ -378,6 +378,13 @@ Part names are conventions, so the reader never trusts them: a part is what `[Co
 declares it to be, reached through the relationship graph, and slide order comes from
 `p:sldIdLst` alone. `slide3.xml` first in the deck is what PowerPoint writes after a reorder.
 
+The same rule applies inside a slide. A placeholder's font, size and colour are decided by the
+layout, the master's `p:txStyles` and the theme; the reader resolves those references —
+`+mj-lt` through `a:fontScheme`, `a:schemeClr` through the master's `p:clrMap` — and stores only
+what the slide changes over them. The resolved values live on the layout and master
+placeholders, which keeps a restyle a restyle: change the theme and every slide follows, because
+no slide copied the answer.
+
 ### 9.5 CLI surface v2
 
 ```

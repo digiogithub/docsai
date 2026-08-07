@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The placeholder cascade, as reference plus delta** (plan v2 Phase 13, fourth increment): a
+  slide's fonts, sizes and colours are read against what its layout, master and theme already
+  decide. Theme references are **resolved** — `+mj-lt`/`+mn-lt` become the font the
+  `a:fontScheme` names, `a:schemeClr` becomes a hex colour through the master's `p:clrMap`, so
+  `tx1` on an inverted master resolves to what it really is — and what the cascade already says
+  is then **subtracted**: a placeholder that changes nothing stores nothing, and the resolved
+  values live on the layout and master placeholders, where they belong. The reference is never
+  flattened away: the slide keeps its layout id. A colour transform (`a:lumMod`, `a:alpha`) and
+  a theme colour that resolves to nothing are reported rather than dropped in silence.
+
 - **Slide text** (plan v2 Phase 13, third increment): `p:sp` becomes a `Placeholder` or a
   `TextBox`, and `p:txBody` becomes blocks — `a:p`/`a:r` with the same run-property model the
   docx reader uses, `a:br`, `a:fld` (a slide number is `FieldKind::Page`, and the DrawingML type
