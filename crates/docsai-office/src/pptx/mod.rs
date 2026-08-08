@@ -27,10 +27,15 @@
 //!   being the first slide of the deck is legal and common after a reorder in
 //!   PowerPoint. The same rule binds a slide to its notes: [`notes`] follows the
 //!   slide's `notesSlide` relationship, never the number in the part name.
+//!
+//! A third order is not read from the file at all: the order of the shapes on a
+//! slide. `p:spTree` is z-order, and [`order`] computes reading order from it —
+//! reversibly, because every shape keeps its source index.
 
 mod cascade;
 mod graphics;
 mod notes;
+mod order;
 mod text;
 
 use std::collections::BTreeMap;
@@ -402,11 +407,11 @@ const UNREAD_SHAPES: &[(&str, &str)] = &[
     ("AlternateContent", "alternate content"),
 ];
 
-/// Reads the shapes of a slide's `p:spTree`, in source order.
+/// Reads the shapes of a slide's `p:spTree`, in **reading order**.
 ///
-/// The reading-order policy (placeholders by type, then the rest by top-left)
-/// is increment 13-G; until then the order *is* the source order, and every
-/// shape already carries the `z_index` that makes the reordering reversible.
+/// The tree gives z-order; [`order::sort`] turns it into the order a human
+/// reads the slide in, and every shape keeps the `z_index` that makes that
+/// reordering reversible.
 fn read_shapes(
     tree: &Element,
     ctx: &SlideCtx<'_>,
@@ -458,6 +463,7 @@ fn read_shapes(
         }
         z_index += 1;
     }
+    order::sort(&mut shapes);
     Ok(shapes)
 }
 
@@ -1288,6 +1294,37 @@ mod tests {
         assert_eq!(
             deck.slides[1].notes.as_ref().map(|n| block_text(&n[0])),
             Some("Nota de la segunda diapositiva.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_slide_comes_back_in_reading_order_and_remembers_the_other_one() {
+        // The fixture's `p:spTree` is z-order: a footnote box first, the title
+        // fourth. Reading order is computed from the slide — title, body, then
+        // the free boxes by top-left — and the two boxes 10 000 EMU apart
+        // vertically are one row, read left to right.
+        let (deck, _) = read_fixture("reading-order");
+        let shapes = &deck.slides[0].shapes;
+        let names: Vec<&str> = shapes
+            .iter()
+            .map(|shape| shape.name.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "Title 1",
+                "Content Placeholder 2",
+                "Marca izquierda",
+                "Etiqueta derecha",
+                "Pie 1",
+            ]
+        );
+
+        // What makes the reordering admissible: the source order is still on
+        // the shapes, so a writer can put the tree back exactly as it was.
+        assert_eq!(
+            shapes.iter().map(|shape| shape.z_index).collect::<Vec<_>>(),
+            vec![3, 1, 4, 2, 0]
         );
     }
 

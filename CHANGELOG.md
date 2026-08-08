@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deterministic, reversible reading order** (plan v2 Phase 13, seventh increment): a slide's
+  shapes come back in the order a human reads them, not in the order the file stores them.
+  `p:spTree` is z-order, and it stops agreeing with reading order the moment a shape is sent to
+  the back or a title is added last. Placeholders come first by type — title, then the bodies in
+  the layout's own `p:ph@idx` order, then the rest, with the furniture a deck repeats on every
+  slide last — and the remaining shapes follow by top-left, with tops within an eighth of an inch
+  read as one row from left to right. Nothing is lost by the move: every shape still carries its
+  source `p:spTree` index, so sorting by it reproduces the tree exactly, and every comparison ends
+  in that index, so the order is total and independent of the sort algorithm. New corpus deck
+  `reading-order.pptx`, whose shape tree is deliberately not its reading order.
+
 - **Speaker notes** (plan v2 Phase 13, sixth increment): `ppt/notesSlides/*` becomes
   `Slide::notes`, reached through the slide's own `notesSlide` relationship and never by the
   number in the part name — `notesSlide1.xml` belonging to the first slide is PowerPoint's habit,

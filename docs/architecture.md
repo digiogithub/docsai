@@ -399,6 +399,15 @@ plausible text under the wrong slide. `Slide::notes` distinguishes a deck with n
 (`None`) from a notes page that is empty (`Some([])`), because the writer has to reproduce the
 second and must not invent the first.
 
+The order of the shapes on a slide is **computed, not read**. `p:spTree` order is z-order — what
+is drawn on top of what — and it stops being reading order the moment a shape is sent to the back
+or a title is added last. The policy is placeholders first by type (title, then the bodies by
+`p:ph@idx`, then the rest, with the repeated furniture last) and then the remaining shapes by
+top-left, with tops within an eighth of an inch counted as one row and read left to right. It is
+admissible only because it is reversible: `Shape::z_index` keeps the source index on every shape,
+so sorting by it reproduces the tree exactly. Every comparison ends in that index, so the order is
+total and does not depend on the sort algorithm.
+
 ### 9.5 CLI surface v2
 
 ```

@@ -2870,6 +2870,36 @@ def pptx_notes_crossed() -> None:
     )
 
 
+def pptx_reading_order() -> None:
+    """A `p:spTree` whose order is not the order anybody reads the slide in.
+
+    The title comes fourth in the tree and a footnote box comes first, which is
+    what happens the moment somebody sends a shape to the back or adds the
+    title last: `spTree` order is z-order, not reading order. Two of the free
+    boxes are 10 000 EMU apart vertically — under a hundredth of an inch — so
+    they are one row, and a reader that compares tops exactly reads them
+    top-down instead of left-to-right.
+
+    Every other deck in the corpus is written in an order that happens to
+    already be the reading order, so none of them can tell the policy from
+    trusting the file.
+    """
+    build_pptx(
+        "reading-order.pptx",
+        [slide(
+            shape(4, "Pie 1", a_p("Al pie de la diapositiva"),
+                  frame=xfrm(838200, 5000000, 2000000, 500000))
+            + shape(3, "Content Placeholder 2", a_p("Cuerpo heredado"), ph=ph("body", 1))
+            + shape(5, "Etiqueta derecha", a_p("A la derecha"),
+                    frame=xfrm(5000000, 2000000, 1500000, 500000))
+            + shape(2, "Title 1", a_p("El título va el cuarto"), ph=ph("title"))
+            + shape(6, "Marca izquierda", a_p("A la izquierda"),
+                    frame=xfrm(838200, 2010000, 1500000, 500000))
+        )],
+        title="Orden de lectura",
+    )
+
+
 def pptx_tables_simple() -> None:
     """`p:graphicFrame` -> `a:tbl`: a different XML model from `w:tbl`, but the
     IR `Table` already covers it, so this fixture is about the wrapper."""
@@ -3281,6 +3311,7 @@ GENERATORS = [
     pptx_bullets_levels,
     pptx_notes_speaker,
     pptx_notes_crossed,
+    pptx_reading_order,
     pptx_tables_simple,
     pptx_images_anchored,
     pptx_shapes_geometry,

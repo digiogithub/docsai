@@ -175,7 +175,9 @@ Current work is **Phase 13**: `.pptx` reading into the IR. `Document::Presentati
 layouts, masters, slide order, sections — plus the shapes and text of each slide, resolved
 against the placeholder cascade so that only the delta over layout, master and theme is stored,
 plus the pictures and tables of a slide — the same `ImageRef` and `Table` a `.docx` carries — and
-the speaker notes, reached through the slide's own relationships. Groups, charts and SmartArt are
+the speaker notes, reached through the slide's own relationships. The shapes come back in a
+computed reading order — placeholders by type, then the rest by top-left — that stays reversible
+because every shape keeps its source `p:spTree` index. Groups, charts and SmartArt are
 still to come, so `read_pptx` is kept out of the `read` dispatch and `docsai formats` still says
 `pptx: no`.
 
