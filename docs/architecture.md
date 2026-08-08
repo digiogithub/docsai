@@ -408,6 +408,16 @@ admissible only because it is reversible: `Shape::z_index` keeps the source inde
 so sorting by it reproduces the tree exactly. Every comparison ends in that index, so the order is
 total and does not depend on the sort algorithm.
 
+The deck the reader could not model is not thereby lost. `Presentation::skeleton` points at the
+**whole original package**, stored opaquely and content-hashed in the asset store — the file
+itself, not a re-zip of its parts, because a re-zip has already lost the member order and the
+compression the deck was written with. `SkeletonRef::rebuilt_parts` names the parts whose content
+the IR holds, and only those: the slides that were read and their notes pages. Everything else —
+theme, masters, layouts, `tableStyles.xml`, the workbook embedded in a chart, the four `dgm:`
+parts of a diagram — is the writer's to copy back byte for byte. Spike P3 measured the
+alternative: a package whose unmodelled parts are regenerated opens without complaint and loses a
+chart's values and five SmartArt parts invisibly.
+
 ### 9.5 CLI surface v2
 
 ```

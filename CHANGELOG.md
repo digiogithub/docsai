@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The preserved package skeleton** (plan v2 Phase 13, eighth increment): reading a deck now
+  keeps the original `.pptx` whole and opaque in the asset store, referenced from
+  `Presentation::skeleton`, so a writer re-injects the slides it can rebuild into the deck as it
+  was written instead of regenerating a theme, a master, `tableStyles.xml` or the workbook
+  embedded in a chart. Spike P3 measured what the alternative costs: a package whose unmodelled
+  parts are dropped still opens without a word, and loses a chart's values and five SmartArt parts
+  invisibly. `SkeletonRef::rebuilt_parts` names exactly the parts whose content the IR holds — the
+  slides that were read and their notes pages, never a part the reader skipped — which is the
+  writer's licence to regenerate one. The package is content-hashed like every other asset, so the
+  same deck read twice is stored once, and reading it is now capped at 512 MiB, the same limit
+  that already bounded what a package may expand to.
+
 - **Deterministic, reversible reading order** (plan v2 Phase 13, seventh increment): a slide's
   shapes come back in the order a human reads them, not in the order the file stores them.
   `p:spTree` is z-order, and it stops agreeing with reading order the moment a shape is sent to

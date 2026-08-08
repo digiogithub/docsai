@@ -177,7 +177,9 @@ against the placeholder cascade so that only the delta over layout, master and t
 plus the pictures and tables of a slide — the same `ImageRef` and `Table` a `.docx` carries — and
 the speaker notes, reached through the slide's own relationships. The shapes come back in a
 computed reading order — placeholders by type, then the rest by top-left — that stays reversible
-because every shape keeps its source `p:spTree` index. Groups, charts and SmartArt are
+because every shape keeps its source `p:spTree` index. The original package is kept whole in the
+asset store as `Presentation::skeleton`, so nothing the reader does not model is lost. Groups,
+charts and SmartArt are
 still to come, so `read_pptx` is kept out of the `read` dispatch and `docsai formats` still says
 `pptx: no`.
 

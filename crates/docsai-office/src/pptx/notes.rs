@@ -20,6 +20,19 @@ use crate::package::{ContentTypes, Package, Relationships};
 use super::cascade::{LevelStyles, Theme};
 use super::{text, PML};
 
+/// The notes part of a slide, when its relationships name one inside the
+/// package.
+///
+/// The same door [`read`] goes through, so the part the skeleton records as
+/// rebuilt is the part whose text the IR actually holds.
+pub(super) fn part(slide_rels: &Relationships) -> Option<&str> {
+    slide_rels
+        .of_kind("notesSlide")
+        .next()
+        .filter(|rel| !rel.external)
+        .map(|rel| rel.target.as_str())
+}
+
 /// Reads the notes of one slide.
 ///
 /// `None` when the slide has no notes part at all; `Some(vec![])` when it has

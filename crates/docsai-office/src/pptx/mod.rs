@@ -28,6 +28,11 @@
 //!   PowerPoint. The same rule binds a slide to its notes: [`notes`] follows the
 //!   slide's `notesSlide` relationship, never the number in the part name.
 //!
+//! What this reader does *not* model is not thereby lost: [`skeleton`] keeps
+//! the original package whole and opaque, so the writer re-injects the slides
+//! it can rebuild into the deck as it was written rather than regenerating a
+//! theme, a master or an embedded workbook it never understood.
+//!
 //! A third order is not read from the file at all: the order of the shapes on a
 //! slide. `p:spTree` is z-order, and [`order`] computes reading order from it —
 //! reversibly, because every shape keeps its source index.
@@ -36,6 +41,7 @@ mod cascade;
 mod graphics;
 mod notes;
 mod order;
+mod skeleton;
 mod text;
 
 use std::collections::BTreeMap;
@@ -67,21 +73,47 @@ const CT_PRESENTATION: &str =
 const CT_PRESENTATION_MACRO: &str =
     "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml";
 
+/// Cap on the compressed package the skeleton keeps, matching the cap
+/// `package.rs` puts on what it expands to. A deck this reader would refuse to
+/// decompress is one it refuses to hold.
+const MAX_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Default slide size when `p:sldSz` is missing: 4:3 at 10 × 7.5 in.
 const DEFAULT_SLIDE_SIZE: (i64, i64) = (9_144_000, 6_858_000);
 
 /// Reads a `.pptx` presentation into the IR.
+///
+/// The bytes are read once and kept, because they are two things at once: the
+/// package to decompress, and the [`skeleton`] the writer will re-inject slides
+/// into. Handing `Package::open` a reader and then asking for the original
+/// again would mean decompressing or reading the deck twice.
 pub fn read<R: Read + Seek>(
-    reader: R,
+    mut reader: R,
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
-    let package = Package::open(reader)?;
-    read_package(&package, assets)
+    // Capped, because reading the stream ahead of `Package::open` moves the
+    // first size check to this line: without it, a 5 GiB file that is not even
+    // a ZIP would be pulled into memory before anything rejected it.
+    let mut original = Vec::new();
+    let read = (&mut reader)
+        .take(MAX_PACKAGE_BYTES.saturating_add(1))
+        .read_to_end(&mut original)?;
+    if read as u64 > MAX_PACKAGE_BYTES {
+        return Err(ReadError::TooLarge(format!(
+            "the package is larger than {MAX_PACKAGE_BYTES} bytes"
+        )));
+    }
+    let package = Package::open(std::io::Cursor::new(&original))?;
+    read_package(&package, Some(&original), assets)
 }
 
+/// `original` is the undecompressed package, when the caller has it: it is what
+/// the skeleton preserves. `None` — a package assembled in memory, as the tests
+/// do — reads into a deck with no skeleton, which is honest rather than a
+/// skeleton reconstructed from parts that have already lost their ZIP order.
 pub(crate) fn read_package(
     package: &Package,
-    // Slide pictures land in the store; the preserved skeleton follows in 13-H.
+    original: Option<&[u8]>,
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
     let mut report = ConversionReport::new();
@@ -126,6 +158,9 @@ pub(crate) fn read_package(
 
     let sections = read_sections(&root);
     let mut slides = Vec::new();
+    // The parts whose content ends up in the IR, and therefore the only ones a
+    // writer is allowed to regenerate instead of copying from the skeleton.
+    let mut rebuilt_parts: Vec<String> = Vec::new();
 
     for entry in slide_entries(&root) {
         let Some(rel) = entry.rel_id.as_deref().and_then(|id| rels.get(id)) else {
@@ -182,6 +217,14 @@ pub(crate) fn read_package(
             &mut report,
         )?;
         report.stats.slides = report.stats.slides.saturating_add(1);
+        rebuilt_parts.push(rel.target.clone());
+        // Only when the notes were read: a notes part the reader refused is a
+        // part the IR does not hold, so the writer has to copy it back.
+        if slide.notes.is_some() {
+            if let Some(part) = notes::part(&slide_rels) {
+                rebuilt_parts.push(part.to_string());
+            }
+        }
         slides.push(slide);
     }
 
@@ -200,6 +243,9 @@ pub(crate) fn read_package(
         )?;
     }
 
+    let skeleton =
+        original.and_then(|bytes| skeleton::capture(bytes, &rebuilt_parts, assets, &mut report));
+
     let presentation = Presentation {
         meta: read_meta(package),
         addressing: Default::default(),
@@ -207,7 +253,7 @@ pub(crate) fn read_package(
         layouts,
         slide_size,
         slides,
-        skeleton: None,
+        skeleton,
     };
     Ok((Document::Presentation(presentation), report))
 }
@@ -784,14 +830,25 @@ mod tests {
     use docsai_model::text::Block;
     use docsai_model::MemoryAssetStore;
 
-    fn read_fixture(name: &str) -> (Presentation, ConversionReport) {
-        let path = format!(
+    fn fixture_path(name: &str) -> String {
+        format!(
             "{}/../../corpus/pptx/{name}.pptx",
             env!("CARGO_MANIFEST_DIR")
-        );
-        let file = std::fs::File::open(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        )
+    }
+
+    fn read_fixture(name: &str) -> (Presentation, ConversionReport) {
         let mut assets = MemoryAssetStore::new();
-        let (document, report) = read(file, &mut assets).unwrap_or_else(|e| panic!("{name}: {e}"));
+        read_fixture_into(name, &mut assets)
+    }
+
+    fn read_fixture_into(
+        name: &str,
+        assets: &mut dyn AssetStore,
+    ) -> (Presentation, ConversionReport) {
+        let path = fixture_path(name);
+        let file = std::fs::File::open(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let (document, report) = read(file, assets).unwrap_or_else(|e| panic!("{name}: {e}"));
         match document {
             Document::Presentation(deck) => (deck, report),
             other => panic!("expected a presentation, got {}", other.shape_name()),
@@ -1326,6 +1383,73 @@ mod tests {
             shapes.iter().map(|shape| shape.z_index).collect::<Vec<_>>(),
             vec![3, 1, 4, 2, 0]
         );
+    }
+
+    #[test]
+    fn the_original_package_is_kept_whole_and_opaque() {
+        // Spike P3's rule: preserve everything, rebuild as the exception. What
+        // the skeleton holds is the file itself — not a re-zip of the parts,
+        // which would already have lost the member order and the compression
+        // the deck was written with.
+        let mut assets = MemoryAssetStore::new();
+        let (deck, report) = read_fixture_into("charts-embedded", &mut assets);
+        let skeleton = deck.skeleton.expect("the deck keeps its package");
+
+        let stored = assets.get(&skeleton.asset).expect("stored opaquely");
+        let original = std::fs::read(fixture_path("charts-embedded")).unwrap();
+        assert_eq!(stored, original, "byte for byte, not a rewrite");
+
+        // And it is the whole package, embedded workbook included — the part
+        // the naive control of spike P3 lost twelve chart values to.
+        let kept = Package::open(std::io::Cursor::new(stored)).unwrap();
+        assert!(kept.part_names().any(|p| p.ends_with(".xlsx")));
+        assert!(kept.has_part("ppt/theme/theme1.xml"));
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::Degraded { what, .. } if what.contains("skeleton"))),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn the_skeleton_names_only_the_parts_the_ir_holds() {
+        // `rebuilt_parts` is a licence to regenerate, and it is granted for
+        // exactly the parts this reader turned into IR. The theme, the master,
+        // the layouts and `docProps` are not in it: nothing in the IR could
+        // reproduce them, so the writer copies them.
+        let (deck, _) = read_fixture("notes-speaker");
+        let skeleton = deck.skeleton.expect("the deck keeps its package");
+        assert_eq!(
+            skeleton.rebuilt_parts,
+            vec![
+                "ppt/notesSlides/notesSlide1.xml",
+                "ppt/notesSlides/notesSlide2.xml",
+                "ppt/slides/slide1.xml",
+                "ppt/slides/slide2.xml",
+            ]
+        );
+
+        let (plain, _) = read_fixture("basic-slides");
+        assert_eq!(
+            plain.skeleton.expect("kept too").rebuilt_parts,
+            vec!["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+            "a deck with no notes rebuilds no notes part"
+        );
+    }
+
+    #[test]
+    fn the_same_deck_read_twice_is_stored_once() {
+        // The skeleton is content-hashed like every other asset, so a batch
+        // that reads one deck repeatedly does not store it repeatedly.
+        let mut assets = MemoryAssetStore::new();
+        let (first, _) = read_fixture_into("basic-slides", &mut assets);
+        assert_eq!(assets.len(), 1);
+        let (second, _) = read_fixture_into("basic-slides", &mut assets);
+        assert_eq!(assets.len(), 1);
+        assert_eq!(first.skeleton, second.skeleton);
     }
 
     fn block_text(block: &Block) -> String {
