@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`.pptm` and corrupt decks** (plan v2 Phase 13, tenth increment): a macro-enabled presentation
+  reads as its macro-free equivalent — the slides come back whole, the VBA project is never
+  inspected or executed, and `Warning::MacrosIgnored` names the part, the same rule `.docm` and
+  `.xlsm` already followed. Detection stays content-based: a `.pptm` renamed `.pptx`, or the other
+  way round, reaches the same reader. New corpus deck `macro-enabled.pptm`. The robustness suite
+  now covers presentations too: truncated packages, flipped bytes, malformed XML, random noise and
+  dangling relationships are a typed `Err` or a warning, never a panic. A slide relationship that
+  does not resolve is a warning and the deck reads without that slide; a relationship that resolves
+  to a part the package does not carry is a typed `ReadError::MissingPart`, because handing back a
+  deck one slide short is how an agent deletes it by writing it out again.
+
 - **Nothing disappears from a slide** (plan v2 Phase 13, ninth increment): a group, a connector, a
   custom geometry, SmartArt and anything else the IR has no node for now comes back as three
   things at once — a **visible stub** so an agent knows the object is there and does not delete it

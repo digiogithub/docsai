@@ -30,6 +30,7 @@ there are no goldens and no Rust test touches these files. The only gate is
 | `notes-crossed.pptx` | Notes parts numbered against the slides (added in 13-F, [[40-phase-13-notes]]) |
 | `reading-order.pptx` | A `p:spTree` that is not the reading order (added in 13-G, [[41-phase-13-reading-order]]) |
 | `raw-preserved.pptx` | A group, a `custGeom`, `p:transition` and `p:timing` (added in 13-I, [[43-phase-13-raw]]) |
+| `macro-enabled.pptm` | A macro-enabled deck and its VBA project (added in 13-J, [[44-phase-13-pptm-robustness]]) |
 | `tables-simple.pptx` | `p:graphicFrame` → `a:tbl` |
 | `images-anchored.pptx` | DrawingML `p:pic` with explicit `a:xfrm` |
 | `shapes-geometry.pptx` | `prstGeom` free shapes and a `p:cxnSp` connector |

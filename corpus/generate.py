@@ -2575,6 +2575,7 @@ def build_pptx(
     extra_parts: dict[str, bytes] | None = None,
     extra_overrides: list[tuple[str, str]] | None = None,
     extra_defaults: dict[str, str] | None = None,
+    macro_enabled: bool = False,
 ) -> None:
     """Assemble a .pptx package.
 
@@ -2602,8 +2603,13 @@ def build_pptx(
         "xml": "application/xml",
     }
     defaults.update(extra_defaults or {})
+    main_type = (
+        "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml"
+        if macro_enabled
+        else f"{PML_TYPE}.presentation.main+xml"
+    )
     overrides = [
-        ("/ppt/presentation.xml", f"{PML_TYPE}.presentation.main+xml"),
+        ("/ppt/presentation.xml", main_type),
         ("/ppt/slideMasters/slideMaster1.xml", f"{PML_TYPE}.slideMaster+xml"),
         ("/ppt/slideLayouts/slideLayout1.xml", f"{PML_TYPE}.slideLayout+xml"),
         ("/ppt/theme/theme1.xml", f"{DML_TYPE}.theme+xml"),
@@ -2627,6 +2633,18 @@ def build_pptx(
     ])
 
     presentation_rels = [("rIdMaster1", "slideMaster", "slideMasters/slideMaster1.xml")]
+    if macro_enabled:
+        # Not a real VBA project: an OLE2 header and filler, enough for the part
+        # to exist with its content type and relationship. The reader must never
+        # look inside it, so a fixture that could actually run something would be
+        # a hazard with no test value.
+        parts["ppt/vbaProject.bin"] = bytes.fromhex("d0cf11e0a1b11ae1") + b"\x00" * 504
+        defaults["bin"] = "application/vnd.ms-office.vbaProject"
+        presentation_rels.append((
+            "rIdVba",
+            "http://schemas.microsoft.com/office/2006/relationships/vbaProject",
+            "vbaProject.bin",
+        ))
     slide_ids = []
     for position, number in enumerate(order):
         rid = f"rIdSlide{number}"
@@ -3325,6 +3343,27 @@ def pptx_smartart_fallback() -> None:
     )
 
 
+def pptx_macro_enabled() -> None:
+    """A `.pptm`: the same deck as `basic-slides`, plus a macro project and the
+    macro-enabled main content type. Read as its macro-free equivalent — the
+    slides come back whole and a warning says the project was ignored.
+
+    It is a separate fixture rather than a flag on an existing one because the
+    extension differs, and every reader that routes on the extension instead of
+    the content is exactly what this file is here to catch."""
+    build_pptx(
+        "macro-enabled.pptm",
+        [
+            title_body_slide("Informe con macros", [
+                ("La macro no se ejecuta", 0),
+                ("El texto se lee igual", 0),
+            ]),
+        ],
+        title="Presentación con macros",
+        macro_enabled=True,
+    )
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -3380,6 +3419,7 @@ GENERATORS = [
     pptx_autofit_stale,
     pptx_charts_embedded,
     pptx_smartart_fallback,
+    pptx_macro_enabled,
 ]
 
 

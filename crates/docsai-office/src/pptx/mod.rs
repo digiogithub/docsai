@@ -121,6 +121,20 @@ pub(crate) fn read_package(
     let types = ContentTypes::read(package);
     let main = main_part(package, &types)?;
 
+    // A `.pptm` is a `.pptx` with a macro project bolted on, and it is read as
+    // its macro-free equivalent — never executed, never carried across — the
+    // same rule `.docm` and `.xlsm` already follow (AGENTS.md §7, plan Phase 8).
+    // The skeleton still holds the project part byte for byte, so a lossless
+    // round trip does not silently disarm the deck either.
+    if let Some(part) = package
+        .part_names()
+        .find(|name| name.ends_with("vbaProject.bin"))
+    {
+        report.warn(Warning::MacrosIgnored {
+            part: part.to_string(),
+        });
+    }
+
     let root = parse(package, &main)?;
     let rels = package.relationships(&main);
 
@@ -956,6 +970,7 @@ fn parse(package: &Package, part: &str) -> Result<Element, ReadError> {
 mod tests {
     use super::*;
     use docsai_model::presentation::RawShape;
+    use docsai_model::report::Severity;
     use docsai_model::text::Block;
     use docsai_model::MemoryAssetStore;
 
@@ -1435,6 +1450,57 @@ mod tests {
             "{:?}",
             report.warnings
         );
+    }
+
+    #[test]
+    fn a_macro_enabled_deck_reads_as_its_macro_free_equivalent() {
+        // `.pptm` differs from `.pptx` in its main content type and in carrying
+        // a VBA project. Neither changes what a slide says, so the deck reads
+        // whole — and the ignored project is stated, not assumed.
+        let path = format!(
+            "{}/../../corpus/pptx/macro-enabled.pptm",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let file = std::fs::File::open(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let mut assets = MemoryAssetStore::new();
+        let (document, report) = read(file, &mut assets).expect("a .pptm is a readable deck");
+        let Document::Presentation(deck) = document else {
+            panic!("expected a presentation");
+        };
+        assert_eq!(deck.slides.len(), 1);
+        assert!(
+            slide_shapes(&deck) >= 2,
+            "the slides of a macro-enabled deck are ordinary slides"
+        );
+        let macros = report
+            .warnings
+            .iter()
+            .find(|w| matches!(w, Warning::MacrosIgnored { .. }))
+            .expect("the ignored macro project is reported");
+        assert!(
+            matches!(macros, Warning::MacrosIgnored { part } if part == "ppt/vbaProject.bin"),
+            "{macros:?}"
+        );
+        // Informational: nothing about the document was degraded. The project
+        // was never part of the IR, and the skeleton still holds it verbatim.
+        assert_eq!(macros.severity(), Severity::Info);
+        assert!(deck.skeleton.is_some(), "the package is preserved whole");
+    }
+
+    #[test]
+    fn a_macro_enabled_deck_is_detected_by_its_content() {
+        // The extension is the one thing detection may not rely on: a `.pptm`
+        // renamed `.pptx` is still a deck, and either name reaches the same
+        // reader (architecture §4).
+        let path = format!(
+            "{}/../../corpus/pptx/macro-enabled.pptm",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let (format, score) =
+            crate::detect(std::io::Cursor::new(&bytes), Some("macro-enabled.pptm"));
+        assert_eq!(format, docsai_model::Format::Pptx);
+        assert_eq!(score, crate::DetectScore::Certain);
     }
 
     #[test]

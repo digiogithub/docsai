@@ -181,8 +181,10 @@ because every shape keeps its source `p:spTree` index. The original package is k
 asset store as `Presentation::skeleton`, so nothing the reader does not model is lost. Groups,
 connectors, SmartArt, custom geometries and a slide's animation subtrees come back as a visible
 stub plus a verbatim raw fragment plus a typed warning, and a chart is recorded with its markup.
+A `.pptm` reads as its macro-free equivalent with `Warning::MacrosIgnored`, and a broken package —
+truncated, corrupted, malformed, dangling — is a typed `ReadError` or a warning, never a panic.
 `read_pptx` is still kept out of the `read` dispatch and `docsai formats` still says `pptx: no`:
-`.pptm` and the corrupt corpus are 13-J.
+the `inspect` slide inventory is 13-K.
 
 ## 2. Documents you must read before implementing
 

@@ -432,6 +432,21 @@ application can recompute it, so the reader keeps the number and emits `Warning:
 an agent that adds a bullet has made the scale a lie, and nothing in the file says so
 (analysis §5.4).
 
+A macro-enabled deck is read as its macro-free equivalent, exactly as `.docm` and `.xlsm` are: the
+slides are ordinary slides, `vbaProject.bin` is never inspected or executed, and
+`Warning::MacrosIgnored` names the part. The project is not lost either — the skeleton holds the
+package whole — so a lossless round trip neither runs the macros nor silently disarms the deck.
+The extension is not what routes the file: detection is by content (§4), so a `.pptm` renamed
+`.pptx` reads the same.
+
+A broken deck fails as an error, never as a panic and never as a half-read success. A package that
+is truncated, has flipped bytes, carries malformed XML or is not a package at all is a typed
+`ReadError`. Dangling references are graded by what the package claims: a `p:sldId` whose
+relationship does not resolve is a warning and the deck reads without that slide, because the deck
+never said the slide was readable; a relationship that resolves to a part the package does not
+carry is `ReadError::MissingPart`, because a deck handed back one slide short is a deck an agent
+deletes a slide from by writing it out again.
+
 ### 9.5 CLI surface v2
 
 ```
