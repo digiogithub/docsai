@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Slide pictures and tables** (plan v2 Phase 13, fifth increment): `p:pic` becomes the same
+  normalised `ImageRef` a `.docx` picture does, stored in the `AssetStore` by content hash — one
+  bitmap on four slides is one stored file — with its alt text, crop, native pixel size and
+  hyperlink; a linked picture is still never fetched. `p:graphicFrame` holding an `a:tbl`
+  becomes the IR `Table`, spans and all: DrawingML writes the span on the origin cell and marks
+  what it swallowed, so a horizontally merged cell leaves the grid and a vertically merged one
+  stays as a covered cell, exactly as a `.docx` `vMerge` continuation does. What a graphic frame
+  holds that is *not* a table is reported **by what it is** — `p:graphicFrame (chart)` — read
+  from the `a:graphicData@uri` rather than guessed from the first child.
+
 - **The placeholder cascade, as reference plus delta** (plan v2 Phase 13, fourth increment): a
   slide's fonts, sizes and colours are read against what its layout, master and theme already
   decide. Theme references are **resolved** — `+mj-lt`/`+mn-lt` become the font the

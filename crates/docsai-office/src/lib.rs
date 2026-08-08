@@ -19,6 +19,7 @@
 pub mod detect;
 mod doc;
 mod docx;
+mod drawingml;
 mod error;
 mod package;
 mod pptx;

@@ -385,6 +385,13 @@ what the slide changes over them. The resolved values live on the layout and mas
 placeholders, which keeps a restyle a restyle: change the theme and every slide follows, because
 no slide copied the answer.
 
+A slide's pictures and tables get no presentation-specific model. A `p:pic` is the normalised
+`ImageRef` of §3.1, through the same `AssetStore` and the same `a:blip` code a `.docx` uses, and
+a `p:graphicFrame` holding an `a:tbl` is the IR `Table` the writers and DocMark already render.
+The frame is a container, and what it holds is read from its `a:graphicData@uri`: a chart and a
+diagram arrive in the very same element a table does, and guessing from the first child is how a
+chart becomes an empty table.
+
 ### 9.5 CLI surface v2
 
 ```

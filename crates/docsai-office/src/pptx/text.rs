@@ -251,7 +251,11 @@ pub(super) fn font_props(rpr: &Element, theme: &Theme, report: &mut ConversionRe
 /// into the theme, and resolving it is what makes a slide's colour comparable
 /// with the one it inherits. A colour model this reader cannot resolve is
 /// reported rather than dropped in silence.
-fn solid_colour(fill: &Element, theme: &Theme, report: &mut ConversionReport) -> Option<String> {
+pub(super) fn solid_colour(
+    fill: &Element,
+    theme: &Theme,
+    report: &mut ConversionReport,
+) -> Option<String> {
     if let Some(srgb) = fill.child("srgbClr").and_then(|c| c.attr("val")) {
         if srgb.len() == 6 && srgb.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some(format!("#{}", srgb.to_ascii_lowercase()));

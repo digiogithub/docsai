@@ -11,9 +11,11 @@
 //! layout, master and theme already decided, so the references have to exist
 //! before the text that measures itself against them.
 //!
-//! Shape kinds this reader does not model yet (pictures, tables, groups,
-//! connectors) are **reported, not skipped in silence**: a slide that quietly
-//! loses its table is the failure this project exists to avoid.
+//! Shape kinds this reader does not model yet (groups, connectors, charts,
+//! SmartArt) are **reported, not skipped in silence**: a slide that quietly
+//! loses its chart is the failure this project exists to avoid. Pictures and
+//! tables are read, and neither gets a model of its own — they are the same
+//! `ImageRef` and `Table` a `.docx` carries, through the same [`AssetStore`].
 //!
 //! Two rules from spike P3 are enforced here rather than assumed:
 //!
@@ -26,6 +28,7 @@
 //!   PowerPoint.
 
 mod cascade;
+mod graphics;
 mod text;
 
 use std::collections::BTreeMap;
@@ -71,9 +74,8 @@ pub fn read<R: Read + Seek>(
 
 pub(crate) fn read_package(
     package: &Package,
-    // Media and the preserved skeleton land in the store in later increments;
-    // the package layer stores nothing.
-    _assets: &mut dyn AssetStore,
+    // Slide pictures land in the store; the preserved skeleton follows in 13-H.
+    assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
     let mut report = ConversionReport::new();
     let types = ContentTypes::read(package);
@@ -168,6 +170,7 @@ pub(crate) fn read_package(
             &entry,
             &sections,
             &cascade,
+            assets,
             &mut report,
         )?;
         report.stats.slides = report.stats.slides.saturating_add(1);
@@ -316,6 +319,16 @@ fn read_sections(root: &Element) -> BTreeMap<i64, String> {
     sections
 }
 
+/// Everything a shape needs from the slide around it: where its media lives,
+/// what it inherits, and what to call the part in a warning.
+struct SlideCtx<'a> {
+    package: &'a Package,
+    part: &'a str,
+    rels: &'a Relationships,
+    layout: Option<&'a LayoutId>,
+    cascade: &'a Cascade,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn read_slide(
     package: &Package,
@@ -325,6 +338,7 @@ fn read_slide(
     entry: &SlideEntry,
     sections: &BTreeMap<i64, String>,
     cascade: &Cascade,
+    assets: &mut dyn AssetStore,
     report: &mut ConversionReport,
 ) -> Result<Slide, ReadError> {
     let root = parse(package, part)?;
@@ -336,8 +350,15 @@ fn read_slide(
         });
     }
 
+    let ctx = SlideCtx {
+        package,
+        part,
+        rels,
+        layout: layout.as_ref(),
+        cascade,
+    };
     let shapes = match root.path(&["cSld", "spTree"]) {
-        Some(tree) => read_shapes(tree, part, rels, layout.as_ref(), cascade, report),
+        Some(tree) => read_shapes(tree, &ctx, assets, report)?,
         None => {
             report.warn(Warning::Degraded {
                 what: format!("slide `{part}`"),
@@ -363,8 +384,6 @@ fn read_slide(
 /// too, and each is named here so the increment that reads it has to remove its
 /// line rather than discover it was never handled.
 const UNREAD_SHAPES: &[(&str, &str)] = &[
-    ("pic", "picture"),
-    ("graphicFrame", "table, chart or diagram"),
     ("grpSp", "shape group"),
     ("cxnSp", "connector"),
     ("AlternateContent", "alternate content"),
@@ -377,12 +396,10 @@ const UNREAD_SHAPES: &[(&str, &str)] = &[
 /// shape already carries the `z_index` that makes the reordering reversible.
 fn read_shapes(
     tree: &Element,
-    part: &str,
-    rels: &Relationships,
-    layout: Option<&LayoutId>,
-    cascade: &Cascade,
+    ctx: &SlideCtx<'_>,
+    assets: &mut dyn AssetStore,
     report: &mut ConversionReport,
-) -> Vec<Shape> {
+) -> Result<Vec<Shape>, ReadError> {
     let mut shapes = Vec::new();
     let mut z_index = 0u32;
     for child in tree.children() {
@@ -390,19 +407,37 @@ fn read_shapes(
             // The group's own identity and transform, not a shape on the slide.
             "nvGrpSpPr" | "grpSpPr" => continue,
             "sp" => {
-                shapes.push(read_shape(child, z_index, rels, layout, cascade, report));
+                shapes.push(read_shape(child, z_index, ctx, report));
+            }
+            "pic" => {
+                if let Some(image) =
+                    graphics::read_picture(child, ctx.package, ctx.rels, assets, report)?
+                {
+                    shapes.push(Shape {
+                        id: None,
+                        name: image.name.clone(),
+                        z_index,
+                        geometry: read_geometry(child.path(&["spPr", "xfrm"])),
+                        kind: ShapeKind::Picture(image),
+                    });
+                }
+            }
+            "graphicFrame" => {
+                if let Some(shape) = read_graphic_frame(child, z_index, ctx, report) {
+                    shapes.push(shape);
+                }
             }
             name => {
                 if let Some((_, what)) = UNREAD_SHAPES.iter().find(|(tag, _)| *tag == name) {
                     report.warn(Warning::UnsupportedElement {
                         kind: format!("p:{name} ({what})"),
-                        location: part.to_string(),
+                        location: ctx.part.to_string(),
                         action: "skipped: read in a later increment of Phase 13".into(),
                     });
                 } else {
                     report.warn(Warning::UnsupportedElement {
                         kind: format!("p:{name}"),
-                        location: part.to_string(),
+                        location: ctx.part.to_string(),
                         action: "skipped: unknown shape element".into(),
                     });
                 }
@@ -410,7 +445,59 @@ fn read_shapes(
         }
         z_index += 1;
     }
-    shapes
+    Ok(shapes)
+}
+
+/// A `p:graphicFrame`: a table, or something a later increment models.
+///
+/// The frame is a container, and what it holds is named by
+/// `a:graphicData@uri` — never by guessing from the first child, which is how a
+/// chart ends up read as an empty table.
+fn read_graphic_frame(
+    frame: &Element,
+    z_index: u32,
+    ctx: &SlideCtx<'_>,
+    report: &mut ConversionReport,
+) -> Option<Shape> {
+    let data = frame.path(&["graphic", "graphicData"]);
+    let uri = data.and_then(|data| data.attr("uri")).unwrap_or_default();
+    let name = frame
+        .path(&["nvGraphicFramePr", "cNvPr"])
+        .and_then(|nv| nv.attr("name"))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+
+    let Some(tbl) = data
+        .filter(|_| uri == graphics::TABLE_URI)
+        .and_then(|data| data.child("tbl"))
+    else {
+        report.warn(Warning::UnsupportedElement {
+            // The uri's last segment is what the frame holds: `chart`,
+            // `diagram`, `ole`.
+            kind: format!(
+                "p:graphicFrame ({})",
+                uri.rsplit('/')
+                    .next()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("unknown content")
+            ),
+            location: ctx.part.to_string(),
+            action: "skipped: read in a later increment".into(),
+        });
+        return None;
+    };
+
+    let table = graphics::read_table(tbl, ctx.cascade.theme_of(ctx.layout), ctx.rels, report);
+    report.stats.tables = report.stats.tables.saturating_add(1);
+    Some(Shape {
+        id: None,
+        name,
+        z_index,
+        // A graphic frame states its transform on `p:xfrm`, one level up from
+        // where a shape does.
+        geometry: read_geometry(frame.child("xfrm")),
+        kind: ShapeKind::Table(table),
+    })
 }
 
 /// One `p:sp`: a placeholder when it fills a slot the layout declares, a free
@@ -418,9 +505,7 @@ fn read_shapes(
 fn read_shape(
     sp: &Element,
     z_index: u32,
-    rels: &Relationships,
-    layout: Option<&LayoutId>,
-    cascade: &Cascade,
+    ctx: &SlideCtx<'_>,
     report: &mut ConversionReport,
 ) -> Shape {
     let ph = sp.path(&["nvSpPr", "nvPr", "ph"]);
@@ -428,12 +513,12 @@ fn read_shape(
     let idx = ph
         .and_then(|ph| ph.attr_i64("idx"))
         .and_then(|n| u32::try_from(n).ok());
-    let theme = cascade.theme_of(layout);
+    let theme = ctx.cascade.theme_of(ctx.layout);
 
     // What this shape inherits, before it says anything itself.
     let inherited = match &ph_type {
-        Some(ph_type) => cascade.inherited(layout, ph_type, idx),
-        None => cascade.inherited_text_box(layout),
+        Some(ph_type) => ctx.cascade.inherited(ctx.layout, ph_type, idx),
+        None => ctx.cascade.inherited_text_box(ctx.layout),
     };
     // The shape's own `a:lstStyle` sits between the layout and the runs: it is
     // this shape's delta, and it is also what its runs inherit.
@@ -443,8 +528,8 @@ fn read_shape(
     };
     let font = own.at(0).minus(&inherited.at(0));
     let runs_inherit = own.over(&inherited);
-    let ctx = text::TextCtx {
-        rels,
+    let text_ctx = text::TextCtx {
+        rels: ctx.rels,
         // A body placeholder bullets by inheritance; a title and a free text
         // box do not.
         bulleted: ph_type.as_ref().is_some_and(PhType::is_body),
@@ -452,7 +537,7 @@ fn read_shape(
         inherited: &runs_inherit,
     };
     let body = match sp.child("txBody") {
-        Some(tx_body) => text::read_body(tx_body, &ctx, report),
+        Some(tx_body) => text::read_body(tx_body, &text_ctx, report),
         None => Vec::new(),
     };
 
@@ -978,18 +1063,167 @@ mod tests {
 
     #[test]
     fn the_unread_shape_kinds_are_reported_and_not_dropped() {
-        // Pictures, tables and connectors are later increments. Until then the
-        // reader says so out loud, because a slide that quietly loses its table
-        // is the failure this project exists to avoid.
-        let (_, report) = read_fixture("tables-simple");
+        // A chart arrives in the same `p:graphicFrame` a table does, and only
+        // the `a:graphicData@uri` tells them apart — so the warning names what
+        // the frame held rather than the frame. SmartArt reaches the reader
+        // wrapped in `mc:AlternateContent`, which is increment 13-I.
+        let (_, report) = read_fixture("charts-embedded");
         assert!(
             report.warnings.iter().any(|w| matches!(
                 w,
-                Warning::UnsupportedElement { kind, .. } if kind.starts_with("p:graphicFrame")
+                Warning::UnsupportedElement { kind, .. } if kind == "p:graphicFrame (chart)"
             )),
             "{:?}",
             report.warnings
         );
+        let (_, report) = read_fixture("smartart-fallback");
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::UnsupportedElement { kind, .. } if kind.starts_with("p:AlternateContent")
+            )),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn a_slide_picture_is_stored_once_and_placed_by_its_shape() {
+        let (deck, report) = read_fixture("images-anchored");
+        let mut assets = MemoryAssetStore::new();
+        let path = format!(
+            "{}/../../corpus/pptx/images-anchored.pptx",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let file = std::fs::File::open(&path).unwrap();
+        read(file, &mut assets).unwrap();
+
+        let picture = &deck.slides[0].shapes[1];
+        assert_eq!(picture.name.as_deref(), Some("Imagen 1"));
+        assert_eq!(picture.z_index, 1, "it follows the title in the tree");
+        // The placement is the shape's, like every other shape on the slide.
+        assert_eq!(picture.geometry.pos.unwrap().x.emu(), 1_524_000);
+        assert_eq!(picture.geometry.pos.unwrap().y.emu(), 2_286_000);
+
+        let ShapeKind::Picture(image) = &picture.kind else {
+            panic!("expected a picture, got {:?}", picture.kind);
+        };
+        assert_eq!(
+            image.alt, "Gráfico de barras azul",
+            "`descr` is alt text and travels in the Markdown `![…]` slot"
+        );
+        assert_eq!(image.geometry.display_size.width.emu(), 1_143_000);
+        assert_eq!(image.geometry.display_size.height.emu(), 857_250);
+        assert!(
+            image.geometry.native_size_px.is_some(),
+            "the bitmap's own header says how many pixels it has"
+        );
+        assert!(
+            assets.get(&image.asset).is_some(),
+            "the media part is in the store, keyed by content hash"
+        );
+        assert_eq!(report.stats.images, 1);
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::Degraded { .. })),
+            "{:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn a_slide_table_is_the_same_table_a_document_carries() {
+        let (deck, report) = read_fixture("tables-simple");
+        let frame = &deck.slides[0].shapes[1];
+        assert_eq!(frame.name.as_deref(), Some("Tabla 1"));
+        // `p:graphicFrame` states its transform one level up from a `p:sp`.
+        assert_eq!(frame.geometry.pos.unwrap().y.emu(), 1_825_625);
+
+        let ShapeKind::Table(table) = &frame.kind else {
+            panic!("expected a table, got {:?}", frame.kind);
+        };
+        assert_eq!(table.col_widths.len(), 2);
+        assert_eq!(table.col_widths[0].emu(), 3_733_800);
+        assert_eq!(table.rows.len(), 3);
+        assert_eq!(table.width(), 2);
+        assert!(
+            table.header_row && table.rows[0].is_header,
+            "`a:tblPr@firstRow` is what makes the first row a header"
+        );
+        assert!(!table.is_complex(), "one paragraph per cell");
+        assert_eq!(cell_text(&table.rows[0].cells[0]), "Región");
+        assert_eq!(cell_text(&table.rows[2].cells[1]), "980");
+        assert_eq!(report.stats.tables, 1);
+    }
+
+    fn cell_text(cell: &docsai_model::text::TableCell) -> String {
+        cell.blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(p) => Some(p.plain_text()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn drawingml_states_a_merge_on_both_the_spanning_cell_and_the_covered_one() {
+        // No corpus deck merges a cell, and the merge model is where the two
+        // OOXML dialects disagree: WordprocessingML continues a `vMerge` and
+        // leaves the reader to count, DrawingML writes the span on the origin
+        // and marks every cell it swallowed. Reading the covered cells' text
+        // would duplicate the spanning cell's content across the grid.
+        let xml = r#"<a:tbl xmlns:a="urn:a" xmlns:p="urn:p">
+            <a:tblPr firstRow="1"><a:tableStyleId>{5C22544A}</a:tableStyleId></a:tblPr>
+            <a:tblGrid><a:gridCol w="100"/><a:gridCol w="200"/></a:tblGrid>
+            <a:tr h="10">
+              <a:tc gridSpan="2"><p:txBody><a:p><a:r><a:t>Ambas</a:t></a:r></a:p></p:txBody>
+                <a:tcPr><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:tcPr></a:tc>
+              <a:tc hMerge="1"><p:txBody><a:p><a:r><a:t>Ambas</a:t></a:r></a:p></p:txBody><a:tcPr/></a:tc>
+            </a:tr>
+            <a:tr h="10">
+              <a:tc rowSpan="2"><p:txBody><a:p><a:r><a:t>Alta</a:t></a:r></a:p></p:txBody><a:tcPr/></a:tc>
+              <a:tc><p:txBody><a:p><a:r><a:t>x</a:t></a:r></a:p></p:txBody><a:tcPr/></a:tc>
+            </a:tr>
+            <a:tr h="10">
+              <a:tc vMerge="1"><p:txBody><a:p><a:r><a:t>Alta</a:t></a:r></a:p></p:txBody><a:tcPr/></a:tc>
+              <a:tc><p:txBody><a:p><a:r><a:t>y</a:t></a:r></a:p></p:txBody><a:tcPr/></a:tc>
+            </a:tr>
+        </a:tbl>"#;
+        let root = Element::parse("t.xml", xml.as_bytes()).unwrap();
+        let mut report = ConversionReport::new();
+        let table = graphics::read_table(
+            &root,
+            &Default::default(),
+            &Relationships::default(),
+            &mut report,
+        );
+
+        assert_eq!(table.style.as_ref().map(|s| s.as_str()), Some("{5C22544A}"));
+        assert_eq!(
+            table.col_widths,
+            vec![Length::from_emu(100), Length::from_emu(200)]
+        );
+        assert_eq!(table.rows[0].cells[0].colspan, 2);
+        assert_eq!(
+            table.rows[0].cells[0].background.as_deref(),
+            Some("#ff0000")
+        );
+        assert_eq!(
+            table.rows[0].cells.len(),
+            1,
+            "the `hMerge` cell is not in the grid: the colspan already fills it"
+        );
+        assert_eq!(table.rows[1].cells[0].rowspan, 2);
+        assert!(table.rows[2].cells[0].covered, "the row below is swallowed");
+        assert!(
+            table.rows[2].cells[0].blocks.is_empty(),
+            "a covered cell holds no text of its own: PowerPoint repeats the \
+             spanning cell's text there and reading it would duplicate it"
+        );
+        assert_eq!(table.width(), 2, "the spans add up to the grid");
     }
 
     #[test]

@@ -9,21 +9,20 @@
 
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{
-    AlignKeyword, Anchor, AxisPos, CropRect, Flip, HVPos, ImageGeometry, ImageRef, RelBase,
-    SimpleBorder, WrapMode, WrapSide,
+    AlignKeyword, Anchor, AxisPos, Flip, HVPos, ImageGeometry, ImageRef, RelBase, SimpleBorder,
+    WrapMode, WrapSide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::units::{Length, Size};
 
 use super::format::hex_color;
+use crate::drawingml::{read_crop, resolve_blip, warn_if_unrenderable};
 use crate::error::ReadError;
 use crate::package::{Package, Relationships};
 use crate::xml::Element;
 
 /// Sixty-thousandths of a degree per degree, the DrawingML rotation unit.
 const ROT_UNITS_PER_DEGREE: f32 = 60_000.0;
-/// Thousandths of a percent, the `a:srcRect` unit.
-const CROP_UNITS_PER_PERCENT: f32 = 1_000.0;
 
 /// Context a drawing needs to resolve its media and report problems.
 pub struct DrawingContext<'a> {
@@ -193,20 +192,6 @@ fn read_shape_properties(
     }
 }
 
-fn read_crop(src_rect: Option<&Element>, geometry: &mut ImageGeometry) {
-    let Some(rect) = src_rect else { return };
-    let side = |name: &str| rect.attr_i64(name).unwrap_or(0) as f32 / CROP_UNITS_PER_PERCENT;
-    let crop = CropRect {
-        left: side("l"),
-        top: side("t"),
-        right: side("r"),
-        bottom: side("b"),
-    };
-    if !crop.is_empty() {
-        geometry.crop = Some(crop);
-    }
-}
-
 fn read_anchor(anchor: &Element) -> Anchor {
     let axis = |name: &str| -> (RelBase, AxisPos) {
         let Some(position) = anchor.child(name) else {
@@ -267,66 +252,7 @@ fn resolve_media(
     assets: &mut dyn AssetStore,
     report: &mut ConversionReport,
 ) -> Result<Option<ImageRef>, ReadError> {
-    let Some(blip) = blip else { return Ok(None) };
-
-    if let Some(embed) = blip.attr_qualified("r:embed") {
-        let Some(rel) = ctx.rels.get(embed) else {
-            report.warn(Warning::AssetIssue {
-                asset: embed.to_string(),
-                why: "relationship not found".into(),
-            });
-            return Ok(None);
-        };
-        let Some(bytes) = ctx.package.part(&rel.target) else {
-            report.warn(Warning::AssetIssue {
-                asset: rel.target.clone(),
-                why: "media part missing from the package".into(),
-            });
-            return Ok(None);
-        };
-        let id = assets.put(bytes)?;
-        report.stats.images += 1;
-        let mut image = ImageRef::new(id, ImageGeometry::inline(Size::default()));
-        warn_if_unrenderable(&image, assets, report);
-        image.alt.clear();
-        return Ok(Some(image));
-    }
-
-    if let Some(link) = blip.attr_qualified("r:link") {
-        // Linked images are never fetched: doing so would turn a document into
-        // an outbound network request (architecture §3.2).
-        let url = ctx
-            .rels
-            .get(link)
-            .map(|r| r.target.clone())
-            .unwrap_or_else(|| link.to_string());
-        report.warn(Warning::ExternalImageNotFetched { url: url.clone() });
-        let mut image = ImageRef::new(
-            docsai_model::AssetId::new(String::new()),
-            ImageGeometry::inline(Size::default()),
-        );
-        image.external_src = Some(url);
-        return Ok(Some(image));
-    }
-
-    Ok(None)
-}
-
-fn warn_if_unrenderable(image: &ImageRef, assets: &dyn AssetStore, report: &mut ConversionReport) {
-    let Some(info) = assets.info(&image.asset) else {
-        return;
-    };
-    if matches!(info.content_type.as_str(), "image/x-emf" | "image/x-wmf") {
-        report.warn(Warning::Degraded {
-            what: info.file_name.clone(),
-            why: "WMF/EMF is preserved byte for byte but Markdown viewers cannot render it".into(),
-        });
-    } else if info.content_type == "application/octet-stream" {
-        report.warn(Warning::AssetIssue {
-            asset: info.file_name.clone(),
-            why: "unrecognised media type; stored verbatim".into(),
-        });
-    }
+    resolve_blip(blip, ctx.package, ctx.rels, assets, report)
 }
 
 /// Reads a legacy VML picture (`w:pict`), typical of documents that once were

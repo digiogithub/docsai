@@ -173,8 +173,9 @@ presentation spikes (`docs/spikes/P1`–`P3`) and the `corpus/pptx` deck corpus.
 Current work is **Phase 13**: `.pptx` reading into the IR. `Document::Presentation` exists
 (`docsai-model::presentation`) and `docsai-office::pptx` reads the package layer — parts,
 layouts, masters, slide order, sections — plus the shapes and text of each slide, resolved
-against the placeholder cascade so that only the delta over layout, master and theme is stored.
-Pictures, tables, groups and notes are still to come, so `read_pptx` is kept out of the `read`
+against the placeholder cascade so that only the delta over layout, master and theme is stored,
+plus the pictures and tables of a slide — the same `ImageRef` and `Table` a `.docx` carries.
+Groups, notes, charts and SmartArt are still to come, so `read_pptx` is kept out of the `read`
 dispatch and `docsai formats` still says `pptx: no`.
 
 ## 2. Documents you must read before implementing
