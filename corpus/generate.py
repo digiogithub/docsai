@@ -2705,9 +2705,11 @@ NOTES_MASTER = (
 )
 
 
-def slide(shapes: str, *, show_master: bool = True) -> str:
+def slide(shapes: str, *, show_master: bool = True, extra: str = "") -> str:
+    """A `p:sld`. ``extra`` is slide-level markup after the shape tree —
+    `p:transition`, `p:timing` — which the schema requires in that order."""
     attr = "" if show_master else ' showMasterSp="0"'
-    return f'<p:sld {P_NS}{attr}>{sp_tree(shapes)}</p:sld>'
+    return f'<p:sld {P_NS}{attr}>{sp_tree(shapes)}{extra}</p:sld>'
 
 
 def notes_slide(index: int, text: str) -> str:
@@ -2897,6 +2899,65 @@ def pptx_reading_order() -> None:
                     frame=xfrm(838200, 2010000, 1500000, 500000))
         )],
         title="Orden de lectura",
+    )
+
+
+def pptx_raw_preserved() -> None:
+    """The four things a slide can hold that the IR has no node for.
+
+    A group (`p:grpSp`), a custom geometry (`a:custGeom`), and the two
+    slide-level subtrees a deck animates itself with (`p:transition`,
+    `p:timing`). None of them has a Markdown equivalent, all of them must
+    survive the round trip as raw fragments behind a visible stub, and none of
+    the other decks in the corpus carries one — the connector in
+    `shapes-geometry` and the SmartArt in `smartart-fallback` cover the rest.
+
+    The group holds text on purpose: a stub that swallowed it would hide real
+    content behind a payload no agent is meant to read.
+    """
+    group = (
+        "<p:grpSp>"
+        '<p:nvGrpSpPr><p:cNvPr id="7" name="Grupo 1"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
+        '<p:grpSpPr><a:xfrm><a:off x="838200" y="2000000"/><a:ext cx="3000000" cy="1200000"/>'
+        '<a:chOff x="838200" y="2000000"/><a:chExt cx="3000000" cy="1200000"/></a:xfrm></p:grpSpPr>'
+        + shape(8, "Caja agrupada 1", a_p("Dentro del grupo"),
+                frame=xfrm(838200, 2000000, 1400000, 500000))
+        + shape(9, "Caja agrupada 2", a_p("También dentro"),
+                frame=xfrm(2400000, 2000000, 1400000, 500000))
+        + "</p:grpSp>"
+    )
+    # A closed triangle: the path list is the shape, and no preset names it.
+    custom = (
+        "<p:sp>"
+        '<p:nvSpPr><p:cNvPr id="10" name="Triángulo libre"/>'
+        '<p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+        f'<p:spPr>{xfrm(5000000, 2000000, 1200000, 1200000)}'
+        '<a:custGeom><a:avLst/><a:gdLst/><a:pathLst>'
+        '<a:path w="1200000" h="1200000">'
+        '<a:moveTo><a:pt x="0" y="1200000"/></a:moveTo>'
+        '<a:lnTo><a:pt x="600000" y="0"/></a:lnTo>'
+        '<a:lnTo><a:pt x="1200000" y="1200000"/></a:lnTo>'
+        "<a:close/></a:path></a:pathLst></a:custGeom></p:spPr>"
+        + tx_body(a_p("Etiqueta del triángulo"))
+        + "</p:sp>"
+    )
+    transition = (
+        '<p:transition spd="slow" advClick="1"><p:fade/></p:transition>'
+    )
+    timing = (
+        "<p:timing><p:tnLst>"
+        '<p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/></p:par>'
+        "</p:tnLst></p:timing>"
+    )
+    build_pptx(
+        "raw-preserved.pptx",
+        [slide(
+            shape(2, "Title 1", a_p("Lo que no se modela"), ph=ph("title"))
+            + group
+            + custom,
+            extra=transition + timing,
+        )],
+        title="Preservación en bruto",
     )
 
 
@@ -3312,6 +3373,7 @@ GENERATORS = [
     pptx_notes_speaker,
     pptx_notes_crossed,
     pptx_reading_order,
+    pptx_raw_preserved,
     pptx_tables_simple,
     pptx_images_anchored,
     pptx_shapes_geometry,

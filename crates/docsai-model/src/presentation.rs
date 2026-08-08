@@ -31,7 +31,7 @@ use crate::addressing::{Addressing, NodeId};
 use crate::assets::AssetId;
 use crate::image::{Flip, ImageRef, RawId};
 use crate::style::{FontProps, ParaProps, StyleCatalog};
-use crate::text::{Block, DocumentMeta, Table};
+use crate::text::{Block, DocumentMeta, RawFragment, Table};
 use crate::units::{Point, Size};
 
 /// A presentation.
@@ -52,6 +52,15 @@ pub struct Presentation {
     /// (spike P3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skeleton: Option<SkeletonRef>,
+    /// The markup behind every [`RawId`] a slide or a shape refers to.
+    ///
+    /// Deck-level, because the ids are: a stub says `raw=r7` and the payload is
+    /// found here, exactly as a `Sheet` keeps the fragments its charts point at.
+    /// The Phase 11 sidecar is where these bytes go when the deck is
+    /// serialised; keeping them in one list is what lets a serialiser write the
+    /// sidecar without walking every shape.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub raw: Vec<RawFragment>,
 }
 
 impl Presentation {
@@ -534,13 +543,20 @@ impl std::fmt::Display for RawShapeKind {
 /// Absent position and size mean *inherited* — a placeholder that sits exactly
 /// where its layout puts it stores nothing, which is the same
 /// reference-plus-delta rule the styles follow.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct ShapeGeometry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pos: Option<Point>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
+    /// `a:prstGeom@prst` — `rect`, `roundRect`, `rightArrow`. The name DocMark-P
+    /// writes as `geom=` on a shape, and the only thing that says a box is an
+    /// arrow: without it a shape's outline is lost the moment the IR is written
+    /// back from anything but the skeleton. `None` for a custom geometry, whose
+    /// path list travels as a raw fragment instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
     /// `a:xfrm@rot`, in degrees. The IR keeps degrees; the reader converts from
     /// sixty-thousandths.
     #[serde(skip_serializing_if = "is_zero_f32")]
@@ -559,6 +575,7 @@ impl ShapeGeometry {
         ShapeGeometry {
             pos: Some(pos),
             size: Some(size),
+            preset: None,
             rotation_deg: 0.0,
             flip: Flip::default(),
         }

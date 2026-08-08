@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Nothing disappears from a slide** (plan v2 Phase 13, ninth increment): a group, a connector, a
+  custom geometry, SmartArt and anything else the IR has no node for now comes back as three
+  things at once — a **visible stub** so an agent knows the object is there and does not delete it
+  by writing the slide back without it, the **markup verbatim** in a raw fragment the stub points
+  at by id (sliced from the source part, never re-serialised), and a **typed warning**. A slide's
+  `p:transition` and `p:timing` are preserved the same way; until now they vanished without even a
+  warning. A chart is recorded as a chart — its kind read from the chart part reached through the
+  frame's relationship, its XML preserved — rather than reported and skipped. A shape's
+  `a:prstGeom@prst` is kept, so a `rightArrow` no longer comes back a plain box. New
+  `Warning::AutofitStale`: the `a:normAutofit@fontScale` a deck carries is kept, because only
+  PowerPoint can recompute it, and reported, because an agent that adds a line has just made it a
+  lie. New corpus deck `raw-preserved.pptx`.
+
 - **The preserved package skeleton** (plan v2 Phase 13, eighth increment): reading a deck now
   keeps the original `.pptx` whole and opaque in the asset store, referenced from
   `Presentation::skeleton`, so a writer re-injects the slides it can rebuild into the deck as it

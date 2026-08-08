@@ -41,6 +41,7 @@ mod cascade;
 mod graphics;
 mod notes;
 mod order;
+mod raw;
 mod skeleton;
 mod text;
 
@@ -49,8 +50,8 @@ use std::io::{Read, Seek};
 
 use docsai_model::assets::AssetStore;
 use docsai_model::presentation::{
-    Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, Master, MasterId, PhType, Placeholder,
-    Presentation, Shape, ShapeGeometry, ShapeKind, ShapeProps, Slide,
+    ChartRef, Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, Master, MasterId, PhType,
+    Placeholder, Presentation, RawShapeKind, Shape, ShapeGeometry, ShapeKind, ShapeProps, Slide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::units::{Length, Point, Size};
@@ -158,6 +159,9 @@ pub(crate) fn read_package(
 
     let sections = read_sections(&root);
     let mut slides = Vec::new();
+    // Deck-wide, because the raw ids are: every stub on every slide refers into
+    // the one `Presentation::raw` list.
+    let mut sink = raw::Sink::default();
     // The parts whose content ends up in the IR, and therefore the only ones a
     // writer is allowed to regenerate instead of copying from the skeleton.
     let mut rebuilt_parts: Vec<String> = Vec::new();
@@ -214,6 +218,7 @@ pub(crate) fn read_package(
             &sections,
             &cascade,
             assets,
+            &mut sink,
             &mut report,
         )?;
         report.stats.slides = report.stats.slides.saturating_add(1);
@@ -254,6 +259,7 @@ pub(crate) fn read_package(
         slide_size,
         slides,
         skeleton,
+        raw: sink.fragments,
     };
     Ok((Document::Presentation(presentation), report))
 }
@@ -378,6 +384,9 @@ fn read_sections(root: &Element) -> BTreeMap<i64, String> {
 struct SlideCtx<'a> {
     package: &'a Package,
     part: &'a str,
+    /// The part's own text, so a raw fragment is a slice of the source rather
+    /// than a re-serialisation of the tree.
+    source: &'a str,
     rels: &'a Relationships,
     layout: Option<&'a LayoutId>,
     cascade: &'a Cascade,
@@ -394,6 +403,7 @@ fn read_slide(
     sections: &BTreeMap<i64, String>,
     cascade: &Cascade,
     assets: &mut dyn AssetStore,
+    sink: &mut raw::Sink,
     report: &mut ConversionReport,
 ) -> Result<Slide, ReadError> {
     let root = parse(package, part)?;
@@ -408,12 +418,15 @@ fn read_slide(
     let ctx = SlideCtx {
         package,
         part,
+        // The bytes the raw fragments are sliced out of. Read once per slide:
+        // every stub on it points into this string.
+        source: package.text(part)?,
         rels,
         layout: layout.as_ref(),
         cascade,
     };
     let shapes = match root.path(&["cSld", "spTree"]) {
-        Some(tree) => read_shapes(tree, &ctx, assets, report)?,
+        Some(tree) => read_shapes(tree, &ctx, assets, sink, report)?,
         None => {
             report.warn(Warning::Degraded {
                 what: format!("slide `{part}`"),
@@ -432,6 +445,15 @@ fn read_slide(
         report,
     )?;
 
+    // `p:transition` and `p:timing`: subtrees with no Markdown representation
+    // and no IR node, and the two that vanished without a word until now.
+    let mut slide_raw = Vec::new();
+    for child in root.children() {
+        if matches!(child.name.as_str(), "transition" | "timing") {
+            slide_raw.push(sink.capture(child, part, ctx.source, report));
+        }
+    }
+
     Ok(Slide {
         id: None,
         layout,
@@ -440,17 +462,25 @@ fn read_slide(
         notes,
         hidden: root.attr("show") == Some("0"),
         section: sections.get(&entry.id).cloned(),
-        raw: Vec::new(),
+        raw: slide_raw,
     })
 }
 
-/// The `p:spTree` children this increment reads. Everything else is a shape
-/// too, and each is named here so the increment that reads it has to remove its
-/// line rather than discover it was never handled.
-const UNREAD_SHAPES: &[(&str, &str)] = &[
-    ("grpSp", "shape group"),
-    ("cxnSp", "connector"),
-    ("AlternateContent", "alternate content"),
+/// The `p:spTree` children that become a stub plus a raw fragment rather than
+/// a modelled shape, and the kind of stub each one gets.
+///
+/// A group is stubbed whole, children included. It is a real loss of structure
+/// — the model has a `ShapeKind::Group` this reader does not fill — and it is
+/// the loss the increment chose: reading a group's children means reading a
+/// second, nested cascade, and a stub that carries the group's text and its
+/// markup loses nothing a writer cannot put back.
+const STUBBED_SHAPES: &[(&str, RawShapeKind)] = &[
+    ("grpSp", RawShapeKind::Shape),
+    ("cxnSp", RawShapeKind::Connector),
+    // SmartArt reaches a slide inside this: a `mc:Choice` holding the diagram
+    // and a `mc:Fallback` holding shapes that draw it. Preserved whole, because
+    // the choice between the two branches is the consumer's, not ours.
+    ("AlternateContent", RawShapeKind::Other),
 ];
 
 /// Reads the shapes of a slide's `p:spTree`, in **reading order**.
@@ -462,6 +492,7 @@ fn read_shapes(
     tree: &Element,
     ctx: &SlideCtx<'_>,
     assets: &mut dyn AssetStore,
+    sink: &mut raw::Sink,
     report: &mut ConversionReport,
 ) -> Result<Vec<Shape>, ReadError> {
     let mut shapes = Vec::new();
@@ -471,7 +502,20 @@ fn read_shapes(
             // The group's own identity and transform, not a shape on the slide.
             "nvGrpSpPr" | "grpSpPr" => continue,
             "sp" => {
-                shapes.push(read_shape(child, z_index, ctx, report));
+                // A custom geometry is a path list, not a shape any Markdown
+                // names. Its text still travels on the stub.
+                if child.path(&["spPr", "custGeom"]).is_some() {
+                    shapes.push(sink.shape(
+                        child,
+                        RawShapeKind::Shape,
+                        z_index,
+                        ctx.part,
+                        ctx.source,
+                        report,
+                    ));
+                } else {
+                    shapes.push(read_shape(child, z_index, ctx, report));
+                }
             }
             "pic" => {
                 if let Some(image) =
@@ -487,24 +531,17 @@ fn read_shapes(
                 }
             }
             "graphicFrame" => {
-                if let Some(shape) = read_graphic_frame(child, z_index, ctx, report) {
-                    shapes.push(shape);
-                }
+                shapes.push(read_graphic_frame(child, z_index, ctx, sink, report));
             }
             name => {
-                if let Some((_, what)) = UNREAD_SHAPES.iter().find(|(tag, _)| *tag == name) {
-                    report.warn(Warning::UnsupportedElement {
-                        kind: format!("p:{name} ({what})"),
-                        location: ctx.part.to_string(),
-                        action: "skipped: read in a later increment of Phase 13".into(),
-                    });
-                } else {
-                    report.warn(Warning::UnsupportedElement {
-                        kind: format!("p:{name}"),
-                        location: ctx.part.to_string(),
-                        action: "skipped: unknown shape element".into(),
-                    });
-                }
+                let kind = STUBBED_SHAPES
+                    .iter()
+                    .find(|(tag, _)| *tag == name)
+                    .map(|(_, kind)| *kind)
+                    // An element this reader has never heard of is preserved
+                    // too. Guessing what it is would be worse than saying so.
+                    .unwrap_or(RawShapeKind::Other);
+                shapes.push(sink.shape(child, kind, z_index, ctx.part, ctx.source, report));
             }
         }
         z_index += 1;
@@ -513,55 +550,114 @@ fn read_shapes(
     Ok(shapes)
 }
 
-/// A `p:graphicFrame`: a table, or something a later increment models.
+/// A `p:graphicFrame`: a table, a chart, or something with no IR node at all.
 ///
 /// The frame is a container, and what it holds is named by
 /// `a:graphicData@uri` — never by guessing from the first child, which is how a
-/// chart ends up read as an empty table.
+/// chart ends up read as an empty table. Whatever it holds, a shape comes back:
+/// a frame that produced nothing would be a hole in the slide.
 fn read_graphic_frame(
     frame: &Element,
     z_index: u32,
     ctx: &SlideCtx<'_>,
+    sink: &mut raw::Sink,
     report: &mut ConversionReport,
-) -> Option<Shape> {
+) -> Shape {
     let data = frame.path(&["graphic", "graphicData"]);
     let uri = data.and_then(|data| data.attr("uri")).unwrap_or_default();
+    // The uri's last segment is what the frame holds: `table`, `chart`,
+    // `diagram`, `ole`.
+    let held = uri
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown content");
+
     let name = frame
         .path(&["nvGraphicFramePr", "cNvPr"])
         .and_then(|nv| nv.attr("name"))
         .filter(|name| !name.is_empty())
         .map(str::to_string);
+    // A graphic frame states its transform on `p:xfrm`, one level up from where
+    // a shape does.
+    let geometry = read_geometry(frame.child("xfrm"));
 
-    let Some(tbl) = data
+    if let Some(tbl) = data
         .filter(|_| uri == graphics::TABLE_URI)
         .and_then(|data| data.child("tbl"))
-    else {
-        report.warn(Warning::UnsupportedElement {
-            // The uri's last segment is what the frame holds: `chart`,
-            // `diagram`, `ole`.
-            kind: format!(
-                "p:graphicFrame ({})",
-                uri.rsplit('/')
-                    .next()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or("unknown content")
-            ),
-            location: ctx.part.to_string(),
-            action: "skipped: read in a later increment".into(),
-        });
-        return None;
-    };
+    {
+        let table = graphics::read_table(tbl, ctx.cascade.theme_of(ctx.layout), ctx.rels, report);
+        report.stats.tables = report.stats.tables.saturating_add(1);
+        return Shape {
+            id: None,
+            name,
+            z_index,
+            geometry,
+            kind: ShapeKind::Table(table),
+        };
+    }
 
-    let table = graphics::read_table(tbl, ctx.cascade.theme_of(ctx.layout), ctx.rels, report);
-    report.stats.tables = report.stats.tables.saturating_add(1);
-    Some(Shape {
-        id: None,
-        name,
-        z_index,
-        // A graphic frame states its transform on `p:xfrm`, one level up from
-        // where a shape does.
-        geometry: read_geometry(frame.child("xfrm")),
-        kind: ShapeKind::Table(table),
+    if held == "chart" {
+        if let Some(chart) = read_chart(data, ctx, sink, report) {
+            return Shape {
+                id: None,
+                name,
+                z_index,
+                geometry,
+                kind: ShapeKind::Chart(chart),
+            };
+        }
+    }
+
+    let kind = match held {
+        "diagram" => RawShapeKind::SmartArt,
+        "ole" | "oleObject" => RawShapeKind::Ole,
+        _ => RawShapeKind::Other,
+    };
+    let mut shape = sink.shape(frame, kind, z_index, ctx.part, ctx.source, report);
+    shape.name = name;
+    shape.geometry = geometry;
+    shape
+}
+
+/// The chart a frame holds: what kind it is, and its markup.
+///
+/// Phase 13 records that a chart is there and preserves it; the series are
+/// Phase 16's, and the workbook they come from is in the skeleton either way.
+/// The part is reached through the frame's `r:id`, like every other reference
+/// in the format.
+fn read_chart(
+    data: Option<&Element>,
+    ctx: &SlideCtx<'_>,
+    sink: &mut raw::Sink,
+    report: &mut ConversionReport,
+) -> Option<ChartRef> {
+    let rel_id = data?.child("chart")?.attr_qualified("r:id")?;
+    let rel = ctx.rels.get(rel_id).filter(|rel| !rel.external)?;
+    let part = rel.target.clone();
+    let (root, source) = match (parse(ctx.package, &part), ctx.package.text(&part)) {
+        (Ok(root), Ok(source)) => (root, source),
+        _ => {
+            report.warn(Warning::Degraded {
+                what: format!("chart `{part}`"),
+                why: "the chart part could not be read; the frame is kept as a stub".into(),
+            });
+            return None;
+        }
+    };
+    // `c:barChart`, `c:lineChart`… the first plot in the plot area names the
+    // chart, and a combo chart is named by its first plot rather than by a
+    // guess at which one matters.
+    let kind = root.path(&["chart", "plotArea"]).and_then(|area| {
+        area.children()
+            .find(|child| child.name.ends_with("Chart"))
+            .map(|child| child.name.clone())
+    });
+    Some(ChartRef {
+        kind,
+        title: None,
+        workbook: None,
+        raw: Some(sink.capture(&root, &part, source, report)),
     })
 }
 
@@ -619,15 +715,44 @@ fn read_shape(
         None => ShapeKind::TextBox { body },
     };
 
+    let name = sp
+        .path(&["nvSpPr", "cNvPr"])
+        .and_then(|nv| nv.attr("name"))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+
+    // The scale PowerPoint computed for the text that was in the box when a
+    // human last edited it. It is kept — only PowerPoint can recompute it — and
+    // reported, because an agent that adds a line has just made it a lie and
+    // nothing in the file says so (analysis §5.4).
+    if let Some(scale) = sp
+        .path(&["txBody", "bodyPr", "normAutofit"])
+        .and_then(|fit| fit.attr_i64("fontScale"))
+        .and_then(|scale| u32::try_from(scale).ok())
+    {
+        report.warn(Warning::AutofitStale {
+            what: format!(
+                "`{}` on `{}`",
+                name.as_deref().unwrap_or("an unnamed shape"),
+                ctx.part
+            ),
+            scale,
+        });
+    }
+
+    let mut geometry = read_geometry(sp.path(&["spPr", "xfrm"]));
+    // `rect`, `roundRect`, `rightArrow`: without it a shape's outline is gone
+    // the moment the deck is written from the IR rather than the skeleton.
+    geometry.preset = sp
+        .path(&["spPr", "prstGeom"])
+        .and_then(|geom| geom.attr("prst"))
+        .map(str::to_string);
+
     Shape {
         id: None,
-        name: sp
-            .path(&["nvSpPr", "cNvPr"])
-            .and_then(|nv| nv.attr("name"))
-            .filter(|name| !name.is_empty())
-            .map(str::to_string),
+        name,
         z_index,
-        geometry: read_geometry(sp.path(&["spPr", "xfrm"])),
+        geometry,
         kind,
     }
 }
@@ -795,6 +920,9 @@ fn read_geometry(xfrm: Option<&Element>) -> ShapeGeometry {
     ShapeGeometry {
         pos,
         size,
+        // The caller fills this in: the preset lives on `a:prstGeom`, a sibling
+        // of the transform rather than a part of it.
+        preset: None,
         // DrawingML angles are sixtieth-thousandths of a degree.
         rotation_deg: xfrm.attr_i64("rot").unwrap_or(0) as f32 / 60_000.0,
         flip: docsai_model::image::Flip::from_flags(
@@ -827,6 +955,7 @@ fn parse(package: &Package, part: &str) -> Result<Element, ReadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use docsai_model::presentation::RawShape;
     use docsai_model::text::Block;
     use docsai_model::MemoryAssetStore;
 
@@ -1128,35 +1257,180 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_autofit_scale_is_read_rather_than_dropped() {
-        // Risk P5: the scale PowerPoint computed for text that is no longer
-        // there. `Warning::AutofitStale` is increment 13-I; losing the number
-        // before then would leave that increment nothing to warn about.
-        let (deck, _) = read_fixture("autofit-stale");
+    fn a_stale_autofit_scale_is_kept_and_reported() {
+        // Risk P5: the scale PowerPoint computed for the text that was in the
+        // box when a human last edited it. Only PowerPoint can recompute it, so
+        // it is kept — and reported, because an agent that adds a line has just
+        // made it a lie and nothing in the file says so.
+        let (deck, report) = read_fixture("autofit-stale");
         let body = deck.slides[0].shapes[1].placeholder().expect("the body");
         assert_eq!(body.delta.font_scale, Some(62.5));
-    }
-
-    #[test]
-    fn the_unread_shape_kinds_are_reported_and_not_dropped() {
-        // A chart arrives in the same `p:graphicFrame` a table does, and only
-        // the `a:graphicData@uri` tells them apart — so the warning names what
-        // the frame held rather than the frame. SmartArt reaches the reader
-        // wrapped in `mc:AlternateContent`, which is increment 13-I.
-        let (_, report) = read_fixture("charts-embedded");
         assert!(
-            report.warnings.iter().any(|w| matches!(
-                w,
-                Warning::UnsupportedElement { kind, .. } if kind == "p:graphicFrame (chart)"
-            )),
+            report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::AutofitStale { scale, .. } if *scale == 62_500)),
             "{:?}",
             report.warnings
         );
-        let (_, report) = read_fixture("smartart-fallback");
+    }
+
+    #[test]
+    fn a_group_and_a_custom_geometry_become_stubs_that_keep_their_text() {
+        let (deck, report) = read_fixture("raw-preserved");
+        let slide = &deck.slides[0];
+        let stubs: Vec<(&RawShape, &Shape)> = slide
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.kind {
+                ShapeKind::Raw(raw) => Some((raw, shape)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stubs.len(), 2, "the group and the custom geometry");
+
+        let (group, group_shape) = stubs[0];
+        assert_eq!(group.kind, RawShapeKind::Shape);
+        assert_eq!(group_shape.name.as_deref(), Some("Grupo 1"));
+        // A group states its transform on `p:grpSpPr`, not on `p:spPr`, and a
+        // stub with no position would be read last on every slide.
+        assert_eq!(group_shape.geometry.pos.unwrap().x.emu(), 838_200);
+        assert!(
+            group.text.contains("Dentro del grupo") && group.text.contains("También dentro"),
+            "a stub that swallowed the group's text would hide real content: {:?}",
+            group.text
+        );
+
+        let (custom, _) = stubs[1];
+        assert_eq!(custom.kind, RawShapeKind::Shape);
+        assert_eq!(custom.text, "Etiqueta del triángulo");
+        let fragment = deck
+            .raw
+            .iter()
+            .find(|f| Some(&f.id) == custom.raw.as_ref())
+            .expect("the payload is in the deck");
+        assert!(
+            fragment.content.contains("<a:custGeom>") && fragment.content.contains("<a:close/>"),
+            "the path list is the shape, and it travels verbatim"
+        );
+
+        // Every stub's payload is really there, and every fragment is a slice
+        // of a part rather than a re-serialisation.
+        assert_eq!(report.raw_blocks_emitted as usize, deck.raw.len());
+        assert!(deck.raw.iter().all(|f| f.format == "ooxml"));
+    }
+
+    #[test]
+    fn a_slides_transition_and_timing_no_longer_vanish() {
+        // Both are slide-level subtrees with no IR node and no Markdown
+        // representation. Until this increment they were dropped without even a
+        // warning, which is the one thing this project may not do.
+        let (deck, _) = read_fixture("raw-preserved");
+        let slide = &deck.slides[0];
+        assert_eq!(slide.raw.len(), 2);
+        let kept: Vec<&str> = slide
+            .raw
+            .iter()
+            .map(|id| {
+                deck.raw
+                    .iter()
+                    .find(|f| &f.id == id)
+                    .expect("the payload is in the deck")
+                    .content
+                    .as_str()
+            })
+            .collect();
+        assert!(kept[0].starts_with("<p:transition"), "{:?}", kept[0]);
+        assert!(kept[1].starts_with("<p:timing"), "{:?}", kept[1]);
+        assert!(kept[1].contains("tmRoot"));
+    }
+
+    #[test]
+    fn a_connector_is_a_stub_and_a_preset_shape_keeps_its_outline() {
+        let (deck, _) = read_fixture("shapes-geometry");
+        let slide = &deck.slides[0];
+        let connector = slide
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.kind {
+                ShapeKind::Raw(raw) => Some(raw),
+                _ => None,
+            })
+            .expect("the connector is preserved, not dropped");
+        assert_eq!(connector.kind, RawShapeKind::Connector);
+
+        // A preset shape keeps its text as a box — and its outline, which used
+        // to be lost: a `rightArrow` read as a plain box comes back a box.
+        let arrow = slide
+            .shapes
+            .iter()
+            .find(|shape| shape.name.as_deref() == Some("Flecha 1"))
+            .expect("the arrow");
+        assert_eq!(arrow.geometry.preset.as_deref(), Some("rightArrow"));
+    }
+
+    #[test]
+    fn a_chart_is_recorded_and_its_markup_preserved() {
+        // A chart arrives in the same `p:graphicFrame` a table does, and only
+        // the `a:graphicData@uri` tells them apart. Phase 13 records that one is
+        // there and keeps its XML; the series are Phase 16's.
+        let (deck, report) = read_fixture("charts-embedded");
+        let chart = deck.slides[0]
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.kind {
+                ShapeKind::Chart(chart) => Some(chart),
+                _ => None,
+            })
+            .expect("the frame held a chart");
+        assert_eq!(chart.kind.as_deref(), Some("barChart"));
+
+        let raw = chart.raw.as_ref().expect("its markup travels with it");
+        let fragment = deck
+            .raw
+            .iter()
+            .find(|f| &f.id == raw)
+            .expect("the payload is in the deck");
+        assert_eq!(fragment.part, "ppt/charts/chart1.xml");
+        assert!(fragment.content.starts_with("<c:chartSpace"));
+        assert!(
+            fragment.content.contains("1200"),
+            "the values are in the fragment, not summarised out of it"
+        );
+        assert_eq!(report.raw_blocks_emitted, 1);
+    }
+
+    #[test]
+    fn smartart_is_stubbed_whole_rather_than_half_read() {
+        // SmartArt reaches a slide as `mc:AlternateContent`: a `mc:Choice`
+        // holding the diagram and a `mc:Fallback` holding shapes that draw it.
+        // Reading either branch would be a decision this reader has no business
+        // taking, so the pair is preserved and stubbed.
+        let (deck, report) = read_fixture("smartart-fallback");
+        let stubs: Vec<&RawShape> = deck.slides[0]
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.kind {
+                ShapeKind::Raw(raw) => Some(raw),
+                _ => None,
+            })
+            .collect();
+        // One stub, not two: the diagram's `p:graphicFrame` is *inside* the
+        // `mc:Choice`, and descending into a branch would be picking one.
+        assert_eq!(stubs.len(), 1);
+        let stub = stubs[0];
+        assert_eq!(stub.kind, RawShapeKind::Other);
+        let fragment = deck
+            .raw
+            .iter()
+            .find(|f| Some(&f.id) == stub.raw.as_ref())
+            .expect("the payload is in the deck");
+        assert!(fragment.content.contains("mc:Fallback"));
         assert!(
             report.warnings.iter().any(|w| matches!(
                 w,
-                Warning::UnsupportedElement { kind, .. } if kind.starts_with("p:AlternateContent")
+                Warning::UnsupportedElement { kind, action, .. }
+                    if kind == "mc:AlternateContent" && action == "raw-block"
             )),
             "{:?}",
             report.warnings

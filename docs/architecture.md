@@ -418,6 +418,20 @@ parts of a diagram — is the writer's to copy back byte for byte. Spike P3 meas
 alternative: a package whose unmodelled parts are regenerated opens without complaint and loses a
 chart's values and five SmartArt parts invisibly.
 
+Inside a slide the same principle is enforced shape by shape. A group, a connector, a custom
+geometry, a diagram — anything with no IR node — becomes a **stub plus a raw fragment plus a typed
+warning**, never a silence: the stub carries the shape's name, position, preset geometry and text
+so an agent knows the object is there and does not delete it, and the fragment carries the markup
+verbatim, sliced out of the source part rather than re-serialised. The fragments live in
+`Presentation::raw`, one deck-wide list the ids refer into, which is what lets a serialiser write
+the Phase 11 sidecar without walking every shape. `p:transition` and `p:timing` are preserved the
+same way, on `Slide::raw`.
+
+One thing is deliberately kept rather than dropped: `a:normAutofit@fontScale`. Only the
+application can recompute it, so the reader keeps the number and emits `Warning::AutofitStale` —
+an agent that adds a bullet has made the scale a lie, and nothing in the file says so
+(analysis §5.4).
+
 ### 9.5 CLI surface v2
 
 ```

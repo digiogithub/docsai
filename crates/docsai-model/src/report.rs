@@ -45,6 +45,16 @@ pub enum Warning {
     RevisionsAccepted { count: u32 },
     /// A raw-block could not be re-injected because the target dialect differs.
     RawBlockDropped { id: String, format: String },
+    /// A shape carries an autofit scale PowerPoint computed for text that may
+    /// no longer be there (analysis §5.4). The number is kept, because only the
+    /// application can recompute it — but an agent that adds a line has just
+    /// made it a lie, and nothing in the file says so.
+    AutofitStale {
+        what: String,
+        /// `a:normAutofit@fontScale` in the unit the file states it in:
+        /// thousandths of a percent, so 62 500 is 62.5 %.
+        scale: u32,
+    },
     /// The document is a selection of another (`partial: true`, spec §2.1).
     /// Nothing is wrong with it — but whoever writes it back over the document
     /// it came from, rather than node by node, deletes the rest of it.
@@ -59,6 +69,9 @@ impl Warning {
             Warning::Degraded { .. } | Warning::ImageGeometryDegraded { .. } => Severity::Minor,
             Warning::AssetIssue { .. } | Warning::RawBlockDropped { .. } => Severity::Severe,
             Warning::ExternalImageNotFetched { .. } => Severity::Minor,
+            // Minor: nothing is lost yet. It becomes a visible defect only if
+            // the text changes, which is why the warning names the shape.
+            Warning::AutofitStale { .. } => Severity::Minor,
             Warning::MacrosIgnored { .. } | Warning::RevisionsAccepted { .. } => Severity::Info,
             // Severe on purpose: the loss is not in this document, it is in
             // the one a careless write would overwrite with it.
@@ -89,6 +102,11 @@ impl Warning {
             Warning::RawBlockDropped { id, format } => {
                 format!("raw-block {id} dropped: source dialect is {format}")
             }
+            Warning::AutofitStale { what, scale } => format!(
+                "{what} scales its text to {:.1} %, a number PowerPoint computed \
+                 for the text that was there when it was last edited by hand",
+                *scale as f32 / 1000.0
+            ),
             Warning::PartialDocument { nodes } => format!(
                 "partial document: a selection of {nodes} addressed node(s); \
                  writing it back whole loses everything it does not contain"

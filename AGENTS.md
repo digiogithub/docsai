@@ -179,9 +179,10 @@ the speaker notes, reached through the slide's own relationships. The shapes com
 computed reading order — placeholders by type, then the rest by top-left — that stays reversible
 because every shape keeps its source `p:spTree` index. The original package is kept whole in the
 asset store as `Presentation::skeleton`, so nothing the reader does not model is lost. Groups,
-charts and SmartArt are
-still to come, so `read_pptx` is kept out of the `read` dispatch and `docsai formats` still says
-`pptx: no`.
+connectors, SmartArt, custom geometries and a slide's animation subtrees come back as a visible
+stub plus a verbatim raw fragment plus a typed warning, and a chart is recorded with its markup.
+`read_pptx` is still kept out of the `read` dispatch and `docsai formats` still says `pptx: no`:
+`.pptm` and the corrupt corpus are 13-J.
 
 ## 2. Documents you must read before implementing
 
