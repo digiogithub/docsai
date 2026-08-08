@@ -29,6 +29,8 @@ pub struct InspectReport {
     pub sections: Option<Vec<SectionSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheets: Option<Vec<SheetSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slides: Option<Vec<SlideSummary>>,
     pub media: Vec<MediaSummary>,
     pub stats: ConversionStats,
     pub warnings: Vec<Warning>,
@@ -73,6 +75,51 @@ pub struct SheetSummary {
     pub hidden: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub used_range: Option<String>,
+}
+
+/// High-level slide facts for a presentation (plan v2 Phase 13-K).
+///
+/// What an agent needs to decide *where* to edit before it loads the deck: the
+/// layout a slide hangs from, how much is on it, whether it carries speaker
+/// notes, and whether it holds anything Markdown cannot express — SmartArt or an
+/// embedded OLE object — which is exactly where a hand edit would destroy
+/// something.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SlideSummary {
+    /// Position in presentation order (`p:sldIdLst`), not file-name order.
+    pub index: usize,
+    /// The slide's stable address, when the read assigned ids.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// `p:cSld@name`, when the deck names its slides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The title placeholder's text, when it holds any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The layout part the placeholders resolve against.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    /// `p:cSld@name` of that layout — "Title and Content".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_name: Option<String>,
+    /// Every shape on the slide, group children included: the question is how
+    /// much is on the slide, not how many top-level entries `p:spTree` has.
+    pub shapes: usize,
+    pub placeholders: usize,
+    pub pictures: usize,
+    pub tables: usize,
+    pub charts: usize,
+    /// Shapes kept as a stub over raw markup — the ones an agent must not
+    /// hand-edit.
+    pub raw_shapes: usize,
+    pub has_notes: bool,
+    pub has_smart_art: bool,
+    pub has_ole: bool,
+    pub hidden: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
 }
 
 /// One media asset present in the package.
@@ -124,7 +171,7 @@ pub fn build_report(
         .collect();
 
     let mut ref_counts = std::collections::BTreeMap::<String, usize>::new();
-    let (kind, sections, sheets, stats) = match document {
+    let (kind, sections, sheets, slides, stats) = match document {
         Document::Text(text) => {
             count_text_image_refs(text, &mut ref_counts);
             let sections = text
@@ -136,6 +183,7 @@ pub fn build_report(
             (
                 "text",
                 Some(sections),
+                None,
                 None,
                 stats_from_text(text, document.styles().styles.len()),
             )
@@ -168,11 +216,10 @@ pub fn build_report(
                 "workbook",
                 None,
                 Some(sheets),
+                None,
                 stats_from_workbook(book, document.styles().styles.len()),
             )
         }
-        // The slide inventory an agent needs — layout, shape count, notes —
-        // lands with the reader that can fill it (plan v2 Phase 13 task 11).
         Document::Presentation(deck) => {
             for slide in &deck.slides {
                 for block in slide.blocks() {
@@ -180,18 +227,34 @@ pub fn build_report(
                 }
                 count_shape_images(&slide.shapes, &mut ref_counts);
             }
+            let slides = deck
+                .slides
+                .iter()
+                .enumerate()
+                .map(|(index, slide)| summarize_slide(index, slide, &deck.layouts))
+                .collect();
             (
                 "presentation",
                 None,
                 None,
+                Some(slides),
                 stats_from_presentation(deck, document.styles().styles.len()),
             )
         }
     };
 
+    // The preserved package is in the asset store, but it is not media: a deck
+    // with no pictures must not report one asset that is the deck itself.
+    let skeleton = match document {
+        Document::Presentation(deck) => {
+            deck.skeleton.as_ref().map(|s| s.asset.as_str().to_string())
+        }
+        _ => None,
+    };
     let media = assets
         .ids()
         .into_iter()
+        .filter(|id| Some(id.as_str()) != skeleton.as_deref())
         .filter_map(|id| {
             let info = assets.info(&id)?;
             Some(MediaSummary {
@@ -219,6 +282,7 @@ pub fn build_report(
         styles,
         sections,
         sheets,
+        slides,
         media,
         stats,
         warnings: report.warnings,
@@ -234,6 +298,78 @@ fn summarize_section(index: usize, section: &Section) -> SectionSummary {
         headers: section.headers.len(),
         footers: section.footers.len(),
         blocks: section.blocks.len(),
+    }
+}
+
+fn summarize_slide(
+    index: usize,
+    slide: &docsai_model::presentation::Slide,
+    layouts: &docsai_model::presentation::LayoutCatalog,
+) -> SlideSummary {
+    let mut tally = ShapeTally::default();
+    tally.walk(&slide.shapes);
+    SlideSummary {
+        index,
+        id: slide.id.as_ref().map(|id| id.as_str().to_string()),
+        name: slide.name.clone(),
+        title: slide.title(),
+        layout: slide.layout.as_ref().map(|id| id.as_str().to_string()),
+        // A layout id is a part name; its `p:cSld@name` is what the deck's
+        // author sees in PowerPoint, and only the catalogue knows it.
+        layout_name: slide
+            .layout
+            .as_ref()
+            .and_then(|id| layouts.layout(id))
+            .map(|layout| layout.name.clone()),
+        shapes: tally.shapes,
+        placeholders: tally.placeholders,
+        pictures: tally.pictures,
+        tables: tally.tables,
+        charts: tally.charts,
+        raw_shapes: tally.raw_shapes,
+        has_notes: slide.notes.is_some(),
+        has_smart_art: tally.smart_art,
+        has_ole: tally.ole,
+        hidden: slide.hidden,
+        section: slide.section.clone(),
+    }
+}
+
+/// One walk of a slide's shape tree, counting everything the inventory reports.
+#[derive(Default)]
+struct ShapeTally {
+    shapes: usize,
+    placeholders: usize,
+    pictures: usize,
+    tables: usize,
+    charts: usize,
+    raw_shapes: usize,
+    smart_art: bool,
+    ole: bool,
+}
+
+impl ShapeTally {
+    fn walk(&mut self, shapes: &[docsai_model::presentation::Shape]) {
+        use docsai_model::presentation::{RawShapeKind, ShapeKind};
+        for shape in shapes {
+            self.shapes += 1;
+            match &shape.kind {
+                ShapeKind::Placeholder(_) => self.placeholders += 1,
+                ShapeKind::Picture(_) => self.pictures += 1,
+                ShapeKind::Table(_) => self.tables += 1,
+                ShapeKind::Chart(_) => self.charts += 1,
+                ShapeKind::Group(children) => self.walk(children),
+                ShapeKind::Raw(raw) => {
+                    self.raw_shapes += 1;
+                    match raw.kind {
+                        RawShapeKind::SmartArt => self.smart_art = true,
+                        RawShapeKind::Ole => self.ole = true,
+                        _ => {}
+                    }
+                }
+                ShapeKind::TextBox { .. } => {}
+            }
+        }
     }
 }
 
@@ -436,6 +572,19 @@ mod tests {
             .join(name)
     }
 
+    fn corpus_pptx(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus/pptx")
+            .join(name)
+    }
+
+    fn deck(name: &str) -> Vec<SlideSummary> {
+        let report = inspect_path(&corpus_pptx(name), &ConvertOptions::default()).expect("inspect");
+        assert_eq!(report.kind, "presentation");
+        assert_eq!(report.source_format, "pptx");
+        report.slides.expect("a deck reports its slides")
+    }
+
     #[test]
     fn inspects_a_basic_docx() {
         let report = inspect_path(&corpus_docx("basic-text.docx"), &ConvertOptions::default())
@@ -455,5 +604,108 @@ mod tests {
         .expect("inspect");
         assert_eq!(report.media.len(), 3);
         assert!(report.stats.images >= 3);
+    }
+
+    // Presentations (plan v2 Phase 13-K).
+
+    #[test]
+    fn a_deck_is_inspected_slide_by_slide() {
+        let slides = deck("basic-slides.pptx");
+        assert_eq!(slides.len(), 2);
+        assert_eq!(slides[0].index, 0);
+        assert_eq!(slides[0].title.as_deref(), Some("Informe trimestral"));
+        assert_eq!(
+            slides[0].layout.as_deref(),
+            Some("ppt/slideLayouts/slideLayout1.xml")
+        );
+        assert_eq!(
+            slides[0].layout_name.as_deref(),
+            Some("Titulo y objetos"),
+            "the layout an agent recognises is `p:cSld@name`, not the part name"
+        );
+        assert_eq!(slides[0].shapes, 2);
+        assert_eq!(slides[0].placeholders, 2);
+        assert!(!slides[0].has_notes);
+        assert!(!slides[0].hidden);
+        assert_eq!(slides[1].index, 1);
+        assert_eq!(slides[1].title.as_deref(), Some("Siguientes pasos"));
+    }
+
+    #[test]
+    fn the_inventory_says_which_slides_carry_notes() {
+        let slides = deck("notes-speaker.pptx");
+        assert!(slides.iter().all(|s| s.has_notes));
+        // The crossed fixture binds notes by relationship, not by numbering;
+        // whichever slide ends up with them, the flag has to follow.
+        let crossed = deck("notes-crossed.pptx");
+        assert_eq!(crossed.iter().filter(|s| s.has_notes).count(), 2);
+    }
+
+    #[test]
+    fn the_inventory_flags_what_must_not_be_hand_edited() {
+        let slides = deck("smartart-fallback.pptx");
+        assert_eq!(slides.len(), 1);
+        assert_eq!(slides[0].raw_shapes, 1);
+        assert!(
+            slides[0].has_smart_art,
+            "an agent deciding where to edit needs to know the diagram is there"
+        );
+        assert!(!slides[0].has_ole);
+
+        let charts = deck("charts-embedded.pptx");
+        assert_eq!(charts[0].charts, 1);
+        let tables = deck("tables-simple.pptx");
+        assert_eq!(tables[0].tables, 1);
+    }
+
+    #[test]
+    fn a_group_counts_its_children_and_the_preserved_package_is_not_media() {
+        let report = inspect_path(
+            &corpus_pptx("images-anchored.pptx"),
+            &ConvertOptions::default(),
+        )
+        .expect("inspect");
+        let slides = report.slides.as_ref().expect("slides");
+        assert_eq!(slides[0].pictures, 1);
+        // One picture, one media asset: the skeleton is in the store too, and
+        // reporting the deck itself as an image would be a lie by arithmetic.
+        assert_eq!(report.media.len(), 1);
+        assert_eq!(report.media[0].references, 1);
+    }
+
+    #[test]
+    fn the_tally_walks_into_groups_and_names_an_ole_object() {
+        use docsai_model::presentation::{RawShape, RawShapeKind, Shape, ShapeKind};
+
+        fn raw(kind: RawShapeKind) -> Shape {
+            Shape::new(
+                0,
+                ShapeKind::Raw(RawShape {
+                    kind,
+                    ..Default::default()
+                }),
+            )
+        }
+
+        // No corpus deck embeds an OLE object yet, so the flag is proved over
+        // the IR instead of over a package — recorded as a gap, not hidden.
+        let mut tally = ShapeTally::default();
+        tally.walk(&[
+            raw(RawShapeKind::Ole),
+            Shape::new(
+                1,
+                ShapeKind::Group(vec![
+                    raw(RawShapeKind::SmartArt),
+                    Shape::new(0, ShapeKind::TextBox { body: Vec::new() }),
+                ]),
+            ),
+        ]);
+        assert!(tally.ole);
+        assert!(tally.smart_art);
+        assert_eq!(tally.raw_shapes, 2);
+        assert_eq!(
+            tally.shapes, 4,
+            "the group and its two children, plus the OLE stub"
+        );
     }
 }

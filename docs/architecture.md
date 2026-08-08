@@ -447,6 +447,22 @@ never said the slide was readable; a relationship that resolves to a part the pa
 carry is `ReadError::MissingPart`, because a deck handed back one slide short is a deck an agent
 deletes a slide from by writing it out again.
 
+**Reading a deck and converting one are separate capabilities.** `.pptx` is in
+`docsai_office::READABLE` and the support matrix reports `read: yes, write: no`: a deck reaches the
+IR, and `docsai inspect` reports it. Converting it to DocMark is refused with
+`ConvertError::Unsupported` until the DocMark-P profile exists (Phase 14), because the serializer
+would hand back an empty body and a caller redirecting it to a file would lose every slide in
+something that looked like a success. The support matrix is one bit per direction precisely so a
+half-supported format can be described honestly instead of rounded to yes or no.
+
+**The `inspect` slide inventory** is what an agent reads before it decides where to edit: per
+slide, the layout (by `p:cSld@name` — the name a human recognises, resolved through the layout
+catalogue, falling back to the part stem), the shape counts by kind with group children included,
+whether the slide carries speaker notes, and whether it holds SmartArt or an embedded OLE object.
+The last two are the flags that say «do not hand-edit this»; they are why an `mc:AlternateContent`
+stub is classified by what it wraps rather than left as «other». Classifying is not choosing a
+branch: the wrapper is still preserved whole and neither branch is read.
+
 ### 9.5 CLI surface v2
 
 ```

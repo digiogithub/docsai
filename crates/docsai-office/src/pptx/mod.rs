@@ -497,6 +497,38 @@ const STUBBED_SHAPES: &[(&str, RawShapeKind)] = &[
     ("AlternateContent", RawShapeKind::Other),
 ];
 
+/// What an `mc:AlternateContent` wraps, when it is recognisable.
+///
+/// Naming the stub is not the same as choosing a branch: the pair is still
+/// preserved whole and neither branch is read. But a stub that says «other»
+/// about SmartArt under-informs exactly the agent the stub exists for — the
+/// `inspect` slide inventory reports has-SmartArt and has-OLE from this
+/// (plan v2 Phase 13-K), and both arrive on a slide inside this wrapper.
+fn wrapped_kind(element: &Element) -> Option<RawShapeKind> {
+    if element.name == "oleObj" {
+        return Some(RawShapeKind::Ole);
+    }
+    if element.name == "graphicData" {
+        if let Some(uri) = element.attr("uri") {
+            let held = uri.rsplit('/').next().unwrap_or_default();
+            match held_kind(held) {
+                RawShapeKind::Other => {}
+                kind => return Some(kind),
+            }
+        }
+    }
+    element.children().find_map(wrapped_kind)
+}
+
+/// The stub kind for the last segment of an `a:graphicData@uri`.
+fn held_kind(held: &str) -> RawShapeKind {
+    match held {
+        "diagram" => RawShapeKind::SmartArt,
+        "ole" | "oleObject" => RawShapeKind::Ole,
+        _ => RawShapeKind::Other,
+    }
+}
+
 /// Reads the shapes of a slide's `p:spTree`, in **reading order**.
 ///
 /// The tree gives z-order; [`order::sort`] turns it into the order a human
@@ -555,6 +587,11 @@ fn read_shapes(
                     // An element this reader has never heard of is preserved
                     // too. Guessing what it is would be worse than saying so.
                     .unwrap_or(RawShapeKind::Other);
+                let kind = if name == "AlternateContent" {
+                    wrapped_kind(child).unwrap_or(kind)
+                } else {
+                    kind
+                };
                 shapes.push(sink.shape(child, kind, z_index, ctx.part, ctx.source, report));
             }
         }
@@ -623,12 +660,14 @@ fn read_graphic_frame(
         }
     }
 
-    let kind = match held {
-        "diagram" => RawShapeKind::SmartArt,
-        "ole" | "oleObject" => RawShapeKind::Ole,
-        _ => RawShapeKind::Other,
-    };
-    let mut shape = sink.shape(frame, kind, z_index, ctx.part, ctx.source, report);
+    let mut shape = sink.shape(
+        frame,
+        held_kind(held),
+        z_index,
+        ctx.part,
+        ctx.source,
+        report,
+    );
     shape.name = name;
     shape.geometry = geometry;
     shape
@@ -1060,7 +1099,7 @@ mod tests {
             assert_eq!(slide.layout.as_ref(), Some(&layout_id));
         }
         let layout = deck.layouts.layout(&layout_id).expect("catalogued");
-        assert_eq!(layout.name, "slideLayout1");
+        assert_eq!(layout.name, "Titulo y objetos", "`p:cSld@name` wins");
         assert!(layout.title().is_some(), "the layout declares a title");
         assert_eq!(layout.body().and_then(|p| p.idx), Some(1));
         let master = deck.layouts.master_of(&layout_id).expect("reachable");
@@ -1434,7 +1473,11 @@ mod tests {
         // `mc:Choice`, and descending into a branch would be picking one.
         assert_eq!(stubs.len(), 1);
         let stub = stubs[0];
-        assert_eq!(stub.kind, RawShapeKind::Other);
+        // Named for what it wraps, which is not the same as reading a branch:
+        // the `inspect` inventory reports has-SmartArt from this, and a stub
+        // that said «other» would leave an agent blind to the one thing on the
+        // slide it must not hand-edit.
+        assert_eq!(stub.kind, RawShapeKind::SmartArt);
         let fragment = deck
             .raw
             .iter()

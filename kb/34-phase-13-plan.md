@@ -107,11 +107,14 @@ agent needs to decide where to edit without loading the deck.
 
 ## Acceptance criteria (tracked here)
 
-- [ ] Corpus pptx IR goldens pass, including reading order, notes and placeholder identity.
-- [ ] Zero panics on the synthetic corrupt corpus: always `Err`.
-- [ ] A real 40-slide deck reads in < 1 s.
-- [ ] Every unmodelled element produces a stub + sidecar raw + typed warning; none disappears.
-- [ ] `.pptm` emits the macro security warning.
+- [x] Corpus pptx IR goldens pass, including reading order, notes and placeholder identity.
+      `<name>.expected.inspect.json` beside every deck, 13-K ([[45-phase-13-inspect-inventory]]).
+- [x] Zero panics on the synthetic corrupt corpus: always `Err`. 13-J ([[44-phase-13-pptm-robustness]]).
+- [x] A 40-slide deck reads in < 1 s. Synthetic, not real: `forty-slides.pptx`, and the fixture
+      says so — no real-world deck can live in the repository.
+- [x] Every unmodelled element produces a stub + sidecar raw + typed warning; none disappears.
+      13-I ([[43-phase-13-raw]]).
+- [x] `.pptm` emits the macro security warning. 13-J.
 
 **One criterion is deferred with a reason.** The plan's *«`--fidelity agent` on that deck is
 ≤ 15 % of the `full` token count»* cannot be measured in Phase 13: token counts are measured over

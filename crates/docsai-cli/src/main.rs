@@ -691,6 +691,36 @@ fn print_inspect(
             );
         }
     }
+    if let Some(slides) = &report.slides {
+        println!("slides:         {}", slides.len());
+        for slide in slides {
+            let mut flags = Vec::new();
+            if slide.has_notes {
+                flags.push("notes");
+            }
+            if slide.has_smart_art {
+                flags.push("smartart");
+            }
+            if slide.has_ole {
+                flags.push("ole");
+            }
+            if slide.hidden {
+                flags.push("hidden");
+            }
+            println!(
+                "  [{}] layout={} shapes={} {}{}",
+                slide.index + 1,
+                slide.layout_name.as_deref().unwrap_or("?"),
+                slide.shapes,
+                slide.title.as_deref().unwrap_or("(untitled)"),
+                if flags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", flags.join(", "))
+                }
+            );
+        }
+    }
     println!("media:          {}", report.media.len());
     if verbose {
         for asset in &report.media {
@@ -702,8 +732,8 @@ fn print_inspect(
     }
     let s = &report.stats;
     println!(
-        "stats:          paragraphs={} headings={} lists={} tables={} images={} sheets={} cells={} formulas={}",
-        s.paragraphs, s.headings, s.lists, s.tables, s.images, s.sheets, s.cells, s.formulas
+        "stats:          paragraphs={} headings={} lists={} tables={} images={} sheets={} cells={} formulas={} slides={}",
+        s.paragraphs, s.headings, s.lists, s.tables, s.images, s.sheets, s.cells, s.formulas, s.slides
     );
     if !report.warnings.is_empty() {
         eprintln!("docsai: {} warning(s) while reading", report.warnings.len());

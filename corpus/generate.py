@@ -2449,10 +2449,16 @@ THEME = (
 )
 
 
-def sp_tree(shapes: str) -> str:
-    """The shape tree every slide, layout and master part wraps its shapes in."""
+def sp_tree(shapes: str, *, name: str = "") -> str:
+    """The shape tree every slide, layout and master part wraps its shapes in.
+
+    ``name`` is `p:cSld@name`. Real layouts carry one — "Title and Content" is
+    what a deck's author sees — and it is what `docsai inspect` reports as the
+    layout of a slide, so at least one part in the corpus has to have it.
+    """
+    attr = f' name="{name}"' if name else ""
     return (
-        "<p:cSld><p:spTree>"
+        f"<p:cSld{attr}><p:spTree>"
         '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
         '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>'
         '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>'
@@ -2556,7 +2562,8 @@ SLIDE_LAYOUT = (
     f'<p:sldLayout {P_NS} type="obj" preserve="1">'
     + sp_tree(
         shape(2, "Title 1", "", ph=ph("title"))
-        + shape(3, "Content Placeholder 2", "", ph=ph("body", 1))
+        + shape(3, "Content Placeholder 2", "", ph=ph("body", 1)),
+        name="Titulo y objetos",
     )
     + "</p:sldLayout>"
 )
@@ -3364,6 +3371,32 @@ def pptx_macro_enabled() -> None:
     )
 
 
+def pptx_forty_slides() -> None:
+    """Forty slides, each with a title, a body and speaker notes.
+
+    Not a trait fixture: the plan's Phase 13 acceptance asks that a 40-slide deck
+    reads in under a second, and no real-world deck can live in the repository.
+    This one has the right shape — forty slides resolving against the same
+    cascade, forty notes parts reached through their own relationships — and not
+    the weight of a real deck, which would carry images and embedded objects.
+    What it catches is a reader that goes quadratic in the slide count."""
+    build_pptx(
+        "forty-slides.pptx",
+        [
+            title_body_slide(f"Sección {index}", [
+                (f"Punto {index}.1", 0),
+                (f"Punto {index}.2", 1),
+            ])
+            for index in range(1, 41)
+        ],
+        title="Deck largo",
+        notes={
+            index: notes_slide(index, f"Notas de la sección {index}")
+            for index in range(1, 41)
+        },
+    )
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -3420,6 +3453,7 @@ GENERATORS = [
     pptx_charts_embedded,
     pptx_smartart_fallback,
     pptx_macro_enabled,
+    pptx_forty_slides,
 ]
 
 

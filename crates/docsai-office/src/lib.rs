@@ -37,7 +37,13 @@ use docsai_model::{ConversionReport, Document, Format};
 use std::io::{Read, Seek};
 
 /// Formats this crate can read today.
-pub const READABLE: &[Format] = &[Format::Docx, Format::Doc, Format::Xlsx, Format::Xls];
+pub const READABLE: &[Format] = &[
+    Format::Docx,
+    Format::Doc,
+    Format::Xlsx,
+    Format::Xls,
+    Format::Pptx,
+];
 
 /// Formats this crate can write today.
 pub const WRITABLE: &[Format] = &[Format::Docx, Format::Xlsx];
@@ -71,10 +77,11 @@ pub fn read_xlsx<R: Read + Seek>(
 
 /// Reads a `.pptx` presentation.
 ///
-/// Deliberately **not** in [`READABLE`] yet: Phase 13 is building this reader
-/// increment by increment, and a deck that converted to an empty document would
-/// be worse than one the tool honestly refuses. It joins the dispatch in
-/// [`read`] when the slides are full.
+/// In [`READABLE`] since Phase 13-K, which is the increment that gave a deck a
+/// destination: `inspect` reports the slide inventory. Reading is *not* the same
+/// as converting — DocMark-P is Phase 14, and until it exists a deck read into
+/// the IR still refuses to serialise rather than writing an empty document
+/// (`docsai-convert`).
 pub fn read_pptx<R: Read + Seek>(
     reader: R,
     assets: &mut dyn AssetStore,
@@ -101,9 +108,10 @@ pub fn read<R: Read + Seek>(
         Format::Doc => read_doc(reader, assets),
         Format::Xlsx => read_xlsx(reader, assets),
         Format::Xls => read_xls(reader, assets),
+        Format::Pptx => read_pptx(reader, assets),
         other => Err(ReadError::WrongShape {
             part: other.to_string(),
-            expected: "a format supported in this phase (docx, doc, xlsx, xls)".into(),
+            expected: "a format supported in this phase (docx, doc, xlsx, xls, pptx)".into(),
         }),
     }
 }

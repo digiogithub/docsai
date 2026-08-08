@@ -1,0 +1,52 @@
+{
+  "source-format": "pptx",
+  "kind": "presentation",
+  "meta": {
+    "title": "Presentación con macros",
+    "author": "docsai corpus",
+    "last-modified-by": "docsai corpus",
+    "created": "2026-01-01T00:00:00Z",
+    "modified": "2026-01-02T00:00:00Z",
+    "language": "es-ES",
+    "application": "docsai-corpus"
+  },
+  "styles": [],
+  "slides": [
+    {
+      "index": 0,
+      "title": "Informe con macros",
+      "layout": "ppt/slideLayouts/slideLayout1.xml",
+      "layout-name": "Titulo y objetos",
+      "shapes": 2,
+      "placeholders": 2,
+      "pictures": 0,
+      "tables": 0,
+      "charts": 0,
+      "raw-shapes": 0,
+      "has-notes": false,
+      "has-smart-art": false,
+      "has-ole": false,
+      "hidden": false
+    }
+  ],
+  "media": [],
+  "stats": {
+    "paragraphs": 3,
+    "headings": 0,
+    "lists": 1,
+    "tables": 0,
+    "images": 0,
+    "footnotes": 0,
+    "slides": 1,
+    "sheets": 0,
+    "cells": 0,
+    "formulas": 0,
+    "styles": 0
+  },
+  "warnings": [
+    {
+      "warning": "macros-ignored",
+      "part": "ppt/vbaProject.bin"
+    }
+  ]
+}

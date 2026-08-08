@@ -19,6 +19,11 @@ fixture in the corpus, one trait per file. There is **no reader yet** — Phase 
 there are no goldens and no Rust test touches these files. The only gate is
 `generate.py --check`, which now covers `pptx/` too.
 
+> **Superseded on both counts by Phase 13.** The reader landed increment by increment
+> ([[35-phase-13-ir-root]] onwards), the corpus grew as it went (the rows marked below), and
+> 13-K gave every deck an IR golden — `<name>.expected.inspect.json`, the `inspect` report rather
+> than DocMark, because DocMark-P is Phase 14 ([[45-phase-13-inspect-inventory]]).
+
 | Fixture | Trait it isolates |
 |---|---|
 | `basic-slides.pptx` | Title + body placeholders, two slides. The floor of the format |
@@ -31,6 +36,7 @@ there are no goldens and no Rust test touches these files. The only gate is
 | `reading-order.pptx` | A `p:spTree` that is not the reading order (added in 13-G, [[41-phase-13-reading-order]]) |
 | `raw-preserved.pptx` | A group, a `custGeom`, `p:transition` and `p:timing` (added in 13-I, [[43-phase-13-raw]]) |
 | `macro-enabled.pptm` | A macro-enabled deck and its VBA project (added in 13-J, [[44-phase-13-pptm-robustness]]) |
+| `forty-slides.pptx` | Forty slides with notes — the phase's performance budget, not a trait (added in 13-K, [[45-phase-13-inspect-inventory]]) |
 | `tables-simple.pptx` | `p:graphicFrame` → `a:tbl` |
 | `images-anchored.pptx` | DrawingML `p:pic` with explicit `a:xfrm` |
 | `shapes-geometry.pptx` | `prstGeom` free shapes and a `p:cxnSp` connector |

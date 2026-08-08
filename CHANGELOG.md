@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docsai inspect` reports the slide inventory** (plan v2 Phase 13, eleventh increment): `.pptx`
+  is finally **readable** — it joins `docsai_office::read`, `docsai formats` says `pptx: read yes`,
+  and `inspect` reports, per slide, the layout it hangs from (by `p:cSld@name`, the name a human
+  recognises), how many shapes are on it and of what kind, whether it carries speaker notes, and
+  whether it holds SmartArt or an embedded OLE object — what an agent needs to decide *where* to
+  edit without loading the deck. `--json` carries the same under a new `slides` key. An
+  `mc:AlternateContent` stub is now named for what it wraps rather than always «other»: naming a
+  thing is not the same as reading it, and a stub that hid SmartArt left an agent blind to the one
+  object on the slide it must not hand-edit. The preserved package no longer shows up as a media
+  asset, so a deck with no pictures reports none. Corpus layouts now carry a `p:cSld@name`, as real
+  ones do.
+
+  Reading is **not** converting: `docsai convert deck.pptx` still refuses with
+  `unsupported conversion: pptx -> docmark`, because the DocMark-P profile is Phase 14 and a
+  serializer that wrote an empty body would lose every slide in a file that looked like a success.
+
 - **`.pptm` and corrupt decks** (plan v2 Phase 13, tenth increment): a macro-enabled presentation
   reads as its macro-free equivalent — the slides come back whole, the VBA project is never
   inspected or executed, and `Warning::MacrosIgnored` names the part, the same rule `.docm` and

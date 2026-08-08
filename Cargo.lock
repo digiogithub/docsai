@@ -443,6 +443,7 @@ dependencies = [
  "docsai-office",
  "rayon",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tiktoken-rs",

@@ -387,6 +387,17 @@ fn write_document(
 
     match target {
         Format::DocMark => {
+            // A deck reads (13-K) long before it serialises: DocMark-P is
+            // Phase 14. The serializer would hand back an empty body with a
+            // warning, and a caller redirecting stdout to a file would end up
+            // with a document that lost every slide and looked like a success.
+            // Refusing is the honest answer until the profile exists.
+            if document.is_presentation() {
+                return Err(ConvertError::Unsupported {
+                    from: source_format,
+                    to: target,
+                });
+            }
             let docmark_options = DocMarkOptions {
                 fidelity: options.fidelity,
                 ids: options.id_policy(),
@@ -756,6 +767,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_deck_reads_but_does_not_convert_yet() {
+        // 13-K made a deck readable so `inspect` could report it. Writing it as
+        // DocMark is Phase 14, and until then the refusal is the honest answer:
+        // the serializer would produce an empty body with a warning, and a
+        // caller redirecting that to a file would lose every slide silently.
+        let dir = temp_dir("deck");
+        let deck =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/pptx/basic-slides.pptx");
+        let error = convert_file(&deck, Some(&dir.join("out.md")), &ConvertOptions::default())
+            .expect_err("DocMark-P is Phase 14");
+        assert!(
+            matches!(
+                error,
+                ConvertError::Unsupported {
+                    from: Format::Pptx,
+                    to: Format::DocMark
+                }
+            ),
+            "{error:?}"
+        );
+        assert!(!dir.join("out.md").exists(), "nothing half-written");
     }
 
     #[test]

@@ -133,9 +133,9 @@ pub const SUPPORT: &[FormatSupport] = &[
     },
     FormatSupport {
         format: Format::Pptx,
-        read: false,
+        read: true,
         write: false,
-        note: "Phase 13: the reader is under construction, slide by slide",
+        note: "Phase 13 read-only: `inspect` reports the slide inventory; DocMark-P and writing are Phase 14",
     },
     FormatSupport {
         format: Format::DocMark,
@@ -187,8 +187,8 @@ mod tests {
         assert!(can_write(Format::Ods));
         assert!(can_read(Format::DocMark));
         assert!(can_write(Format::DocMark));
-        // Recognised, and honestly reported as not yet readable.
-        assert!(!can_read(Format::Pptx));
+        // Read since 13-K, for `inspect`; writing waits for DocMark-P.
+        assert!(can_read(Format::Pptx));
         assert!(!can_write(Format::Pptx));
     }
 

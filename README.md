@@ -37,7 +37,7 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
-| PowerPoint OOXML | `.pptx` | 🕓 v2 P13 | 🕓 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved |
+| PowerPoint OOXML | `.pptx` | ✅ `inspect` | 🕓 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. Reads into the IR and `docsai inspect` reports the slide inventory; converting to DocMark waits for the DocMark-P profile (v2 P14) |
 | PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
 | OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |

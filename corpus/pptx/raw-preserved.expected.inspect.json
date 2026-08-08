@@ -1,0 +1,72 @@
+{
+  "source-format": "pptx",
+  "kind": "presentation",
+  "meta": {
+    "title": "Preservación en bruto",
+    "author": "docsai corpus",
+    "last-modified-by": "docsai corpus",
+    "created": "2026-01-01T00:00:00Z",
+    "modified": "2026-01-02T00:00:00Z",
+    "language": "es-ES",
+    "application": "docsai-corpus"
+  },
+  "styles": [],
+  "slides": [
+    {
+      "index": 0,
+      "title": "Lo que no se modela",
+      "layout": "ppt/slideLayouts/slideLayout1.xml",
+      "layout-name": "Titulo y objetos",
+      "shapes": 3,
+      "placeholders": 1,
+      "pictures": 0,
+      "tables": 0,
+      "charts": 0,
+      "raw-shapes": 2,
+      "has-notes": false,
+      "has-smart-art": false,
+      "has-ole": false,
+      "hidden": false
+    }
+  ],
+  "media": [],
+  "stats": {
+    "paragraphs": 1,
+    "headings": 0,
+    "lists": 0,
+    "tables": 0,
+    "images": 0,
+    "footnotes": 0,
+    "slides": 1,
+    "sheets": 0,
+    "cells": 0,
+    "formulas": 0,
+    "styles": 0
+  },
+  "warnings": [
+    {
+      "warning": "unsupported-element",
+      "kind": "p:grpSp",
+      "location": "ppt/slides/slide1.xml:826",
+      "action": "raw-block"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "p:sp",
+      "location": "ppt/slides/slide1.xml:1878",
+      "action": "raw-block"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "p:transition",
+      "location": "ppt/slides/slide1.xml:2471",
+      "action": "raw-block"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "p:timing",
+      "location": "ppt/slides/slide1.xml:2533",
+      "action": "raw-block"
+    }
+  ]
+}

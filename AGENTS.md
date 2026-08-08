@@ -183,8 +183,12 @@ connectors, SmartArt, custom geometries and a slide's animation subtrees come ba
 stub plus a verbatim raw fragment plus a typed warning, and a chart is recorded with its markup.
 A `.pptm` reads as its macro-free equivalent with `Warning::MacrosIgnored`, and a broken package —
 truncated, corrupted, malformed, dangling — is a typed `ReadError` or a warning, never a panic.
-`read_pptx` is still kept out of the `read` dispatch and `docsai formats` still says `pptx: no`:
-the `inspect` slide inventory is 13-K.
+`.pptx` is now **readable**: it is in the `read` dispatch, `docsai formats` says `pptx: read yes,
+write no`, and `docsai inspect` reports the slide inventory — layout, shape counts, notes,
+SmartArt/OLE — so an agent can decide where to edit without loading the deck. Converting a deck to
+DocMark is still refused (`unsupported conversion: pptx -> docmark`): the DocMark-P profile is
+Phase 14, and an empty body written to a file would lose every slide silently. Phase 13 is closed
+with that; do not start Phase 14 without being told.
 
 ## 2. Documents you must read before implementing
 
