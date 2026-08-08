@@ -2571,6 +2571,7 @@ def build_pptx(
     media: dict[str, bytes] | None = None,
     slide_rels: dict[int, list[tuple[str, str, str]]] | None = None,
     notes: dict[int, str] | None = None,
+    notes_for: dict[int, int] | None = None,
     extra_parts: dict[str, bytes] | None = None,
     extra_overrides: list[tuple[str, str]] | None = None,
     extra_defaults: dict[str, str] | None = None,
@@ -2582,10 +2583,17 @@ def build_pptx(
     differs from the file order it is `p:sldIdLst` that wins, which is the whole
     point of the `slide-order` fixture. ``slide_rels`` entries are
     ``(rId, type_suffix, target)`` relative to `ppt/slides/`.
+
+    ``notes`` are the notes parts by file number; ``notes_for`` maps a slide
+    number to the notes part it points at, which defaults to the same number
+    because that is PowerPoint's habit. It is only a habit: the relationship is
+    what binds a note to a slide, and the `notes-crossed` fixture proves it by
+    disagreeing with the numbering.
     """
     media = media or {}
     slide_rels = slide_rels or {}
     notes = notes or {}
+    notes_for = notes_for or {index: index for index in notes}
     order = order or list(range(1, len(slides) + 1))
 
     parts: dict[str, bytes] = {}
@@ -2631,8 +2639,10 @@ def build_pptx(
         overrides.append((f"/{part}", f"{PML_TYPE}.slide+xml"))
         entries = [("rIdLayout", "slideLayout", "../slideLayouts/slideLayout1.xml")]
         entries.extend(slide_rels.get(index, []))
-        if index in notes:
-            entries.append(("rIdNotes", "notesSlide", f"../notesSlides/notesSlide{index}.xml"))
+        if index in notes_for:
+            entries.append(
+                ("rIdNotes", "notesSlide", f"../notesSlides/notesSlide{notes_for[index]}.xml")
+            )
         parts[f"ppt/slides/_rels/slide{index}.xml.rels"] = rels_part(entries)
 
     if notes:
@@ -2642,12 +2652,13 @@ def build_pptx(
         ])
         overrides.append(("/ppt/notesMasters/notesMaster1.xml", f"{PML_TYPE}.notesMaster+xml"))
         presentation_rels.append(("rIdNotesMaster", "notesMaster", "notesMasters/notesMaster1.xml"))
+        owner = {note: slide for slide, note in notes_for.items()}
         for index, body in sorted(notes.items()):
             part = f"ppt/notesSlides/notesSlide{index}.xml"
             parts[part] = (XML_DECL + body).encode()
             overrides.append((f"/{part}", f"{PML_TYPE}.notesSlide+xml"))
             parts[f"ppt/notesSlides/_rels/notesSlide{index}.xml.rels"] = rels_part([
-                ("rIdSlide", "slide", f"../slides/slide{index}.xml"),
+                ("rIdSlide", "slide", f"../slides/slide{owner.get(index, index)}.xml"),
                 ("rIdNotesMaster", "notesMaster", "../notesMasters/notesMaster1.xml"),
             ])
 
@@ -2833,6 +2844,29 @@ def pptx_notes_speaker() -> None:
             2: notes_slide(2, "Si preguntan por el proveedor, remitir al anexo."),
         },
         title="Notas del ponente",
+    )
+
+
+def pptx_notes_crossed() -> None:
+    """The notes part numbers disagree with the slide numbers on purpose.
+
+    `notesSlide1.xml` belongs to slide 2 and `notesSlide2.xml` to slide 1, which
+    is legal: the `notesSlide` relationship in the slide's own `_rels` is what
+    binds them. A reader that pairs them by number puts every note under the
+    wrong slide — silently, and with text that reads plausibly where it lands.
+    """
+    build_pptx(
+        "notes-crossed.pptx",
+        [
+            title_body_slide("Primera", [("Contenido de la primera", 0)]),
+            title_body_slide("Segunda", [("Contenido de la segunda", 0)]),
+        ],
+        notes={
+            1: notes_slide(2, "Nota de la segunda diapositiva."),
+            2: notes_slide(1, "Nota de la primera diapositiva."),
+        },
+        notes_for={1: 2, 2: 1},
+        title="Notas cruzadas",
     )
 
 
@@ -3246,6 +3280,7 @@ GENERATORS = [
     pptx_placeholders_empty,
     pptx_bullets_levels,
     pptx_notes_speaker,
+    pptx_notes_crossed,
     pptx_tables_simple,
     pptx_images_anchored,
     pptx_shapes_geometry,

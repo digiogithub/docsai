@@ -25,10 +25,12 @@
 //!   them.
 //! * **Order comes from `p:sldIdLst`**, never from the part names. `slide3.xml`
 //!   being the first slide of the deck is legal and common after a reorder in
-//!   PowerPoint.
+//!   PowerPoint. The same rule binds a slide to its notes: [`notes`] follows the
+//!   slide's `notesSlide` relationship, never the number in the part name.
 
 mod cascade;
 mod graphics;
+mod notes;
 mod text;
 
 use std::collections::BTreeMap;
@@ -164,6 +166,7 @@ pub(crate) fn read_package(
 
         let slide = read_slide(
             package,
+            &types,
             &rel.target,
             &slide_rels,
             layout,
@@ -332,6 +335,7 @@ struct SlideCtx<'a> {
 #[allow(clippy::too_many_arguments)]
 fn read_slide(
     package: &Package,
+    types: &ContentTypes,
     part: &str,
     rels: &Relationships,
     layout: Option<LayoutId>,
@@ -368,12 +372,21 @@ fn read_slide(
         }
     };
 
+    let notes = notes::read(
+        package,
+        types,
+        part,
+        rels,
+        cascade.theme_of(layout.as_ref()),
+        report,
+    )?;
+
     Ok(Slide {
         id: None,
         layout,
         name: csld_name(&root),
         shapes,
-        notes: None,
+        notes,
         hidden: root.attr("show") == Some("0"),
         section: sections.get(&entry.id).cloned(),
         raw: Vec::new(),
@@ -1224,6 +1237,65 @@ mod tests {
              spanning cell's text there and reading it would duplicate it"
         );
         assert_eq!(table.width(), 2, "the spans add up to the grid");
+    }
+
+    #[test]
+    fn speaker_notes_are_reached_through_the_slide_relationships() {
+        let (deck, report) = read_fixture("notes-speaker");
+        let first = deck.slides[0].notes.as_ref().expect("the slide has notes");
+        assert_eq!(first.len(), 2, "two paragraphs, not one bulleted list");
+        assert_eq!(
+            first.iter().map(block_text).collect::<Vec<_>>(),
+            [
+                "Insistir en que el 12 % es interanual.",
+                "No entrar en el desglose por región."
+            ]
+        );
+        assert!(
+            first.iter().all(|b| matches!(b, Block::Paragraph(_))),
+            "notes are prose: the notes master is what would bullet them"
+        );
+        let second = deck.slides[1]
+            .notes
+            .as_ref()
+            .expect("both slides have notes");
+        assert_eq!(
+            block_text(&second[0]),
+            "Si preguntan por el proveedor, remitir al anexo."
+        );
+        assert!(
+            report.warnings.is_empty(),
+            "the notes page's slide-image placeholder is furniture, not a loss: {:?}",
+            report.warnings
+        );
+        // A deck without a notes part gets `None`, which is what tells the
+        // writer not to create one.
+        let (plain, _) = read_fixture("basic-slides");
+        assert!(plain.slides.iter().all(|slide| slide.notes.is_none()));
+    }
+
+    #[test]
+    fn notes_follow_the_relationship_even_when_the_numbering_disagrees() {
+        // `notesSlide7.xml` belonging to slide 7 is PowerPoint's habit, not a
+        // rule. This fixture crosses them over, so a reader that matched on the
+        // part name would put every note under the wrong slide — silently, and
+        // with text that looks plausible where it lands.
+        let (deck, _) = read_fixture("notes-crossed");
+        assert_eq!(
+            deck.slides[0].notes.as_ref().map(|n| block_text(&n[0])),
+            Some("Nota de la primera diapositiva.".to_string())
+        );
+        assert_eq!(
+            deck.slides[1].notes.as_ref().map(|n| block_text(&n[0])),
+            Some("Nota de la segunda diapositiva.".to_string())
+        );
+    }
+
+    fn block_text(block: &Block) -> String {
+        match block {
+            Block::Paragraph(p) => p.plain_text(),
+            other => panic!("expected a paragraph, got {other:?}"),
+        }
     }
 
     #[test]

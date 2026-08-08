@@ -392,6 +392,13 @@ The frame is a container, and what it holds is read from its `a:graphicData@uri`
 diagram arrive in the very same element a table does, and guessing from the first child is how a
 chart becomes an empty table.
 
+Speaker notes are bound to their slide by the slide's own `notesSlide` relationship, in exactly
+the way slide order comes from `p:sldIdLst` rather than from part names. The numbering usually
+agrees; when a converter has made it disagree, matching by number is a corruption that reads as
+plausible text under the wrong slide. `Slide::notes` distinguishes a deck with no notes part
+(`None`) from a notes page that is empty (`Some([])`), because the writer has to reproduce the
+second and must not invent the first.
+
 ### 9.5 CLI surface v2
 
 ```

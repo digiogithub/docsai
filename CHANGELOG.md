@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Speaker notes** (plan v2 Phase 13, sixth increment): `ppt/notesSlides/*` becomes
+  `Slide::notes`, reached through the slide's own `notesSlide` relationship and never by the
+  number in the part name — `notesSlide1.xml` belonging to the first slide is PowerPoint's habit,
+  not a rule, and pairing them by number puts every note under the wrong slide. The notes page's
+  furniture (the slide thumbnail, header, footer, date and page number) is regenerated from the
+  notes master and is not read as text; the note itself stays prose, because what would bullet it
+  is a notes master that is not in the slide cascade. A slide with no notes part reads `None`, a
+  slide with an empty one reads `Some([])`, and the writer needs the difference. New corpus deck
+  `notes-crossed.pptx`, whose notes parts are numbered against the slides on purpose.
+
 - **Slide pictures and tables** (plan v2 Phase 13, fifth increment): `p:pic` becomes the same
   normalised `ImageRef` a `.docx` picture does, stored in the `AssetStore` by content hash — one
   bitmap on four slides is one stored file — with its alt text, crop, native pixel size and

@@ -27,6 +27,7 @@ there are no goldens and no Rust test touches these files. The only gate is
 | `placeholders-empty.pptx` | Empty placeholders and an empty paragraph between two full ones |
 | `bullets-levels.pptx` | `a:pPr@lvl` nesting, `buChar` from the master, `buAutoNum` overridden |
 | `notes-speaker.pptx` | `ppt/notesSlides/*` plus the notes master they require |
+| `notes-crossed.pptx` | Notes parts numbered against the slides (added in 13-F, [[40-phase-13-notes]]) |
 | `tables-simple.pptx` | `p:graphicFrame` → `a:tbl` |
 | `images-anchored.pptx` | DrawingML `p:pic` with explicit `a:xfrm` |
 | `shapes-geometry.pptx` | `prstGeom` free shapes and a `p:cxnSp` connector |
