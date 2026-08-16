@@ -11,7 +11,7 @@ use docsai_model::style::{
 };
 use docsai_model::text::{DocumentMeta, Margins, Orientation, PageGeometry};
 use docsai_model::units::{Length, Size};
-use docsai_model::{Format, DOCMARK_VERSION};
+use docsai_model::{Format, DOCMARK_VERSIONS};
 
 use crate::attrs::Attrs;
 use crate::error::ParseError;
@@ -72,15 +72,16 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
 
     if let Some(v) = map.get("docmark") {
         let version = v.as_str().unwrap_or("").trim();
-        if !version.is_empty() && version != DOCMARK_VERSION {
-            // Accept with a soft approach: still parse; future versions may
-            // need migration, but v1.0 is the only supported contract today.
-            if !version.starts_with('1') {
-                return Err(ParseError::front_matter(
-                    start_line,
-                    format!("unsupported docmark version `{version}`"),
-                ));
-            }
+        // The accepted set is named (spec §11): 1.0, 1.1 with ids, 1.2 with the
+        // presentation profile. Every bump is additive, so an older document
+        // parses under this reader unchanged — but a *newer* one is refused by
+        // name rather than read as if it were 1.2, which would be a silent
+        // misreading instead of an error a caller can act on.
+        if !version.is_empty() && !DOCMARK_VERSIONS.contains(&version) {
+            return Err(ParseError::front_matter(
+                start_line,
+                format!("unsupported docmark version `{version}`"),
+            ));
         }
     }
 
@@ -453,5 +454,43 @@ fn parse_underline(value: &str) -> Underline {
         "dashed" => Underline::Dashed,
         "wave" => Underline::Wave,
         _ => Underline::Single,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    fn version_of(version: &str) -> Result<(), String> {
+        let text = format!("docmark: \"{version}\"\nsource-format: pptx\n");
+        parse(&text, 1).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn every_committed_version_parses() {
+        // 1.2 is the presentation profile (spec §11.2); the older two keep
+        // parsing because every bump is additive.
+        for version in ["1.0", "1.1", "1.2"] {
+            assert!(version_of(version).is_ok(), "{version} should parse");
+        }
+    }
+
+    #[test]
+    fn a_version_this_build_does_not_know_is_refused_by_name() {
+        // Not `starts_with('1')`: a 1.3 read as if it were 1.2 is a silent
+        // misreading, and the caller cannot tell it happened.
+        let error = version_of("1.3").expect_err("1.3 is not committed");
+        assert!(
+            error.contains("unsupported docmark version `1.3`"),
+            "{error}"
+        );
+        assert!(version_of("2.0").is_err());
+    }
+
+    #[test]
+    fn a_document_that_declares_no_version_still_parses() {
+        // Hand-written DocMark is a first-class input: the profile is read off
+        // the body, and the front matter key is a courtesy.
+        assert!(parse("source-format: pptx\n", 1).is_ok());
     }
 }

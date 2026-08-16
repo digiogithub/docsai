@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DocMark 1.2, the presentation profile, is specified** (plan v2 Phase 14, first increment):
+  `docs/docmark-specification.md` §11.2 stops being a sketch and becomes normative — eight rules,
+  the front-matter keys a deck adds (`layouts:`, `skeleton:`), the version rule and the
+  compatibility contract. The design is the one spike P2 measured, which **supersedes the earlier
+  sketch on two points**: placeholders are *implicit* (the `##` heading is the title placeholder
+  and the layout's primary body is written as ordinary blocks under it, so a plain viewer no longer
+  prints every title twice), and speaker notes degrade to a blockquote at `--fidelity standard`.
+  Nothing serialises yet; this is the contract the rest of the phase is written against.
+
 - **`docsai inspect` reports the slide inventory** (plan v2 Phase 13, eleventh increment): `.pptx`
   is finally **readable** — it joins `docsai_office::read`, `docsai formats` says `pptx: read yes`,
   and `inspect` reports, per slide, the layout it hangs from (by `p:cSld@name`, the name a human
@@ -291,6 +300,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   primary targets.
 
 ### Changed
+
+- **The front-matter parser names the versions it accepts.** `docmark: "1.0"`, `"1.1"` and `"1.2"`
+  parse; anything else is refused by name. Previously any `1.x` was accepted, so a future `1.3`
+  would have been read as if it were the current profile — a silent misreading rather than an
+  error a caller can act on.
 
 - **BREAKING (MCP): `convert_to_markdown` no longer returns image bytes by default.** The
   default is now `include_images=refs` — name, MIME type and size per image — where it used

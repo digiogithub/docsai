@@ -8,11 +8,11 @@ loss**.
 Status: **frozen (v1.0)** at the close of Phase 0. Any later change bumps the version declared
 in the front matter and requires documenting the migration (`AGENTS.md` §2).
 
-Two version bumps are already committed by
-[`development-plan-v2.md`](development-plan-v2.md) and sketched in §11 of this document:
+Two version bumps are committed by
+[`development-plan-v2.md`](development-plan-v2.md) and specified in §11 of this document:
 **1.1** (node ids and etags, raw-block sidecar, `agent` fidelity level — plan v2 Phases 10–11)
-and **1.2** (the presentation profile, "DocMark-P" — plan v2 Phase 14). Both are additive: a
-document written against 1.0 stays valid.
+and **1.2** (the presentation profile, "DocMark-P" — plan v2 Phase 14). Both are **normative**;
+both are additive, so a document written against 1.0 stays valid.
 
 Annex A (complex tables) is resolved in §3.4. Draft TODOs are closed; additions made explicit by
 the Phase 1 implementation are marked in the text and collected in §10.
@@ -572,10 +572,9 @@ are additions: no document written against the draft becomes invalid.
 
 ## 11. Committed future versions (1.1 and 1.2)
 
-Normative sketch of the two bumps scheduled by
-[`development-plan-v2.md`](development-plan-v2.md). The exact syntax is finalised in the phase
-that implements it (1.1 in Phases 10–11, 1.2 in Phase 14); what is fixed here is the intent and
-the compatibility contract. Rationale:
+The two bumps scheduled by [`development-plan-v2.md`](development-plan-v2.md), each finalised by
+the phase that implements it (1.1 in Phases 10–11, 1.2 in Phase 14). Both sections are normative
+now; anything a phase has not implemented yet says so where it is described. Rationale:
 [`technical-analysis-presentations.md`](technical-analysis-presentations.md) §6.
 
 **Compatibility contract for both bumps**: additive only. A 1.0 document parses under 1.1/1.2
@@ -649,17 +648,16 @@ the remaining bullets stay a sketch until Phase 11 implements them.
 
 ### 11.2 DocMark 1.2 — the presentation profile (DocMark-P)
 
-Third document class, alongside text documents (§3) and spreadsheets (§4). Design rule,
-enforced by test: **`--fidelity standard` must remain hand-editable by a human**, and a plain
-Markdown viewer must show, per slide, title + bullets + images and nothing else.
+Third document class, alongside text documents (§3) and spreadsheets (§4). **Normative**, as of
+plan v2 Phase 14; what an increment has not implemented yet is marked as such in-place. The design
+is the one spike P2 measured — [`spikes/P2-docmark-p.md`](spikes/P2-docmark-p.md) §4 — and it
+**supersedes the earlier sketch of this section on two points**: placeholders are implicit, and
+notes degrade to a blockquote. The sketch wrote every placeholder as a container, which said each
+slide's title twice and left a plain viewer printing it twice.
 
-**Spike P2 drafted this profile and the sketch below is superseded on two points** — see
-[`spikes/P2-docmark-p.md`](spikes/P2-docmark-p.md) §4, which is the draft Phase 14 finalises.
-Placeholders are **implicit**: the slide heading *is* the title placeholder (the sketch writes the
-title twice, which a plain viewer shows twice), and the layout's primary body placeholder is
-written as ordinary blocks under it, with `layouts:` naming which index each is. Containers stay
-for every other placeholder, for free shapes and for notes. Measured over `corpus/pptx` at
-`--fidelity standard`, that leaves **2.6 %** of what a plain viewer prints as syntax — 11.4 %
+Design rule, enforced by test: **`--fidelity standard` must remain hand-editable by a human**, and
+a plain Markdown viewer must show, per slide, title + bullets + images and nothing else. Measured
+over `corpus/pptx` at `standard`, **2.6 %** of what a plain viewer prints is syntax — 11.4 %
 counting the fixture whose whole content is free shapes, where the noise is the point.
 
 ````markdown
@@ -668,38 +666,76 @@ docmark: "1.2"
 source-format: pptx
 next-id: 128
 layouts:
-  L1: { name: "Title and Content", master: M1 }
+  L1: { name: "Title and Content", master: M1, title: 0, body: 1 }
 skeleton: assets/_skeleton/deck-9f3a21c8.pptx
 ---
 
-## Q3 results {#s4 .slide layout=L1}
+## Q3 results {#n1 .slide layout=L1}
 
-::: {.ph type=title idx=0 #s4.title}
-Q3 results
+- Revenue up 12 %
+- Churn flat
+
+::: {#n4 .ph idx=2 pos="88px,5200000emu" size="784px,1000000emu"}
+1. One
+2. Two
 :::
 
-::: {.ph type=body idx=1 #s4.body}
-- Revenue up 12 % {#s4.b1}
-- Churn flat {#s4.b2}
+::: {#n5 .shape geom=rightArrow name="Arrow 1" pos="3200000emu,2200000emu" size="1400000emu,500000emu" raw=r7}
 :::
 
-::: {.shape geom=rect #s4.sh3 raw=r7 pos="3in,2in" size="2in,1in"}
-:::
-
-::: {.notes #s4.notes}
+::: {#n6 .notes}
 Open with the churn number, it is the one they ask about.
 :::
 ````
 
-- `::: {.slide}` is the primary structural unit; `layout=` references the front-matter layout
-  catalogue, and **only deltas against the resolved layout/master/theme are serialized**.
-- `::: {.ph type=… idx=…}` for semantic placeholders; `::: {.shape …}` with explicit geometry
-  for free shapes. A shape with no Markdown representation is a **visible stub** with a `raw=`
-  reference — present so an agent knows not to delete it, cheap because the payload is in the
-  sidecar.
-- `::: {.notes}` for speaker notes.
-- `skeleton:` references the preserved non-slide package parts (architecture §9.4). Absent for
-  documents authored from scratch, in which case the writer uses the embedded default template
-  and selects a layout from the content shape.
-- Geometry is serialized in readable units (`pos`, `size` in in/cm/pt) and compared in
-  round-trip with a documented tolerance; `emu` remains the exact escape hatch (§2).
+#### The eight rules
+
+1. **A slide is an `##` heading carrying `.slide`, and the heading is the title placeholder.** No
+   container repeats it. A slide whose layout has no title placeholder, or whose title is empty,
+   writes an empty heading — `## {#n7 .slide layout=L3}` — which is ugly and bounded; the
+   alternative is a container on every slide.
+2. **The layout's primary body placeholder is implicit**: its blocks are written at slide level,
+   as ordinary Markdown.
+3. **`layouts:` declares, per layout, `name`, `master`, and which placeholder index is the `title`
+   and which is the `body`.** This is what makes rules 1 and 2 a catalogue lookup rather than a
+   guess, and it is why the IR carries those indices (`LayoutCatalog`, architecture §9.1).
+4. **Every other placeholder is `::: {.ph idx=…}`; free shapes are `::: {.shape geom=…}` and
+   connectors `::: {.connector geom=…}`**, each with its geometry and, when the original XML was
+   preserved, a `raw=` reference to the raw-block (§7) that holds it.
+5. **Speaker notes are `::: {.notes}` at `full` and `agent`, and a blockquote at `standard`.** A
+   blockquote is native CommonMark and cannot collide with slide content: PresentationML has no
+   blockquote construct for a placeholder to occupy.
+6. **`standard` writes no ids, no geometry, no raw payload, no image size, no `[]{.empty}` and no
+   layout catalogue** — nothing in the body refers to one. `standard` does not write back, and
+   that is what it buys.
+7. **Geometry is written in readable units (§2) with `emu` as the exact fallback, at `full` and
+   `agent` only.** `pos` and `size` are `"x,y"` and `"w,h"` pairs. PowerPoint stores positions an
+   author *dragged*, not typography an author chose, so a deck shows more raw `emu` than a docx
+   ever does.
+8. **A shape with no Markdown representation is a visible stub at every level, `standard`
+   included.** Charts, SmartArt, OLE and custom geometries are stubs with a `raw=` reference —
+   present so a human or an agent knows not to delete what they cannot see, cheap because the
+   payload lives in the sidecar.
+
+#### Front matter keys added by 1.2
+
+| Key | Meaning |
+|---|---|
+| `layouts:` | The layout catalogue of rule 3. Written at `full` and `agent`; absent at `standard` and `plain` |
+| `skeleton:` | The preserved non-slide package parts (architecture §9.4), as an asset reference. Absent for a document authored from scratch, in which case the writer uses the embedded default template and selects a layout from the content shape |
+
+#### Version rule and compatibility
+
+A presentation declares `docmark: "1.2"` whether or not it carries ids: the version describes the
+*profile* the body is written in, and a deck's body uses `.slide` even at `standard`. The bump
+stays additive in the direction that matters — a 1.0 or 1.1 document parses unchanged under a 1.2
+reader, and no text document or workbook changes shape because this profile exists.
+
+A 1.2 document read by a 1.0 parser loses the profile's attributes and keeps its headings, lists,
+tables and images: principle §0.1 holds, which is the whole point of the implicit form.
+
+#### Not yet implemented
+
+Charts and SmartArt have no representation of their own: both are rule-8 stubs, and turning a
+chart into data (series and categories as a table) is plan v2 Phase 16. The `.odp` reader
+(Phase 18) and the pptx writer (Phase 15) consume this profile but do not change it.

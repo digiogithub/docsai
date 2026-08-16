@@ -58,6 +58,25 @@ pub const DOCMARK_VERSION: &str = "1.0";
 /// additive: a 1.0 document parses unchanged, and ids appear on the next write.
 pub const DOCMARK_VERSION_ADDRESSED: &str = "1.1";
 
+/// Version declared by a presentation (DocMark-P, spec §11.2).
+///
+/// A deck declares it whether or not it carries ids, unlike
+/// [`DOCMARK_VERSION_ADDRESSED`]: the version names the *profile* the body is
+/// written in, and a slide is written as `## … {.slide}` at every fidelity
+/// level, ids or no ids.
+pub const DOCMARK_VERSION_PRESENTATION: &str = "1.2";
+
+/// Every specification version this build parses (spec §11).
+///
+/// The list is explicit rather than a `starts_with('1')` test: a future 1.3
+/// would otherwise be accepted silently and then read as if it were this
+/// profile, which is a worse failure than a refusal naming the version.
+pub const DOCMARK_VERSIONS: &[&str] = &[
+    DOCMARK_VERSION,
+    DOCMARK_VERSION_ADDRESSED,
+    DOCMARK_VERSION_PRESENTATION,
+];
+
 /// The three shapes a document can take.
 ///
 /// Externally tagged on purpose: an internally tagged enum makes serde buffer
