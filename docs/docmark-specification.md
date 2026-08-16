@@ -761,6 +761,22 @@ the layout, carries nothing the author wrote, and costs a container on every sli
 At `plain` there are no containers at all: a `:::` fence is literal text to a CommonMark viewer.
 What a shape *says* still reaches the reader, in slide order; the box does not.
 
+#### Speaker notes
+
+Rule 5 in full. The notes of a slide are written after its shapes, and they are the one node whose
+*syntax* depends on the level, so a parser has to read both forms.
+
+| Level | Form |
+|---|---|
+| `full`, `agent` | `::: {.notes}` … `:::`. The container carries no id: what is addressable inside it are the blocks it holds, exactly as on a slide |
+| `standard` | A CommonMark blockquote, one `> ` per line and a bare `>` for the blank lines inside it |
+| `plain` | Nothing, with a warning. A notes page is not what the slide shows |
+
+A slide with **no notes page** and a slide with an **empty** one are different documents: the first
+writes nothing, the second writes an empty `::: {.notes}` container at the levels that write back.
+At `standard` an empty notes page writes nothing at all — a lone `>` is noise in a document that
+never goes back into a package.
+
 #### Front matter keys added by 1.2
 
 | Key | Meaning |

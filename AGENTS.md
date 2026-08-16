@@ -203,9 +203,11 @@ blocks under it, decided by the catalogue and never by a heuristic. The fourth i
 other shape is a **container** — `::: {.ph idx=…}`, `::: {.shape geom=…}`, `::: {.connector …}` —
 with its geometry in readable units and `emu` as the exact fallback at `full` and `agent`, `geom=`
 and `type=` kept at `standard` because they are identity, slide furniture dropped where it is not
-written back, and no containers at all at `plain`. What is not written yet — pictures, tables,
-charts, groups and notes — warns per shape. Next is **14-E**, the notes; the pptx *writer* is
-Phase 15 — do not start it.
+written back, and no containers at all at `plain`. The fifth is done: **speaker notes** are
+`::: {.notes}` at `full` and `agent` and a **blockquote** at `standard` — the one node whose syntax
+depends on the level, which the parser will have to read both ways — and dropped with a warning at
+`plain`. What is not written yet — pictures, tables, charts and groups — warns per shape. Next is
+**14-F**, the pictures, tables and stubs; the pptx *writer* is Phase 15 — do not start it.
 
 ## 2. Documents you must read before implementing
 

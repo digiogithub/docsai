@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Speaker notes** (plan v2 Phase 14, fifth increment): a slide's notes are written after its
+  shapes as `::: {.notes}` at `--fidelity full` and `agent`, and as a **CommonMark blockquote** at
+  `standard` — the one node whose syntax depends on the level, because a blockquote is native
+  Markdown and PresentationML has no blockquote a placeholder could occupy, so the level that has
+  to stay hand-editable pays no syntax for its notes. At `plain` the notes are dropped with a
+  warning: a notes page is not what the slide shows. A slide with no notes page and a slide with an
+  empty one stay different documents — the second writes an empty container where the document
+  writes back.
+
 - **A slide's shapes become containers** (plan v2 Phase 14, fourth increment): every shape the
   layout does not make implicit is written as `::: {.ph idx=…}`, `::: {.shape geom=…}` or
   `::: {.connector …}`, holding its own content and its geometry — `pos=` and `size=` in readable

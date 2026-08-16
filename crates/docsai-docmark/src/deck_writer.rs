@@ -132,14 +132,11 @@ fn write_slide(
         write_shape(out, shape, writer, options, &location);
     }
 
-    let report = writer.report_mut();
-    if slide.notes.as_ref().is_some_and(|notes| !notes.is_empty()) {
-        report.warn(Warning::UnsupportedElement {
-            kind: "notes".into(),
-            location: location.clone(),
-            action: "skipped: speaker notes are not written yet".into(),
-        });
+    if let Some(notes) = &slide.notes {
+        write_notes(out, notes, writer, options, &location);
     }
+
+    let report = writer.report_mut();
     for raw in &slide.raw {
         report.warn(Warning::RawBlockDropped {
             id: raw.as_str().to_string(),
@@ -153,6 +150,78 @@ fn write_slide(
     writer
         .ids()
         .record(slide_id.as_deref(), NodeKind::Slide, &markdown, mark);
+}
+
+/// Writes the speaker notes of a slide (spec §11.2 rule 5).
+///
+/// The one node whose *syntax* depends on the fidelity level: a container at
+/// `full` and `agent`, a blockquote at `standard`. A blockquote is native
+/// CommonMark and cannot collide with slide content — PresentationML has no
+/// blockquote for a placeholder to occupy — so the level that has to stay
+/// hand-editable pays no syntax for its notes.
+fn write_notes(
+    out: &mut String,
+    notes: &[Block],
+    writer: &mut Writer,
+    options: &Options,
+    location: &str,
+) {
+    if options.fidelity == Fidelity::Plain {
+        if !notes.is_empty() {
+            writer.report_mut().warn(Warning::UnsupportedElement {
+                kind: "notes".into(),
+                location: location.into(),
+                action: "dropped: plain writes what the slide shows".into(),
+            });
+        }
+        return;
+    }
+
+    let body = writer.render_slide_blocks(notes);
+    if options.fidelity.addresses() {
+        // An empty notes slide is written as an empty container: the deck has
+        // one, and «has an empty notes slide» and «has none» are different
+        // things to the writer that puts the package back.
+        let mut attrs = Attrs::new();
+        attrs.class("notes");
+        let rendered = if body.trim().is_empty() {
+            format!("::: {}\n:::", attrs.render_with(writer.dict()))
+        } else {
+            format!(
+                "::: {}\n{}\n:::",
+                attrs.render_with(writer.dict()),
+                body.trim_end()
+            )
+        };
+        push_block(out, &rendered);
+        return;
+    }
+
+    // `standard`: a blockquote, and an empty notes slide leaves nothing. There
+    // is nothing to quote, and a lone `>` is noise in a document that does not
+    // write back.
+    if body.trim().is_empty() {
+        return;
+    }
+    push_block(out, &blockquote(&body));
+}
+
+/// A rendered run of blocks as a CommonMark blockquote.
+fn blockquote(body: &str) -> String {
+    body.trim_end()
+        .lines()
+        .map(|line| {
+            if line.is_empty() {
+                // `>` alone, with no trailing space: a blank line inside a
+                // blockquote still belongs to it, and trailing spaces do not
+                // survive a round trip.
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Writes one shape that the layout does not make implicit (spec §11.2 rule 4).

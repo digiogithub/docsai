@@ -78,4 +78,5 @@ no shape.
 ## Next
 
 **14-E — notes**: `::: {.notes}` at `full`/`agent` and a **blockquote** at `standard`, the one node
-whose syntax differs between levels, which the parser of 14-H must read both ways.
+whose syntax differs between levels, which the parser of 14-H must read both ways. Done, in
+[[51-phase-14-notes]].

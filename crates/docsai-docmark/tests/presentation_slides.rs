@@ -7,6 +7,7 @@
 
 use docsai_docmark::{serialize, Fidelity, Options};
 use docsai_model::addressing::IdPolicy;
+use docsai_model::image::RawId;
 use docsai_model::presentation::{
     Layout, LayoutId, LayoutPlaceholder, MasterId, PhType, Placeholder, Presentation, Shape,
     ShapeKind, Slide,
@@ -348,7 +349,9 @@ fn what_is_not_written_yet_is_warned_not_dropped() {
         Some(2),
         vec![Block::Paragraph(Paragraph::text("segundo cuerpo"))],
     ));
-    presentation.slides[0].notes = Some(vec![Block::Paragraph(Paragraph::text("hablar despacio"))]);
+    // `p:transition` and `p:timing`: slide-level subtrees the IR keeps in the
+    // sidecar and the serializer has nowhere to put.
+    presentation.slides[0].raw = vec![RawId::new("raw-0007")];
     let store = MemoryAssetStore::new();
     let (markdown, report) = serialize(
         &Document::Presentation(presentation),
@@ -356,18 +359,15 @@ fn what_is_not_written_yet_is_warned_not_dropped() {
         &options(Fidelity::Full),
     );
 
-    // The second body is a `.ph` container now; the notes are not written yet.
     assert!(markdown.contains("::: {#n3 .ph idx=2}"), "{markdown}");
-    assert!(!markdown.contains("hablar despacio"), "{markdown}");
-    let kinds: Vec<&str> = report
-        .warnings
-        .iter()
-        .filter_map(|w| match w {
-            Warning::UnsupportedElement { kind, .. } => Some(kind.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert!(kinds.contains(&"notes"), "{kinds:?}");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::RawBlockDropped { id, .. } if id == "raw-0007")),
+        "{:?}",
+        report.warnings
+    );
 }
 
 #[test]
