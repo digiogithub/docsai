@@ -733,6 +733,34 @@ The heading of rule 1 carries everything the slide itself knows. Nothing else is
 A title placeholder holding more than one paragraph is joined into the one heading line, with a
 warning: the text survives, the paragraph break does not.
 
+#### Shape container attributes
+
+Rule 4's containers — `.ph`, `.shape`, `.connector` — carry what the shape knows. A container's
+body is the shape's content: blocks for a placeholder or a text box, the shape's own label for a
+preset shape. An empty shape is written as an empty container, because a box with nothing in it is
+still a box the author placed.
+
+| Attribute | Meaning | Levels |
+|---|---|---|
+| `#id` | The shape's address (§11.1) | `full`, `agent` |
+| `.ph` / `.shape` / `.connector` | What the container is: a placeholder the layout does not make implicit, a free shape or a text box, a connector | every level but `plain` |
+| `idx=` | `p:ph@idx`, which is what matches the shape to its layout placeholder. Only the levels that write back need it | `full`, `agent` |
+| `type=` | `p:ph@type`, when it is not `body` — the PresentationML default. A footer and a chart slot are not the same box, and that is what a *reader* needs | every level but `plain` |
+| `geom=` | `a:prstGeom@prst`. Identity, not measurement: it is the only thing that says a box is an arrow, so it survives where `pos=` does not | every level but `plain` |
+| `name=` | `p:cNvPr@name`, what the selection pane shows | `full`, `agent` |
+| `pos=` / `size=` | `"x,y"` and `"w,h"` in the units of rule 7 | `full`, `agent` |
+| `rotation=` / `flip=` | `a:xfrm@rot` in degrees, and `h` / `v` / `hv` | `full`, `agent` |
+| `raw=` | The raw-block (§7) holding the original markup | `full`, `agent` |
+
+Two consequences of rule 6 are worth stating, because both are losses and both are warned. At
+`standard` a stub keeps its container and loses the `raw=` reference: the reader still knows the
+shape is there, and the bytes are not in the document. And **slide furniture** — the slide-number,
+date, footer and header placeholders — is written only at `full` and `agent`: it is inherited from
+the layout, carries nothing the author wrote, and costs a container on every slide.
+
+At `plain` there are no containers at all: a `:::` fence is literal text to a CommonMark viewer.
+What a shape *says* still reaches the reader, in slide order; the box does not.
+
 #### Front matter keys added by 1.2
 
 | Key | Meaning |

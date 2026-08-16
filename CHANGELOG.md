@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A slide's shapes become containers** (plan v2 Phase 14, fourth increment): every shape the
+  layout does not make implicit is written as `::: {.ph idx=…}`, `::: {.shape geom=…}` or
+  `::: {.connector …}`, holding its own content and its geometry — `pos=` and `size=` in readable
+  units with `emu` as the exact fallback, plus `rotation=`, `flip=`, `name=` and the `raw=`
+  reference to the sidecar — at `full` and `agent`. `standard` keeps the container, its `geom=` and
+  its `type=`, because those say what the box *is*, and drops every measurement, index and raw
+  reference; the dropped payload is a warning, not a silence. Slide furniture — slide numbers,
+  dates, footers and headers — is written only where the document writes back: it is inherited from
+  the layout and costs a container on every slide. At `--fidelity plain` there are no containers at
+  all, and what a shape says still reaches the reader. A selection of a deck now declares
+  `docmark: "1.2"` as well, since its body is written in the presentation profile.
+
 - **A deck writes its slides** (plan v2 Phase 14, third increment): every slide is an `##` heading
   carrying `.slide`, and the heading **is** the title placeholder — no container repeats it — while
   the layout's primary body placeholder is written as ordinary Markdown under it. Which shape is

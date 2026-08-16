@@ -137,6 +137,17 @@ impl<'a> Writer<'a> {
         self.report
     }
 
+    /// The attribute-set dictionary, for the containers `deck_writer` renders.
+    pub(crate) fn dict(&self) -> &AttrDict {
+        self.dict
+    }
+
+    /// A drawing length — a shape's position or size — in the unit spec §2
+    /// gives drawings, with `emu` as the exact fallback.
+    pub(crate) fn drawing_length(&self, value: Length) -> String {
+        self.geometry(value)
+    }
+
     /// Renders a run of blocks at slide level: the layout's primary body
     /// placeholder, written as ordinary Markdown (spec §11.2 rule 2).
     pub(crate) fn render_slide_blocks(&mut self, blocks: &[Block]) -> String {

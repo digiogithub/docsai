@@ -199,9 +199,13 @@ matter** — the 1.2 version, the layout catalogue with the title and body place
 the `skeleton:` path — at `full` and `agent`, and neither catalogue nor skeleton at `standard`.
 The third is done: a deck **writes its slides** — an `##` heading per slide carrying `.slide`, the
 title placeholder consumed by that heading, and the layout's primary body written as ordinary
-blocks under it, decided by the catalogue and never by a heuristic. What is not written yet — the
-other placeholders, free shapes, pictures, tables, notes — warns per shape. Next is **14-D**, the
-containers; the pptx *writer* is Phase 15 — do not start it.
+blocks under it, decided by the catalogue and never by a heuristic. The fourth is done: every
+other shape is a **container** — `::: {.ph idx=…}`, `::: {.shape geom=…}`, `::: {.connector …}` —
+with its geometry in readable units and `emu` as the exact fallback at `full` and `agent`, `geom=`
+and `type=` kept at `standard` because they are identity, slide furniture dropped where it is not
+written back, and no containers at all at `plain`. What is not written yet — pictures, tables,
+charts, groups and notes — warns per shape. Next is **14-E**, the notes; the pptx *writer* is
+Phase 15 — do not start it.
 
 ## 2. Documents you must read before implementing
 

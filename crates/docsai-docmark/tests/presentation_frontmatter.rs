@@ -167,3 +167,23 @@ fn the_front_matter_is_byte_deterministic() {
     let twice = serialize(&doc, &store, &options(Fidelity::Full)).0;
     assert_eq!(once, twice, "spec §8");
 }
+
+#[test]
+fn a_selection_of_a_deck_declares_the_presentation_profile() {
+    // A selection's body carries `.slide` and shape containers, and the
+    // version names the *profile* the body is written in, not whether it has
+    // ids (spec §11.2, version rule). A selection of a text document is
+    // unchanged.
+    let deck = docsai_docmark::selection_front_matter(&options(Fidelity::Full), 7, &[]);
+    assert!(deck.contains("docmark: \"1.2\""), "{deck}");
+
+    let text = docsai_docmark::selection_front_matter(
+        &Options {
+            source_format: Format::Docx,
+            ..options(Fidelity::Full)
+        },
+        7,
+        &[],
+    );
+    assert!(text.contains("docmark: \"1.1\""), "{text}");
+}

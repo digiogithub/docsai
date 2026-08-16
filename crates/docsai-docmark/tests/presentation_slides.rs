@@ -1,8 +1,9 @@
 //! The body of a deck: the slide heading and the implicit body placeholder
 //! (spec §11.2 rules 1–3, plan v2 Phase 14 increment C).
 //!
-//! Containers — the other placeholders, free shapes, notes — arrive in the
-//! increments after this one; what they do here is warn.
+//! The containers those rules leave over live in `presentation_shapes.rs`;
+//! notes, pictures and tables arrive in the increments after this one, and
+//! what they do here is warn.
 
 use docsai_docmark::{serialize, Fidelity, Options};
 use docsai_model::addressing::IdPolicy;
@@ -268,12 +269,13 @@ fn the_layout_decides_which_body_is_implicit() {
         &options(Fidelity::Full),
     );
 
-    assert!(body_of(&markdown).contains("derecha"), "{markdown}");
-    // The other one is not written yet — and says so.
-    assert!(!markdown.contains("izquierda"), "{markdown}");
-    assert!(report.warnings.iter().any(
-        |w| matches!(w, Warning::UnsupportedElement { kind, .. } if kind == "placeholder body")
-    ));
+    // The implicit one is bare Markdown; the other is a container, not a loss.
+    assert!(body_of(&markdown).contains("\nderecha\n"), "{markdown}");
+    assert!(
+        body_of(&markdown).contains("::: {#n2 .ph idx=1}\nizquierda\n:::"),
+        "{markdown}"
+    );
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }
 
 #[test]
@@ -337,7 +339,7 @@ fn several_slides_are_separated_by_a_blank_line() {
 }
 
 #[test]
-fn what_this_increment_does_not_write_is_warned_not_dropped() {
+fn what_is_not_written_yet_is_warned_not_dropped() {
     let Document::Presentation(mut presentation) = deck() else {
         unreachable!()
     };
@@ -354,7 +356,8 @@ fn what_this_increment_does_not_write_is_warned_not_dropped() {
         &options(Fidelity::Full),
     );
 
-    assert!(!markdown.contains("segundo cuerpo"), "{markdown}");
+    // The second body is a `.ph` container now; the notes are not written yet.
+    assert!(markdown.contains("::: {#n3 .ph idx=2}"), "{markdown}");
     assert!(!markdown.contains("hablar despacio"), "{markdown}");
     let kinds: Vec<&str> = report
         .warnings
@@ -364,7 +367,6 @@ fn what_this_increment_does_not_write_is_warned_not_dropped() {
             _ => None,
         })
         .collect();
-    assert!(kinds.contains(&"placeholder body"), "{kinds:?}");
     assert!(kinds.contains(&"notes"), "{kinds:?}");
 }
 

@@ -6,19 +6,27 @@
 //! lookup is [`implicit_shapes`] — the same function the addressing walk asks,
 //! so what is implicit here and what is addressable there cannot disagree.
 //!
-//! Everything a slide holds beyond those two shapes — the other placeholders,
-//! free shapes, connectors, pictures, tables, notes — is written by the
-//! increments after this one. Until then each of them is a warning, never a
-//! silent omission (`AGENTS.md` §7 rule 3).
+//! Every *other* shape is a container — `::: {.ph idx=…}` for a placeholder,
+//! `::: {.shape geom=…}` for a free shape, `::: {.connector …}` for a
+//! connector — because Markdown has no shape and the alternative is losing
+//! where the author put things (spec §11.2 rule 4).
+//!
+//! What a slide holds beyond that — pictures, tables, charts, groups, notes —
+//! is written by the increments after this one. Until then each of them is a
+//! warning, never a silent omission (`AGENTS.md` §7 rule 3).
 
 use docsai_model::addressing::{implicit_shapes, NodeKind};
 use docsai_model::assets::AssetStore;
-use docsai_model::presentation::{Presentation, Shape, ShapeKind, Slide};
+use docsai_model::image::Flip;
+use docsai_model::presentation::{PhType, Presentation, RawShapeKind, Shape, ShapeKind, Slide};
 use docsai_model::report::{ConversionReport, Warning};
+use docsai_model::text::Block;
 
 use crate::attrs::Attrs;
 use crate::dict::AttrDict;
+use crate::escape::{escape, TextContext};
 use crate::ids::IdSource;
+use crate::units::number;
 use crate::writer::Writer;
 use crate::{Fidelity, Options};
 
@@ -117,17 +125,14 @@ fn write_slide(
         push_block(out, &rendered);
     }
 
-    let report = writer.report_mut();
     for (i, shape) in slide.shapes.iter().enumerate() {
         if implicit.contains(&i) {
             continue;
         }
-        report.warn(Warning::UnsupportedElement {
-            kind: shape_kind(shape),
-            location: location.clone(),
-            action: "skipped: shape containers are not written yet".into(),
-        });
+        write_shape(out, shape, writer, options, &location);
     }
+
+    let report = writer.report_mut();
     if slide.notes.as_ref().is_some_and(|notes| !notes.is_empty()) {
         report.warn(Warning::UnsupportedElement {
             kind: "notes".into(),
@@ -148,6 +153,181 @@ fn write_slide(
     writer
         .ids()
         .record(slide_id.as_deref(), NodeKind::Slide, &markdown, mark);
+}
+
+/// Writes one shape that the layout does not make implicit (spec §11.2 rule 4).
+///
+/// A placeholder becomes `.ph`, a text box or a preset shape `.shape`, a
+/// connector `.connector`; what has no container yet is a warning.
+fn write_shape(
+    out: &mut String,
+    shape: &Shape,
+    writer: &mut Writer,
+    options: &Options,
+    location: &str,
+) {
+    let plain = options.fidelity == Fidelity::Plain;
+    // Geometry, indices, names and raw references are what the writing levels
+    // put back and the reading levels do not need (rules 6 and 7).
+    let addresses = options.fidelity.addresses();
+
+    // What the container is, what it holds, and the raw fragment behind it.
+    let class;
+    let mut blocks: &[Block] = &[];
+    let mut label = "";
+    let mut raw = None;
+    match &shape.kind {
+        ShapeKind::Placeholder(ph) => {
+            if ph.ph_type.is_furniture() && !addresses {
+                // A slide number, a date or a footer is inherited from the
+                // layout and holds no authored content; a reader gains a box
+                // per slide and loses nothing when it goes.
+                writer.report_mut().warn(Warning::UnsupportedElement {
+                    kind: shape_kind(shape),
+                    location: location.into(),
+                    action: "dropped: slide furniture is inherited from the layout".into(),
+                });
+                return;
+            }
+            class = "ph";
+            blocks = &ph.body;
+        }
+        ShapeKind::TextBox { body } => {
+            class = "shape";
+            blocks = body;
+        }
+        ShapeKind::Raw(shape_raw)
+            if matches!(
+                shape_raw.kind,
+                RawShapeKind::Shape | RawShapeKind::Connector
+            ) =>
+        {
+            class = shape_raw.kind.as_str();
+            label = shape_raw.text.as_str();
+            raw = shape_raw.raw.as_ref();
+        }
+        _ => {
+            writer.report_mut().warn(Warning::UnsupportedElement {
+                kind: shape_kind(shape),
+                location: location.into(),
+                action: "skipped: not written yet".into(),
+            });
+            return;
+        }
+    }
+
+    if plain {
+        // No containers at `plain`: a slide is heading, bullets and images.
+        // The text a shape holds still reaches the reader — only the box does
+        // not.
+        let body = writer.render_slide_blocks(blocks);
+        push_block(out, &body);
+        if !label.is_empty() {
+            push_block(out, &escape(label, TextContext::Block));
+        }
+        if blocks.is_empty() && label.is_empty() {
+            writer.report_mut().warn(Warning::UnsupportedElement {
+                kind: shape_kind(shape),
+                location: location.into(),
+                action: "dropped: plain writes no shape containers".into(),
+            });
+        }
+        return;
+    }
+
+    let mark = writer.ids().mark();
+    let mut attrs = Attrs::new();
+    // The id comes before the body, which is the order the addressing walk
+    // visits them in: a shape, then what it holds.
+    let id = writer.ids().take(shape);
+    if let Some(id) = id.clone() {
+        attrs.id(id);
+    }
+    attrs.class(class);
+
+    if let Some(ph) = shape.placeholder() {
+        // `p:ph@idx` is what matches this shape to its layout placeholder, so
+        // it is only useful to the levels that write back. The type is what a
+        // *reader* needs — a footer and a chart slot are not the same box —
+        // and `body` is the PresentationML default, so it stays unwritten.
+        if addresses {
+            attrs.set_opt("idx", ph.idx.map(|idx| idx.to_string()));
+        }
+        if ph.ph_type != PhType::Body {
+            attrs.set("type", ph.ph_type.as_str());
+        }
+    }
+
+    let geometry = &shape.geometry;
+    if let Some(preset) = &geometry.preset {
+        // `geom=` is identity, not measurement: it is the only thing that says
+        // a box is an arrow, so it survives at `standard` where `pos=` does
+        // not.
+        attrs.set("geom", preset.as_str());
+    }
+    if addresses {
+        attrs.set_opt("name", shape.name.clone());
+        if let Some(pos) = geometry.pos {
+            attrs.set(
+                "pos",
+                format!(
+                    "{},{}",
+                    writer.drawing_length(pos.x),
+                    writer.drawing_length(pos.y)
+                ),
+            );
+        }
+        if let Some(size) = geometry.size {
+            attrs.set(
+                "size",
+                format!(
+                    "{},{}",
+                    writer.drawing_length(size.width),
+                    writer.drawing_length(size.height)
+                ),
+            );
+        }
+        if geometry.rotation_deg != 0.0 {
+            attrs.set("rotation", number(geometry.rotation_deg));
+        }
+        if geometry.flip != Flip::None {
+            attrs.set("flip", geometry.flip.as_str());
+        }
+    }
+
+    if let Some(raw_id) = raw {
+        if addresses {
+            attrs.set("raw", raw_id.as_str());
+        } else {
+            // The stub stays — rule 8 keeps it at every level — but the bytes
+            // it points at are not in this document.
+            writer.report_mut().warn(Warning::RawBlockDropped {
+                id: raw_id.as_str().to_string(),
+                format: "pml".into(),
+            });
+        }
+    }
+
+    let mut body = writer.render_slide_blocks(blocks);
+    if !label.is_empty() {
+        // The text a preset shape shows. A stub that swallows an arrow's
+        // label is a silent loss.
+        body = escape(label, TextContext::Block);
+    }
+
+    let rendered = if body.trim().is_empty() {
+        format!("::: {}\n:::", attrs.render_with(writer.dict()))
+    } else {
+        format!(
+            "::: {}\n{}\n:::",
+            attrs.render_with(writer.dict()),
+            body.trim_end()
+        )
+    };
+    writer
+        .ids()
+        .record(id.as_deref(), NodeKind::Shape, &rendered, mark);
+    push_block(out, &rendered);
 }
 
 /// Appends a rendered block, blank-line separated.

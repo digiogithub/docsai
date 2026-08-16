@@ -116,7 +116,15 @@ pub fn write(
 pub fn selection_front_matter(options: &Options, next_id: u64, etags: &[(NodeId, Etag)]) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    scalar(&mut out, "docmark", &quoted(DOCMARK_VERSION_ADDRESSED));
+    // A selection of a deck is written in the presentation profile — its body
+    // carries `.slide` and shape containers — and the version names the
+    // profile, not the ids (spec §11.2, version rule).
+    let version = if options.source_format.is_presentation() {
+        DOCMARK_VERSION_PRESENTATION
+    } else {
+        DOCMARK_VERSION_ADDRESSED
+    };
+    scalar(&mut out, "docmark", &quoted(version));
     scalar(&mut out, "source-format", options.source_format.as_str());
     if options.fidelity == Fidelity::Agent {
         scalar(&mut out, "fidelity", "agent");
