@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A deck writes its front matter** (plan v2 Phase 14, second increment): a presentation
+  serialises `docmark: "1.2"` — the version names the *profile*, not the addressing, so a deck
+  declares it with or without node ids — plus `layouts:` and `skeleton:` at the levels that write
+  back. Each layout entry says its name, its master and **which placeholder index is the title and
+  which is the body**, which is what turns the implicit heading and the implicit body of the
+  profile into a catalogue lookup instead of a guess. `skeleton:` is a path
+  (`assets/_skeleton/deck-<hash>.pptx`), not an asset id, for the same reason an image is a path.
+  At `--fidelity standard` neither appears: it does not write back, and a catalogue nothing in the
+  body refers to is pure cost to whoever reads it. The body of a deck is still empty — the slide
+  writer is the next increment.
+
 - **DocMark 1.2, the presentation profile, is specified** (plan v2 Phase 14, first increment):
   `docs/docmark-specification.md` §11.2 stops being a sketch and becomes normative — eight rules,
   the front-matter keys a deck adds (`layouts:`, `skeleton:`), the version rule and the

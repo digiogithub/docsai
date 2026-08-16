@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 
 use docsai_model::addressing::Addressing;
 use docsai_model::list::{ListCatalog, ListDef, ListId, ListLevel, NumFormat};
+use docsai_model::presentation::{
+    Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, MasterId, PhType,
+};
 use docsai_model::sheet::DefinedName;
 use docsai_model::style::{
     Align, DocDefaults, FontProps, LineHeight, ParaProps, Style, StyleCatalog, StyleId, StyleType,
@@ -33,6 +36,14 @@ pub struct FrontMatter {
     /// attribute block in the body is expanded through it before anything
     /// reads it, so the rest of the parser never learns that it exists.
     pub attr_sets: BTreeMap<String, Attrs>,
+    /// The deck's layout catalogue (spec §11.2, rule 3). Empty for anything
+    /// that is not a presentation, and for a deck written at `standard`, which
+    /// carries no catalogue and no reference to one.
+    pub layouts: LayoutCatalog,
+    /// `skeleton:` as written — a path relative to the DocMark file. Kept as
+    /// text because turning it into a [`docsai_model::presentation::SkeletonRef`]
+    /// needs the asset store, which the body parser owns.
+    pub skeleton: Option<String>,
 }
 
 impl Default for FrontMatter {
@@ -47,6 +58,8 @@ impl Default for FrontMatter {
             defined_names: Vec::new(),
             addressing: Addressing::default(),
             attr_sets: BTreeMap::new(),
+            layouts: LayoutCatalog::default(),
+            skeleton: None,
         }
     }
 }
@@ -139,6 +152,16 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
             }
         }
     }
+    if let Some(layouts) = map.get("layouts").and_then(|v| v.as_map()) {
+        for (id, value) in layouts {
+            fm.layouts
+                .layouts
+                .insert(LayoutId::new(id.clone()), read_layout(value));
+        }
+    }
+    if let Some(path) = map.get("skeleton").and_then(|v| v.as_str()) {
+        fm.skeleton = Some(path.to_string());
+    }
     if let Some(wb) = map.get("workbook").and_then(|v| v.as_map()) {
         if let Some(active) = wb.get("active-sheet").and_then(|v| v.as_str()) {
             fm.active_sheet = Some(active.to_string());
@@ -157,6 +180,53 @@ pub fn parse(text: &str, start_line: usize) -> Result<FrontMatter, ParseError> {
     }
 
     Ok(fm)
+}
+
+/// One `layouts:` entry (spec §11.2, rule 3).
+///
+/// `title:` and `body:` are `p:ph@idx` values, so they come back as
+/// placeholders of the right type rather than as two loose numbers: everything
+/// downstream — the implicit heading, the implicit body — asks the layout, and
+/// a catalogue that answered differently depending on where it came from would
+/// be a second source of truth.
+fn read_layout(value: &Value) -> Layout {
+    let map = match value.as_map() {
+        Some(map) => map,
+        None => return Layout::default(),
+    };
+    let mut layout = Layout {
+        name: map
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        master: map
+            .get("master")
+            .and_then(|v| v.as_str())
+            .map(MasterId::new),
+        placeholders: Vec::new(),
+    };
+    let idx = |key: &str| {
+        map.get(key)
+            .and_then(|v| v.as_f64())
+            .filter(|n| n.is_finite() && *n >= 0.0)
+            .map(|n| n as u32)
+    };
+    if let Some(title) = idx("title") {
+        layout.placeholders.push(LayoutPlaceholder {
+            ph_type: PhType::Title,
+            idx: Some(title),
+            ..Default::default()
+        });
+    }
+    if let Some(body) = idx("body") {
+        layout.placeholders.push(LayoutPlaceholder {
+            ph_type: PhType::Body,
+            idx: Some(body),
+            ..Default::default()
+        });
+    }
+    layout
 }
 
 fn read_meta(map: &BTreeMap<String, Value>) -> DocumentMeta {
@@ -460,6 +530,7 @@ fn parse_underline(value: &str) -> Underline {
 #[cfg(test)]
 mod tests {
     use super::parse;
+    use docsai_model::presentation::LayoutId;
 
     fn version_of(version: &str) -> Result<(), String> {
         let text = format!("docmark: \"{version}\"\nsource-format: pptx\n");
@@ -485,6 +556,56 @@ mod tests {
             "{error}"
         );
         assert!(version_of("2.0").is_err());
+    }
+
+    #[test]
+    fn the_layout_catalogue_comes_back_as_placeholders() {
+        // The catalogue is read the way the rest of the code asks it a
+        // question: `layout.title()`, not `entry["title"]`.
+        let text = concat!(
+            "docmark: \"1.2\"\n",
+            "source-format: pptx\n",
+            "layouts:\n",
+            "  L1: { name: \"Title and Content\", master: M1, title: 0, body: 1 }\n",
+            "  L2: { name: \"Blank\" }\n",
+        );
+        let fm = parse(text, 1).expect("a deck front matter");
+
+        let l1 = fm.layouts.layout(&LayoutId::new("L1")).expect("L1");
+        assert_eq!(l1.name, "Title and Content");
+        assert_eq!(l1.master.as_ref().map(|m| m.as_str()), Some("M1"));
+        assert_eq!(l1.title().and_then(|p| p.idx), Some(0));
+        assert_eq!(l1.body().and_then(|p| p.idx), Some(1));
+
+        // A layout with neither is legal: a blank layout has no placeholder
+        // for the heading to stand for, and rule 1 degrades to an empty one.
+        let l2 = fm.layouts.layout(&LayoutId::new("L2")).expect("L2");
+        assert!(l2.title().is_none() && l2.body().is_none());
+    }
+
+    #[test]
+    fn the_skeleton_is_read_as_a_path() {
+        let text = concat!(
+            "docmark: \"1.2\"\n",
+            "source-format: pptx\n",
+            "skeleton: assets/_skeleton/deck-9f3a21c8.pptx\n",
+        );
+        let fm = parse(text, 1).expect("a deck front matter");
+        // Text, not an asset id: resolving it needs the store, which belongs
+        // to the body parser (14-H).
+        assert_eq!(
+            fm.skeleton.as_deref(),
+            Some("assets/_skeleton/deck-9f3a21c8.pptx")
+        );
+    }
+
+    #[test]
+    fn a_document_with_no_layouts_carries_an_empty_catalogue() {
+        // Every text document and every workbook takes this path, and a deck
+        // written at `standard` does too.
+        let fm = parse("docmark: \"1.0\"\nsource-format: docx\n", 1).expect("front matter");
+        assert!(fm.layouts.is_empty());
+        assert!(fm.skeleton.is_none());
     }
 
     #[test]

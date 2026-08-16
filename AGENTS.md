@@ -194,8 +194,11 @@ Current work is **Phase 14**: the DocMark-P serializer and parser (plan `kb/46-p
 Its first increment is done — `docs/docmark-specification.md` §11.2 is now **normative** DocMark
 1.2: the eight rules spike P2 measured, the `layouts:` and `skeleton:` front-matter keys, and the
 version rule (a deck declares `1.2` with or without ids). The parser accepts exactly `1.0`, `1.1`
-and `1.2` and refuses anything else by name. **Nothing serialises a presentation yet**; that is
-increment 14-B onwards, and the pptx *writer* is Phase 15 — do not start it.
+and `1.2` and refuses anything else by name. The second is done too: a deck **writes its front
+matter** — the 1.2 version, the layout catalogue with the title and body placeholder indices, and
+the `skeleton:` path — at `full` and `agent`, and neither catalogue nor skeleton at `standard`.
+**The body of a deck is still empty**; the slide writer is 14-C, and the pptx *writer* is Phase 15
+— do not start it.
 
 ## 2. Documents you must read before implementing
 

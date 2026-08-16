@@ -5,12 +5,16 @@
 //! keeps a YAML serializer out of the dependency tree.
 
 use docsai_model::addressing::{for_each_addressable, Etag, NodeId};
+use docsai_model::assets::AssetId;
 use docsai_model::list::{ListCatalog, NumFormat};
+use docsai_model::presentation::{LayoutCatalog, SkeletonRef};
 use docsai_model::sheet::Workbook;
 use docsai_model::style::{DocDefaults, FontProps, ParaProps, Style, StyleCatalog, Underline};
 use docsai_model::text::{DocumentMeta, PageGeometry};
 use docsai_model::units::Length;
-use docsai_model::{Document, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED};
+use docsai_model::{
+    Document, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED, DOCMARK_VERSION_PRESENTATION,
+};
 
 use crate::dict::AttrDict;
 use crate::units::{len, pt};
@@ -35,9 +39,13 @@ pub fn write(
     }
 
     out.push_str("---\n");
-    let version = match next_id {
-        Some(_) => DOCMARK_VERSION_ADDRESSED,
-        None => DOCMARK_VERSION,
+    let version = match (doc, next_id) {
+        // A deck declares the presentation profile whether or not it carries
+        // ids: its body is written as `## … {.slide}` at every level, so a
+        // version chosen by the ids alone would misdescribe it (spec §11.2).
+        (Document::Presentation(_), _) => DOCMARK_VERSION_PRESENTATION,
+        (_, Some(_)) => DOCMARK_VERSION_ADDRESSED,
+        (_, None) => DOCMARK_VERSION,
     };
     scalar(out, "docmark", &quoted(version));
     scalar(out, "source-format", options.source_format.as_str());
@@ -76,10 +84,18 @@ pub fn write(
                 write_styles(out, &book.styles, options.precision);
             }
         }
-        // DocMark-P (spec §11.2) is Phase 14: a presentation carries no front
-        // matter of its own yet, and the body writer says so with a warning
-        // rather than emitting half a profile.
-        Document::Presentation(_) => {}
+        Document::Presentation(deck) => {
+            // Rule 6 (spec §11.2): the levels that write back carry the
+            // catalogue and the skeleton; `standard` carries neither, and
+            // nothing in its body refers to one.
+            if fidelity.addresses() {
+                write_layouts(out, &deck.layouts);
+                write_skeleton(out, deck.skeleton.as_ref(), &options.assets_dir);
+            }
+            if fidelity == Fidelity::Full {
+                write_styles(out, &deck.styles, options.precision);
+            }
+        }
     }
     write_attr_sets(out, dict);
 
@@ -249,6 +265,76 @@ fn write_workbook(out: &mut String, book: &Workbook) {
             ));
         }
     }
+}
+
+/// The layout catalogue of a deck (spec §11.2, rule 3).
+///
+/// One flow mapping per layout, because the entry is four scalars and a block
+/// mapping would triple the front matter of a deck that has a layout per slide.
+/// `title` and `body` are what make the implicit form a lookup instead of a
+/// guess: they name the placeholder the heading stands for and the one whose
+/// blocks are written at slide level.
+fn write_layouts(out: &mut String, catalog: &LayoutCatalog) {
+    if catalog.layouts.is_empty() {
+        return;
+    }
+    out.push_str("layouts:\n");
+    for (id, layout) in &catalog.layouts {
+        let mut parts = vec![format!("name: {}", quoted(&layout.name))];
+        if let Some(master) = &layout.master {
+            parts.push(format!("master: {}", yaml_key(master.as_str())));
+        }
+        // `p:ph@idx` with PresentationML's own default: a title placeholder
+        // carries no `idx` and is index 0. Writing the position in the
+        // placeholder list instead would be a second numbering scheme that
+        // agrees with the first only by accident.
+        if let Some(title) = layout.title() {
+            parts.push(format!("title: {}", title.idx.unwrap_or(0)));
+        }
+        if let Some(body) = layout.body() {
+            parts.push(format!("body: {}", body.idx.unwrap_or(0)));
+        }
+        out.push_str(&format!(
+            "  {}: {{ {} }}\n",
+            yaml_key(id.as_str()),
+            parts.join(", ")
+        ));
+    }
+}
+
+/// `skeleton:` — where the preserved package is (spec §11.2, architecture §9.4).
+///
+/// A path, not an asset id, for the same reason an image is a path: the
+/// document has to be readable and re-openable on its own. Absent when the deck
+/// has no skeleton, which is what a deck authored from scratch looks like.
+fn write_skeleton(out: &mut String, skeleton: Option<&SkeletonRef>, assets_dir: &str) {
+    if let Some(skeleton) = skeleton {
+        scalar(out, "skeleton", &skeleton_path(assets_dir, &skeleton.asset));
+    }
+}
+
+/// Where the preserved package's bytes go, relative to the DocMark file.
+///
+/// Public because the naming is shared the way [`crate::raw::sidecar_path`] is:
+/// the serializer writes the reference and the caller writes the file, and a
+/// disagreement between them would leave a deck pointing at a package nobody
+/// wrote. The extension is the profile's format rather than the original file's
+/// — a `.pptm` reads as its macro-free equivalent (Phase 13-J), so the byte
+/// stream behind the reference is a presentation package either way.
+pub fn skeleton_path(assets_dir: &str, asset: &AssetId) -> String {
+    let dir = assets_dir.trim_end_matches('/');
+    let hash: String = asset
+        .as_str()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    let hash = if hash.is_empty() {
+        "package".to_string()
+    } else {
+        hash
+    };
+    format!("{dir}/_skeleton/deck-{hash}.pptx")
 }
 
 fn write_styles(out: &mut String, catalog: &StyleCatalog, precision: u8) {
