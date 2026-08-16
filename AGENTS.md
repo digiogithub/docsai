@@ -206,8 +206,13 @@ and `type=` kept at `standard` because they are identity, slide furniture droppe
 written back, and no containers at all at `plain`. The fifth is done: **speaker notes** are
 `::: {.notes}` at `full` and `agent` and a **blockquote** at `standard` — the one node whose syntax
 depends on the level, which the parser will have to read both ways — and dropped with a warning at
-`plain`. What is not written yet — pictures, tables, charts and groups — warns per shape. Next is
-**14-F**, the pictures, tables and stubs; the pptx *writer* is Phase 15 — do not start it.
+`plain`. The sixth is done: **pictures, tables, groups and stubs** — a picture is an image line and
+a table a GFM table, both carrying their *shape's* id and placement; a group is `::: {.group}`
+around children that keep their own addresses; a chart, SmartArt, an OLE object, a media clip or a
+custom geometry is a stub of its own class over the sidecar. An image on a slide carries no
+measurements at `standard`, where a text document keeps them. Every kind of shape is now written.
+Next is **14-G**, `plain` and the residue probe as a repository test; the pptx *writer* is Phase 15
+— do not start it.
 
 ## 2. Documents you must read before implementing
 

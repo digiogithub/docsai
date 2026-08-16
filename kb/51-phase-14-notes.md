@@ -71,4 +71,4 @@ blockquote where a human has to read it.
 
 **14-F — pictures, tables and the shape stub**: wiring the existing image and table writers into a
 slide, with no image geometry at `standard`, and SmartArt, OLE, charts and custom geometry as
-visible stubs over the Phase 13 sidecar ([[43-phase-13-raw]]).
+visible stubs over the Phase 13 sidecar ([[43-phase-13-raw]]). Done, in [[52-phase-14-objects]].

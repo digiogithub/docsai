@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pictures, tables, groups and object stubs on a slide** (plan v2 Phase 14, sixth increment): a
+  picture is written as an image line and a table as a GFM table — Markdown has both, so neither
+  gets a container — each carrying its *shape's* id, name and position, with the picture's size
+  left to the image's own `width=`/`height=` so no measurement is written twice. A group is
+  `::: {.group}` around children that keep their own addresses, because a group is a box around
+  shapes and not a substitute for them. Everything else Markdown has no form for is a stub of its
+  own class — `.chart` (with `kind=` and, when the IR names it, `data=` for the embedded
+  workbook), `.smartart`, `.ole`, `.media`, `.object` — holding the text the object shows and the
+  `raw=` reference to the sidecar. An image on a slide carries **no measurements at `standard`**,
+  where a plain viewer draws it at its own size regardless; the same image in a text document keeps
+  them, because the rule is a property of the document class and not of the level. A table with no
+  rows is warned rather than written as a header rule over nothing.
+
 - **Speaker notes** (plan v2 Phase 14, fifth increment): a slide's notes are written after its
   shapes as `::: {.notes}` at `--fidelity full` and `agent`, and as a **CommonMark blockquote** at
   `standard` — the one node whose syntax depends on the level, because a blockquote is native

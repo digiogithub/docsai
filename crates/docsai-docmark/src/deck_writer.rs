@@ -11,16 +11,19 @@
 //! connector — because Markdown has no shape and the alternative is losing
 //! where the author put things (spec §11.2 rule 4).
 //!
-//! What a slide holds beyond that — pictures, tables, charts, groups, notes —
-//! is written by the increments after this one. Until then each of them is a
-//! warning, never a silent omission (`AGENTS.md` §7 rule 3).
+//! A picture and a table are the exception: Markdown has both, so they are
+//! written as an image line and as a GFM table, carrying their *shape's* id
+//! and placement. What Markdown has no form for at all — a chart, SmartArt,
+//! an OLE object, a media clip, a custom geometry — is a visible stub over the
+//! raw fragment that holds it (rule 8), never a silent omission
+//! (`AGENTS.md` §7 rule 3).
 
 use docsai_model::addressing::{implicit_shapes, NodeKind};
 use docsai_model::assets::AssetStore;
-use docsai_model::image::Flip;
-use docsai_model::presentation::{PhType, Presentation, RawShapeKind, Shape, ShapeKind, Slide};
+use docsai_model::image::{Flip, ImageRef};
+use docsai_model::presentation::{PhType, Presentation, Shape, ShapeKind, Slide};
 use docsai_model::report::{ConversionReport, Warning};
-use docsai_model::text::Block;
+use docsai_model::text::{Block, Table};
 
 use crate::attrs::Attrs;
 use crate::dict::AttrDict;
@@ -39,7 +42,7 @@ pub fn write_presentation(
     dict: &AttrDict,
 ) -> (String, ConversionReport) {
     let mut out = String::new();
-    let mut writer = Writer::new(options, &deck.styles, assets, ids, dict);
+    let mut writer = Writer::new(options, &deck.styles, assets, ids, dict).for_deck();
 
     for (index, slide) in deck.slides.iter().enumerate() {
         if !out.is_empty() {
@@ -227,7 +230,9 @@ fn blockquote(body: &str) -> String {
 /// Writes one shape that the layout does not make implicit (spec §11.2 rule 4).
 ///
 /// A placeholder becomes `.ph`, a text box or a preset shape `.shape`, a
-/// connector `.connector`; what has no container yet is a warning.
+/// connector `.connector`, a chart `.chart` and every other unmodelled object
+/// the class its stub carries. Pictures, tables and groups leave here for a
+/// form of their own.
 fn write_shape(
     out: &mut String,
     shape: &Shape,
@@ -245,7 +250,38 @@ fn write_shape(
     let mut blocks: &[Block] = &[];
     let mut label = "";
     let mut raw = None;
+    // What only one kind of shape knows, folded into its container.
+    let mut extra = Attrs::new();
     match &shape.kind {
+        // Three kinds are not containers at all: Markdown has an image, a
+        // table and — for a group — nothing to say beyond its children.
+        ShapeKind::Picture(image) => {
+            write_picture(out, shape, image, writer, options);
+            return;
+        }
+        ShapeKind::Table(table) => {
+            write_table(out, shape, table, writer, options, location);
+            return;
+        }
+        ShapeKind::Group(children) => {
+            write_group(out, shape, children, writer, options, location);
+            return;
+        }
+        ShapeKind::Chart(chart) => {
+            // A chart is a rule-8 stub until Phase 16 turns its series into a
+            // table. The title is what a reader can see, so it is the body
+            // rather than an attribute, and it survives `plain`.
+            class = "chart";
+            label = chart.title.as_deref().unwrap_or_default();
+            raw = chart.raw.as_ref();
+            extra.set_opt("kind", chart.kind.clone());
+            if let Some(path) = chart.workbook.as_ref().and_then(|w| writer.asset_path(w)) {
+                // Where the numbers are. Not a raw payload — the workbook is a
+                // real asset beside the document — so every level that writes
+                // a container writes it.
+                extra.set("data", path);
+            }
+        }
         ShapeKind::Placeholder(ph) => {
             if ph.ph_type.is_furniture() && !addresses {
                 // A slide number, a date or a footer is inherited from the
@@ -265,23 +301,13 @@ fn write_shape(
             class = "shape";
             blocks = body;
         }
-        ShapeKind::Raw(shape_raw)
-            if matches!(
-                shape_raw.kind,
-                RawShapeKind::Shape | RawShapeKind::Connector
-            ) =>
-        {
+        ShapeKind::Raw(shape_raw) => {
+            // `.shape`, `.connector`, `.smartart`, `.ole`, `.media`,
+            // `.object`: the class is what the stub is, and the stub is at
+            // every level (rule 8). Nothing here is skipped any more.
             class = shape_raw.kind.as_str();
             label = shape_raw.text.as_str();
             raw = shape_raw.raw.as_ref();
-        }
-        _ => {
-            writer.report_mut().warn(Warning::UnsupportedElement {
-                kind: shape_kind(shape),
-                location: location.into(),
-                action: "skipped: not written yet".into(),
-            });
-            return;
         }
     }
 
@@ -327,42 +353,16 @@ fn write_shape(
         }
     }
 
-    let geometry = &shape.geometry;
-    if let Some(preset) = &geometry.preset {
+    if let Some(preset) = &shape.geometry.preset {
         // `geom=` is identity, not measurement: it is the only thing that says
         // a box is an arrow, so it survives at `standard` where `pos=` does
         // not.
         attrs.set("geom", preset.as_str());
     }
     if addresses {
-        attrs.set_opt("name", shape.name.clone());
-        if let Some(pos) = geometry.pos {
-            attrs.set(
-                "pos",
-                format!(
-                    "{},{}",
-                    writer.drawing_length(pos.x),
-                    writer.drawing_length(pos.y)
-                ),
-            );
-        }
-        if let Some(size) = geometry.size {
-            attrs.set(
-                "size",
-                format!(
-                    "{},{}",
-                    writer.drawing_length(size.width),
-                    writer.drawing_length(size.height)
-                ),
-            );
-        }
-        if geometry.rotation_deg != 0.0 {
-            attrs.set("rotation", number(geometry.rotation_deg));
-        }
-        if geometry.flip != Flip::None {
-            attrs.set("flip", geometry.flip.as_str());
-        }
+        attrs.merge(&placement(shape, writer, true));
     }
+    attrs.merge(&extra);
 
     if let Some(raw_id) = raw {
         if addresses {
@@ -382,6 +382,171 @@ fn write_shape(
         // The text a preset shape shows. A stub that swallows an arrow's
         // label is a silent loss.
         body = escape(label, TextContext::Block);
+    }
+
+    let rendered = if body.trim().is_empty() {
+        format!("::: {}\n:::", attrs.render_with(writer.dict()))
+    } else {
+        format!(
+            "::: {}\n{}\n:::",
+            attrs.render_with(writer.dict()),
+            body.trim_end()
+        )
+    };
+    writer
+        .ids()
+        .record(id.as_deref(), NodeKind::Shape, &rendered, mark);
+    push_block(out, &rendered);
+}
+
+/// Where a shape sits, as the levels that write back need it (rule 7).
+///
+/// `size` is skipped for a picture: the image line already carries its own
+/// `width`/`height`, and the same measurement written twice is one that can
+/// disagree with itself.
+fn placement(shape: &Shape, writer: &Writer, with_size: bool) -> Attrs {
+    let geometry = &shape.geometry;
+    let mut attrs = Attrs::new();
+    attrs.set_opt("name", shape.name.clone());
+    if let Some(pos) = geometry.pos {
+        attrs.set(
+            "pos",
+            format!(
+                "{},{}",
+                writer.drawing_length(pos.x),
+                writer.drawing_length(pos.y)
+            ),
+        );
+    }
+    if with_size {
+        if let Some(size) = geometry.size {
+            attrs.set(
+                "size",
+                format!(
+                    "{},{}",
+                    writer.drawing_length(size.width),
+                    writer.drawing_length(size.height)
+                ),
+            );
+        }
+    }
+    if geometry.rotation_deg != 0.0 {
+        attrs.set("rotation", number(geometry.rotation_deg));
+    }
+    if geometry.flip != Flip::None {
+        attrs.set("flip", geometry.flip.as_str());
+    }
+    attrs
+}
+
+/// A picture shape: an image line, not a container.
+///
+/// Markdown has an image, so rule 4 does not apply — a `:::` around it would
+/// be a box a reader cannot use. The shape's id and position ride on the
+/// image's own attribute block, which is where the addressing walk expects
+/// them: a picture shape is one node, not a shape holding an image.
+fn write_picture(
+    out: &mut String,
+    shape: &Shape,
+    image: &ImageRef,
+    writer: &mut Writer,
+    options: &Options,
+) {
+    let mark = writer.ids().mark();
+    let mut attrs = Attrs::new();
+    let mut id = None;
+    if options.fidelity != Fidelity::Plain {
+        id = writer.ids().take(shape);
+        if let Some(id) = id.clone() {
+            attrs.id(id);
+        }
+        if options.fidelity.addresses() {
+            attrs.merge(&placement(shape, writer, false));
+        }
+    }
+    let rendered = writer.image_line(image, attrs);
+    writer
+        .ids()
+        .record(id.as_deref(), NodeKind::Shape, &rendered, mark);
+    push_block(out, &rendered);
+}
+
+/// A table shape: the GFM table the document writer already knows how to
+/// write, carrying the shape's id and placement instead of a table id of its
+/// own — the walk addresses the shape, not the table inside it.
+fn write_table(
+    out: &mut String,
+    shape: &Shape,
+    table: &Table,
+    writer: &mut Writer,
+    options: &Options,
+    location: &str,
+) {
+    if table.rows.is_empty() {
+        // A GFM table needs a row to be a table at all, and an empty one would
+        // render as a header rule over nothing.
+        writer.report_mut().warn(Warning::UnsupportedElement {
+            kind: "table".into(),
+            location: location.into(),
+            action: "dropped: the table has no rows".into(),
+        });
+        return;
+    }
+
+    let mark = writer.ids().mark();
+    let mut seed = Attrs::new();
+    let mut id = None;
+    if options.fidelity != Fidelity::Plain {
+        id = writer.ids().take(shape);
+        if let Some(id) = id.clone() {
+            seed.id(id);
+        }
+        if options.fidelity.addresses() {
+            seed.merge(&placement(shape, writer, true));
+        }
+    }
+    let rendered = writer.render_slide_table(table, seed);
+    writer
+        .ids()
+        .record(id.as_deref(), NodeKind::Shape, &rendered, mark);
+    push_block(out, &rendered);
+}
+
+/// A group: a container holding the shapes it groups.
+///
+/// Every shape inside a group is addressable in its own right — the walk says
+/// so — so the group is a box around them and never a substitute for them.
+/// Flattening it would lose the grouping silently, which rule 3 forbids.
+fn write_group(
+    out: &mut String,
+    shape: &Shape,
+    children: &[Shape],
+    writer: &mut Writer,
+    options: &Options,
+    location: &str,
+) {
+    if options.fidelity == Fidelity::Plain {
+        // No container, but the children still reach the reader in order.
+        for child in children {
+            write_shape(out, child, writer, options, location);
+        }
+        return;
+    }
+
+    let mark = writer.ids().mark();
+    let mut attrs = Attrs::new();
+    let id = writer.ids().take(shape);
+    if let Some(id) = id.clone() {
+        attrs.id(id);
+    }
+    attrs.class("group");
+    if options.fidelity.addresses() {
+        attrs.merge(&placement(shape, writer, true));
+    }
+
+    let mut body = String::new();
+    for child in children {
+        write_shape(&mut body, child, writer, options, location);
     }
 
     let rendered = if body.trim().is_empty() {

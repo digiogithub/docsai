@@ -5,7 +5,7 @@
 //! idempotence test of Phase 2 (`serialize(parse(md)) == md`) has no room for a
 //! library's own formatting opinions.
 
-use docsai_model::assets::AssetStore;
+use docsai_model::assets::{AssetId, AssetStore};
 use docsai_model::image::{Anchor, AxisPos, Flip, ImageRef};
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{FontProps, ResolvedStyle, StyleCatalog, StyleId, Underline, VertAlign};
@@ -43,6 +43,10 @@ pub struct Writer<'a> {
     /// document (the middle of the OOXML cascade), so this is the base every
     /// run delta is measured against.
     para_style: ResolvedStyle,
+    /// Whether this run is writing a deck. Only one thing depends on it — an
+    /// image on a slide carries no measurements at `standard` (spec §11.2
+    /// rule 6) — and it is a property of the document class, not of the level.
+    deck: bool,
 }
 
 impl<'a> Writer<'a> {
@@ -63,7 +67,14 @@ impl<'a> Writer<'a> {
             ids,
             dict,
             para_style: styles.resolve(None),
+            deck: false,
         }
+    }
+
+    /// The same writer, told it is writing slides.
+    pub(crate) fn for_deck(mut self) -> Self {
+        self.deck = true;
+        self
     }
 
     fn full(&self) -> bool {
@@ -78,6 +89,16 @@ impl<'a> Writer<'a> {
     /// text, the structure and the addresses, and drops every measurement.
     fn formatting(&self) -> bool {
         self.options.fidelity.formatting()
+    }
+
+    /// Whether an image's measurements reach the output.
+    ///
+    /// `standard` keeps them in a text document — the size of a figure is part
+    /// of reading it — and drops them on a slide, where a plain viewer draws
+    /// the picture at its own size regardless and the numbers are residue
+    /// (spec §11.2 rule 6, spike P2 §3.3).
+    fn image_geometry(&self) -> bool {
+        self.formatting() && !(self.deck && self.options.fidelity == Fidelity::Standard)
     }
 
     /// Decimals a readable unit may use (spec §2).
@@ -146,6 +167,15 @@ impl<'a> Writer<'a> {
     /// gives drawings, with `emu` as the exact fallback.
     pub(crate) fn drawing_length(&self, value: Length) -> String {
         self.geometry(value)
+    }
+
+    /// Where an asset was written, as the document refers to it. `None` when
+    /// the store never received it — a chart whose workbook is missing says so
+    /// by omitting the reference, not by pointing at nothing.
+    pub(crate) fn asset_path(&self, asset: &AssetId) -> Option<String> {
+        self.assets
+            .info(asset)
+            .map(|info| format!("{}/{}", self.options.assets_dir, info.file_name))
     }
 
     /// Renders a run of blocks at slide level: the layout's primary body
@@ -644,15 +674,27 @@ impl<'a> Writer<'a> {
         }
         let mark = self.ids.mark();
         let id = self.ids.take(table);
-        let rendered = self.render_table_body(table, id.clone());
+        let mut seed = Attrs::new();
+        if let Some(id) = id.clone() {
+            seed.id(id);
+        }
+        let rendered = self.render_table_body(table, seed);
         self.ids
             .record(id.as_deref(), NodeKind::Table, &rendered, mark);
         rendered
     }
 
-    fn render_table_body(&mut self, table: &Table, id: Option<String>) -> String {
+    /// A table on a slide, with the attributes its *shape* carries: the id and
+    /// the position belong to the shape, so the table takes none of its own
+    /// (the addressing walk gives a table shape one id, not two).
+    pub(crate) fn render_slide_table(&mut self, table: &Table, seed: Attrs) -> String {
+        self.report.stats.tables += 1;
+        self.render_table_body(table, seed)
+    }
+
+    fn render_table_body(&mut self, table: &Table, seed: Attrs) -> String {
         if table.is_complex() && !self.plain() {
-            return self.render_complex_table(table, id);
+            return self.render_complex_table(table, seed);
         }
 
         let width = table.width().max(1);
@@ -711,9 +753,7 @@ impl<'a> Writer<'a> {
         if !has_header {
             attrs.set("header-row", "false");
         }
-        if let Some(id) = id {
-            attrs.id(id);
-        }
+        attrs.merge(&seed);
         if attrs.is_empty() {
             return out.trim_end().to_string();
         }
@@ -768,15 +808,13 @@ impl<'a> Writer<'a> {
     }
 
     /// Tables GFM cannot hold (multi-paragraph or nested content, spec §3.4).
-    fn render_complex_table(&mut self, table: &Table, id: Option<String>) -> String {
+    fn render_complex_table(&mut self, table: &Table, seed: Attrs) -> String {
         let mut attrs = Attrs::new();
         attrs.class("table").set("complex", "true");
         if let Some(style) = &table.style {
             attrs.set("style", style.as_str());
         }
-        if let Some(id) = id {
-            attrs.id(id);
-        }
+        attrs.merge(&seed);
         let mut out = format!("::: {}\n", attrs.render_with(self.dict));
         for row in &table.rows {
             let mut row_attrs = Attrs::new();
@@ -1023,6 +1061,24 @@ impl<'a> Writer<'a> {
     /// The image and the id it was written with, which is not necessarily the
     /// one the IR carries: `assign` hands out fresh ids at write time.
     fn render_image_body(&mut self, image: &ImageRef) -> (String, Option<String>) {
+        let mut attrs = Attrs::new();
+        let id = if self.plain() {
+            None
+        } else {
+            self.ids.take(image)
+        };
+        if let Some(id) = id.clone() {
+            attrs.id(id);
+        }
+        (self.image_line(image, attrs), id)
+    }
+
+    /// An image line with the attributes the caller has already seeded.
+    ///
+    /// A picture on a slide is a shape: the id and the position on it belong
+    /// to the shape, not to the `ImageRef`, which is why they arrive from
+    /// outside instead of being taken here.
+    pub(crate) fn image_line(&mut self, image: &ImageRef, mut attrs: Attrs) -> String {
         self.report.stats.images += 1;
         let alt = escape(&image.alt, TextContext::LinkLabel);
         let path = match self.assets.info(&image.asset) {
@@ -1034,26 +1090,18 @@ impl<'a> Writer<'a> {
         };
 
         if self.plain() {
-            return (format!("![{alt}]({path})"), None);
+            return format!("![{alt}]({path})");
         }
 
-        let mut attrs = Attrs::new();
-        let id = self.ids.take(image);
-        if let Some(id) = id.clone() {
-            attrs.id(id);
-        }
         let geometry = &image.geometry;
 
-        if !self.formatting() {
+        if !self.image_geometry() {
             // An image is a leaf an agent can move, delete or re-caption, and
             // its geometry is exactly the part it cannot write. The address,
             // the alt text and the link survive; the EMUs do not.
             attrs.set_opt("title", image.title.clone());
             attrs.set_opt("link", image.link.clone());
-            return (
-                format!("![{alt}]({path}){}", attrs.render_with(self.dict)),
-                id,
-            );
+            return format!("![{alt}]({path}){}", attrs.render_with(self.dict));
         }
 
         // `width`/`height` are mandatory except on two-cell sheet anchors,
@@ -1116,10 +1164,7 @@ impl<'a> Writer<'a> {
             attrs.set("render", "unsupported");
         }
 
-        (
-            format!("![{alt}]({path}){}", attrs.render_with(self.dict)),
-            id,
-        )
+        format!("![{alt}]({path}){}", attrs.render_with(self.dict))
     }
 
     fn anchor_attrs(&self, attrs: &mut Attrs, anchor: &Anchor) {

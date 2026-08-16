@@ -761,6 +761,32 @@ the layout, carries nothing the author wrote, and costs a container on every sli
 At `plain` there are no containers at all: a `:::` fence is literal text to a CommonMark viewer.
 What a shape *says* still reaches the reader, in slide order; the box does not.
 
+#### Pictures, tables, groups and stubs
+
+Rule 4 is about shapes Markdown has no form for. Three kinds are not in that position, and are
+written as what Markdown already has:
+
+| Shape | Form | Notes |
+|---|---|---|
+| A picture | An image line, `![alt](path){…}` | No container. The shape's `#id`, `name=`, `pos=`, `rotation=` and `flip=` ride on the image's own attribute block; the **size** is the image's `width=`/`height=`, never written twice |
+| A table | The GFM table of §3.4 | Its container, when it has one, carries the shape's `#id` and placement. The table takes no id of its own: a table shape is one addressable node, not two |
+| A group | `::: {.group}` holding its shapes | Every shape inside a group is addressable in its own right, so the group is a box around them and never a substitute for them. At `plain` the children are written in order and the grouping is what is lost |
+
+An image on a slide carries **no measurements at `standard`** (rule 6): a plain viewer draws the
+picture at its own size regardless, so `width=`/`height=` would be residue. The same image in a
+text document keeps them at that level — §3.5's round-trip rule is unchanged, and this is a
+property of the document class, not of the fidelity level.
+
+Everything else is a rule-8 stub, and the class names what it is: `.chart`, `.smartart`, `.ole`,
+`.media`, `.object` for what the reader could not classify, and `.shape` for a custom geometry
+whose path list has no preset name. A stub's body is the text the object shows, when it shows any,
+so it survives even at `plain`.
+
+| Attribute | Meaning | Levels |
+|---|---|---|
+| `kind=` | What kind of chart — `barChart`, `lineChart` — as the chart part names it | every level but `plain` |
+| `data=` | The embedded workbook holding the series, as an asset reference. Not a raw payload: the file sits beside the document | every level but `plain` |
+
 #### Speaker notes
 
 Rule 5 in full. The notes of a slide are written after its shapes, and they are the one node whose
@@ -797,5 +823,7 @@ tables and images: principle §0.1 holds, which is the whole point of the implic
 #### Not yet implemented
 
 Charts and SmartArt have no representation of their own: both are rule-8 stubs, and turning a
-chart into data (series and categories as a table) is plan v2 Phase 16. The `.odp` reader
+chart into data (series and categories as a table) is plan v2 Phase 16. `data=` is written when the
+IR names the workbook; the pptx reader of Phase 13 keeps it inside the skeleton instead, so today
+the attribute is the exception rather than the rule. The `.odp` reader
 (Phase 18) and the pptx writer (Phase 15) consume this profile but do not change it.

@@ -2,7 +2,8 @@
 //! implicit, free shapes and connectors (spec §11.2 rules 4, 6, 7 and 8; plan
 //! v2 Phase 14 increment D).
 //!
-//! Pictures, tables, charts and groups still warn — that is increment F.
+//! Pictures, tables, groups and charts have a form of their own — increment F,
+//! `presentation_objects.rs`.
 
 use docsai_docmark::{serialize, Fidelity, Options};
 use docsai_model::addressing::IdPolicy;
@@ -376,7 +377,7 @@ fn ids_in_order(markdown: &str) -> Vec<String> {
 }
 
 #[test]
-fn what_has_no_container_yet_is_still_warned() {
+fn an_unmodelled_object_is_a_stub_of_its_own_kind() {
     let store = MemoryAssetStore::new();
     let smartart = Shape::new(
         4,
@@ -386,16 +387,27 @@ fn what_has_no_container_yet_is_still_warned() {
             text: String::new(),
         }),
     );
-    let (markdown, report) = serialize(&deck(vec![smartart]), &store, &options(Fidelity::Full));
+    let (markdown, report) = serialize(
+        &deck(vec![smartart.clone()]),
+        &store,
+        &options(Fidelity::Full),
+    );
 
-    // Increment F is where a SmartArt becomes a stub of its own; until then
-    // the gap is typed rather than silent.
-    assert!(!markdown.contains("smartart"), "{markdown}");
     assert!(
-        report.warnings.iter().any(|w| matches!(
-            w,
-            Warning::UnsupportedElement { kind, .. } if kind == "smartart"
-        )),
+        markdown.contains("::: {#n2 .smartart raw=r3}\n:::\n"),
+        "{markdown}"
+    );
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+    // Rule 8: the stub is at every level. Rule 6 takes the payload away, and
+    // says so.
+    let (markdown, report) = serialize(&deck(vec![smartart]), &store, &standard());
+    assert!(markdown.contains("::: {.smartart}\n:::\n"), "{markdown}");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::RawBlockDropped { id, .. } if id == "r3")),
         "{:?}",
         report.warnings
     );
