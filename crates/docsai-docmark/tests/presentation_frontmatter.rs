@@ -1,8 +1,8 @@
 //! The front matter of a deck: DocMark 1.2, `layouts:` and `skeleton:`
 //! (spec §11.2, plan v2 Phase 14 increment B).
 //!
-//! The body is still empty at this increment — the slide writer is 14-C — so
-//! everything asserted here is the front matter and the version it declares.
+//! Everything asserted here is the front matter and the version it declares;
+//! the body of a deck is `presentation_slides.rs`.
 
 use docsai_docmark::{serialize, Fidelity, Options};
 use docsai_model::presentation::{

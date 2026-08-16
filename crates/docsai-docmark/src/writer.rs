@@ -112,6 +112,108 @@ impl<'a> Writer<'a> {
         (self.out, self.report)
     }
 
+    // ----------------------------------------------------------------------
+    // The presentation profile (spec §11.2)
+    //
+    // A deck is written by `deck_writer`, which owns the slide layout of the
+    // output and borrows this writer for the parts a slide shares with a text
+    // document: paragraphs, lists, tables and images render exactly as they do
+    // in a `.docx`, and a second renderer for them is how two spellings of the
+    // same list appear.
+    // ----------------------------------------------------------------------
+
+    /// The ids of this run, for the nodes `deck_writer` addresses itself.
+    pub(crate) fn ids(&mut self) -> &mut IdSource {
+        self.ids
+    }
+
+    /// The report this run is accumulating.
+    pub(crate) fn report_mut(&mut self) -> &mut ConversionReport {
+        &mut self.report
+    }
+
+    /// The report, once the caller has finished writing through this writer.
+    pub(crate) fn into_report(self) -> ConversionReport {
+        self.report
+    }
+
+    /// Renders a run of blocks at slide level: the layout's primary body
+    /// placeholder, written as ordinary Markdown (spec §11.2 rule 2).
+    pub(crate) fn render_slide_blocks(&mut self, blocks: &[Block]) -> String {
+        self.render_blocks(blocks, 0)
+    }
+
+    /// Renders the slide heading, which *is* the title placeholder (spec §11.2
+    /// rule 1): no container repeats it.
+    ///
+    /// `seed` carries what the slide knows and the paragraph does not — the
+    /// slide's id, `.slide`, its layout and its section — and wins over the
+    /// paragraph's own attributes. A title with no text writes an empty
+    /// heading, which the spec accepts as ugly and bounded.
+    pub(crate) fn render_slide_heading(
+        &mut self,
+        title: &[Block],
+        seed: Attrs,
+        location: &str,
+    ) -> String {
+        let mut attrs = Attrs::new();
+        let mut parts: Vec<String> = Vec::new();
+        for (index, block) in title.iter().enumerate() {
+            let paragraph = match block {
+                Block::Paragraph(p) => p,
+                Block::Heading(h) => &h.paragraph,
+                // A picture or a table inside a title placeholder has no
+                // heading to be rendered into. It is not silently dropped:
+                // rule 8's stub is `deck_writer`'s job, and until then this
+                // says so.
+                other => {
+                    self.report.warn(Warning::UnsupportedElement {
+                        kind: block_kind(other).into(),
+                        location: location.into(),
+                        action: "skipped: a slide title holds text".into(),
+                    });
+                    continue;
+                }
+            };
+            if index > 0 {
+                // Every paragraph of the title reaches the heading, because a
+                // heading is one line and losing the second one would lose
+                // text. The paragraph break is what goes, and it is warned.
+                self.report.warn(Warning::UnsupportedElement {
+                    kind: "paragraph".into(),
+                    location: location.into(),
+                    action: "joined into the slide heading".into(),
+                });
+            }
+            self.report.stats.paragraphs += 1;
+            let outer = std::mem::replace(
+                &mut self.para_style,
+                self.styles.resolve(paragraph.format.style.as_ref()),
+            );
+            let content = self.render_inlines(&paragraph.content, TextContext::Block);
+            self.para_style = outer;
+            if index == 0 && !self.plain() {
+                attrs = self.paragraph_attrs(paragraph, None);
+            }
+            let content = content.trim().to_string();
+            if !content.is_empty() {
+                parts.push(content);
+            }
+        }
+        if !self.plain() {
+            attrs.merge(&seed);
+        }
+        self.report.stats.headings += 1;
+        let body = parts.join(" ");
+        if body.is_empty() {
+            // `##` and nothing else: no trailing space, so the line is stable
+            // under `serialize(parse(md)) == md`.
+            format!("##{}", attrs.suffix_with(self.dict))
+        } else {
+            format!("## {body}{}", attrs.suffix_with(self.dict))
+        }
+    }
+
     /// Appends a block, separated from the previous one by a blank line.
     fn block(&mut self, text: &str) {
         if text.is_empty() {
@@ -1081,6 +1183,19 @@ impl<'a> Writer<'a> {
 /// Removes the link's own character style from its child runs, so that
 /// `[texto](url){.Hyperlink}` does not also carry `{.Hyperlink}` inside the
 /// label.
+/// What a block is, as a warning names it.
+pub(crate) fn block_kind(block: &Block) -> &'static str {
+    match block {
+        Block::Paragraph(_) => "paragraph",
+        Block::Heading(_) => "heading",
+        Block::List(_) => "list",
+        Block::Table(_) => "table",
+        Block::Image(_) => "image",
+        Block::TextBox(_) => "textbox",
+        Block::Raw(_) => "raw",
+    }
+}
+
 fn strip_redundant_style(content: &[Inline], props: &RunProps) -> Vec<Inline> {
     let Some(style) = &props.style else {
         return content.to_vec();

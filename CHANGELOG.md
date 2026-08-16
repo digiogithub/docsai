@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A deck writes its slides** (plan v2 Phase 14, third increment): every slide is an `##` heading
+  carrying `.slide`, and the heading **is** the title placeholder — no container repeats it — while
+  the layout's primary body placeholder is written as ordinary Markdown under it. Which shape is
+  which is the catalogue lookup of `layouts:`, so a layout whose body sits at index 2 puts index 2
+  in the body and leaves index 1 for a container, where a «first body wins» guess would swap them.
+  The heading carries the slide's id, its `layout=`, its `section=` (`p14:sectionLst`, on every
+  slide of the section so a slide read on its own still knows where it belongs), `hidden=true` and,
+  at the levels that write back, its `name=`. A slide with no title, or with an empty one, writes
+  an empty `##` heading: ugly and bounded, against a container on every slide. At `--fidelity
+  plain` a slide is a heading and its bullets and nothing else. What this increment does not write
+  yet — the other placeholders, free shapes, pictures, tables and speaker notes — is reported as a
+  warning per shape, never omitted in silence.
+
 - **A deck writes its front matter** (plan v2 Phase 14, second increment): a presentation
   serialises `docmark: "1.2"` — the version names the *profile*, not the addressing, so a deck
   declares it with or without node ids — plus `layouts:` and `skeleton:` at the levels that write

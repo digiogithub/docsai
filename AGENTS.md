@@ -197,8 +197,11 @@ version rule (a deck declares `1.2` with or without ids). The parser accepts exa
 and `1.2` and refuses anything else by name. The second is done too: a deck **writes its front
 matter** — the 1.2 version, the layout catalogue with the title and body placeholder indices, and
 the `skeleton:` path — at `full` and `agent`, and neither catalogue nor skeleton at `standard`.
-**The body of a deck is still empty**; the slide writer is 14-C, and the pptx *writer* is Phase 15
-— do not start it.
+The third is done: a deck **writes its slides** — an `##` heading per slide carrying `.slide`, the
+title placeholder consumed by that heading, and the layout's primary body written as ordinary
+blocks under it, decided by the catalogue and never by a heuristic. What is not written yet — the
+other placeholders, free shapes, pictures, tables, notes — warns per shape. Next is **14-D**, the
+containers; the pptx *writer* is Phase 15 — do not start it.
 
 ## 2. Documents you must read before implementing
 

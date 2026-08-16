@@ -59,6 +59,25 @@ impl Attrs {
         self
     }
 
+    /// Folds `other` into this block: its id wins, its classes are appended in
+    /// order and its pairs override.
+    ///
+    /// What a node *is* is decided by the caller that knows — a slide heading
+    /// is `.slide` whatever the paragraph inside it was styled as — so the
+    /// merged block is the node's own attributes with the caller's on top.
+    pub fn merge(&mut self, other: &Attrs) -> &mut Self {
+        if let Some(id) = &other.id {
+            self.id = Some(id.clone());
+        }
+        for class in &other.classes {
+            self.class(class.clone());
+        }
+        for (key, value) in &other.pairs {
+            self.set(key.clone(), value.clone());
+        }
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
         self.id.is_none() && self.classes.is_empty() && self.pairs.is_empty()
     }

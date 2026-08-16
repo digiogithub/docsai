@@ -717,6 +717,22 @@ Open with the churn number, it is the one they ask about.
    present so a human or an agent knows not to delete what they cannot see, cheap because the
    payload lives in the sidecar.
 
+#### Slide attributes
+
+The heading of rule 1 carries everything the slide itself knows. Nothing else is written per slide.
+
+| Attribute | Meaning | Levels |
+|---|---|---|
+| `#id` | The slide's address (§11.1). The two implicit shapes take none: there is nowhere to write it | `full`, `agent` |
+| `.slide` | What the heading is. Its presence is what makes an `##` a slide rather than a section heading | every level but `plain` |
+| `layout=` | The layout in `layouts:`, against which the implicit title and body resolve | every level but `plain` |
+| `section=` | `p14:sectionLst`, written on **every** slide of the section, not once at its start: a slide read on its own must still know where it belongs | every level but `plain` |
+| `hidden=true` | `p:sld@show="0"`. Present only when true | every level but `plain` |
+| `name=` | `p:cSld@name`, what the writer puts back. The levels that do not write back drop it | `full`, `agent` |
+
+A title placeholder holding more than one paragraph is joined into the one heading line, with a
+warning: the text survives, the paragraph break does not.
+
 #### Front matter keys added by 1.2
 
 | Key | Meaning |
