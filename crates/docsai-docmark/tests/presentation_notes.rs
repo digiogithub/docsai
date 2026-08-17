@@ -115,10 +115,12 @@ fn standard_writes_the_notes_as_a_blockquote() {
     let (markdown, report) = serialize(&deck(one_note()), &store, &standard());
 
     // A blockquote is native CommonMark and cannot collide with slide content:
-    // PresentationML has no blockquote for a placeholder to occupy.
+    // PresentationML has no blockquote for a placeholder to occupy. And no
+    // `layout=`: the catalogue it names is not written at this level (§11.2
+    // rule 6), so the reference would point at nothing.
     assert_eq!(
         body_of(&markdown),
-        "## Q3 results {.slide layout=L1}\n\nRevenue up 12 %\n\n\
+        "## Q3 results {.slide}\n\nRevenue up 12 %\n\n\
          > Open with the churn number.\n",
         "{markdown}"
     );

@@ -656,9 +656,20 @@ notes degrade to a blockquote. The sketch wrote every placeholder as a container
 slide's title twice and left a plain viewer printing it twice.
 
 Design rule, enforced by test: **`--fidelity standard` must remain hand-editable by a human**, and
-a plain Markdown viewer must show, per slide, title + bullets + images and nothing else. Measured
-over `corpus/pptx` at `standard`, **2.6 %** of what a plain viewer prints is syntax — 11.4 %
-counting the fixture whose whole content is free shapes, where the noise is the point.
+a plain Markdown viewer must show, per slide, title + bullets + images and nothing else. Both
+halves are checked by CI over `corpus/pptx`
+(`docsai-convert/tests/plain_residue.rs`), rendering with a viewer that has no container and no
+attribute extension:
+
+- At **`plain`** the rule is absolute: **zero** residue, over every deck in the corpus. A plain
+  deck is headings, lists, images and GFM tables, and there is nothing else to see.
+- At **`standard`** what may leak is named, not just bounded: the `{.slide}` marker of rule 1 and
+  the containers of rules 4 and 8, and nothing besides. That is 17 % of what a viewer prints over
+  the whole corpus and 15 % over the decks that are documents rather than diagrams — worse than
+  the 11.4 % / 2.6 % spike P2 measured, by exactly one construct: P2's hand-written samples had no
+  `{.slide}`, which costs eight characters per slide and is the *entire* residue of ten of the
+  seventeen decks. These fixtures are two slides long, so those eight characters weigh what they
+  never would in a real deck: `forty-slides`, the only one of document size, sits at 13 %.
 
 ````markdown
 ---
@@ -725,7 +736,7 @@ The heading of rule 1 carries everything the slide itself knows. Nothing else is
 |---|---|---|
 | `#id` | The slide's address (§11.1). The two implicit shapes take none: there is nowhere to write it | `full`, `agent` |
 | `.slide` | What the heading is. Its presence is what makes an `##` a slide rather than a section heading | every level but `plain` |
-| `layout=` | The layout in `layouts:`, against which the implicit title and body resolve | every level but `plain` |
+| `layout=` | The layout in `layouts:`, against which the implicit title and body resolve. It follows its catalogue: rule 6 writes no `layouts:` at `standard`, and a reference to an absent catalogue would be residue in a viewer and a dangling name in a parser | `full`, `agent` |
 | `section=` | `p14:sectionLst`, written on **every** slide of the section, not once at its start: a slide read on its own must still know where it belongs | every level but `plain` |
 | `hidden=true` | `p:sld@show="0"`. Present only when true | every level but `plain` |
 | `name=` | `p:cSld@name`, what the writer puts back. The levels that do not write back drop it | `full`, `agent` |
@@ -746,7 +757,7 @@ still a box the author placed.
 | `.ph` / `.shape` / `.connector` | What the container is: a placeholder the layout does not make implicit, a free shape or a text box, a connector | every level but `plain` |
 | `idx=` | `p:ph@idx`, which is what matches the shape to its layout placeholder. Only the levels that write back need it | `full`, `agent` |
 | `type=` | `p:ph@type`, when it is not `body` — the PresentationML default. A footer and a chart slot are not the same box, and that is what a *reader* needs | every level but `plain` |
-| `geom=` | `a:prstGeom@prst`. Identity, not measurement: it is the only thing that says a box is an arrow, so it survives where `pos=` does not | every level but `plain` |
+| `geom=` | `a:prstGeom@prst`, when it is not `rect` — the DrawingML default, and unwritten for the same reason `type=body` is. Identity, not measurement: it is the only thing that says a box is an arrow, so it survives where `pos=` does not | every level but `plain` |
 | `name=` | `p:cNvPr@name`, what the selection pane shows | `full`, `agent` |
 | `pos=` / `size=` | `"x,y"` and `"w,h"` in the units of rule 7 | `full`, `agent` |
 | `rotation=` / `flip=` | `a:xfrm@rot` in degrees, and `h` / `v` / `hv` | `full`, `agent` |
@@ -773,9 +784,11 @@ written as what Markdown already has:
 | A group | `::: {.group}` holding its shapes | Every shape inside a group is addressable in its own right, so the group is a box around them and never a substitute for them. At `plain` the children are written in order and the grouping is what is lost |
 
 An image on a slide carries **no measurements at `standard`** (rule 6): a plain viewer draws the
-picture at its own size regardless, so `width=`/`height=` would be residue. The same image in a
-text document keeps them at that level — §3.5's round-trip rule is unchanged, and this is a
-property of the document class, not of the fidelity level.
+picture at its own size regardless, so `width=`/`height=` would be residue. The same holds for a
+table's `col-widths=`, and for the same reason — with it gone a slide table at `standard` needs no
+container at all and is bare GFM. The same image and the same table in a *text* document keep their
+measurements at that level: §3.5's round-trip rule is unchanged, and this is a property of the
+document class, not of the fidelity level.
 
 Everything else is a rule-8 stub, and the class names what it is: `.chart`, `.smartart`, `.ole`,
 `.media`, `.object` for what the reader could not classify, and `.shape` for a custom geometry

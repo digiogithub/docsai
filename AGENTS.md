@@ -211,8 +211,13 @@ a table a GFM table, both carrying their *shape's* id and placement; a group is 
 around children that keep their own addresses; a chart, SmartArt, an OLE object, a media clip or a
 custom geometry is a stub of its own class over the sidecar. An image on a slide carries no
 measurements at `standard`, where a text document keeps them. Every kind of shape is now written.
-Next is **14-G**, `plain` and the residue probe as a repository test; the pptx *writer* is Phase 15
-— do not start it.
+The seventh is done: **`plain` is proven**, not asserted — spike P2's residue probe is a repository
+test (`docsai-convert/tests/plain_residue.rs`) that renders every corpus deck with a viewer having
+no container and no attribute extension: zero residue at `plain`, and at `standard` only the
+`{.slide}` marker and the rule-4/8 containers may show. It found three writer defects, now fixed:
+`layout=` at `standard` (its catalogue is not written there), `col-widths=` on a slide table at
+`standard`, and `geom=rect`, the default nobody chose. Next is **14-H**, the parser; the pptx
+*writer* is Phase 15 — do not start it.
 
 ## 2. Documents you must read before implementing
 

@@ -148,7 +148,7 @@ fn standard_writes_the_slide_without_ids() {
     // slide is still a `.slide`, which is what makes the profile 1.2.
     assert_eq!(
         body_of(&markdown),
-        "## Q3 results {.slide layout=L1}\n\n- Revenue up 12 %\n- Churn flat\n",
+        "## Q3 results {.slide}\n\n- Revenue up 12 %\n- Churn flat\n",
         "{markdown}"
     );
 }

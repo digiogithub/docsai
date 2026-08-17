@@ -91,14 +91,19 @@ impl<'a> Writer<'a> {
         self.options.fidelity.formatting()
     }
 
-    /// Whether an image's measurements reach the output.
+    /// Whether measurements reach the output at all on this document class.
     ///
-    /// `standard` keeps them in a text document — the size of a figure is part
-    /// of reading it — and drops them on a slide, where a plain viewer draws
-    /// the picture at its own size regardless and the numbers are residue
-    /// (spec §11.2 rule 6, spike P2 §3.3).
+    /// `standard` keeps them in a text document — the size of a figure and the
+    /// shape of a table are part of reading it — and drops them on a slide,
+    /// where a viewer lays the deck out on its own and the numbers are residue
+    /// a hand-editor has to step over (spec §11.2 rule 6, spike P2 §3.3).
+    fn measurements(&self) -> bool {
+        !(self.deck && self.options.fidelity == Fidelity::Standard)
+    }
+
+    /// Whether an image's measurements reach the output.
     fn image_geometry(&self) -> bool {
-        self.formatting() && !(self.deck && self.options.fidelity == Fidelity::Standard)
+        self.formatting() && self.measurements()
     }
 
     /// Decimals a readable unit may use (spec §2).
@@ -742,7 +747,7 @@ impl<'a> Writer<'a> {
         if let Some(style) = &table.style {
             attrs.set("style", style.as_str());
         }
-        if !table.col_widths.is_empty() && self.formatting() {
+        if !table.col_widths.is_empty() && self.formatting() && self.measurements() {
             let widths: Vec<String> = table
                 .col_widths
                 .iter()

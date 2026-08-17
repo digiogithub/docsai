@@ -90,4 +90,4 @@ the ones it will never have. With it, every `ShapeKind` is written — nothing o
 
 **14-G — `plain`, and the degradation rule as a test**: a slide at `plain` is heading, bullets and
 images and nothing else, verified as clean CommonMark with `comrak`, and the P2 residue probe
-becomes a repository test rather than a scratchpad binary.
+becomes a repository test rather than a scratchpad binary. Done, in [[53-phase-14-plain]].

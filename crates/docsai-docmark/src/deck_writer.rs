@@ -33,6 +33,10 @@ use crate::units::number;
 use crate::writer::Writer;
 use crate::{Fidelity, Options};
 
+/// The DrawingML preset every plain box has (`a:prstGeom@prst="rect"`).
+/// Written nowhere: it is what a shape is when nobody chose a shape.
+const DEFAULT_PRESET: &str = "rect";
+
 /// Serialises a presentation body (front matter excluded).
 pub fn write_presentation(
     deck: &Presentation,
@@ -99,8 +103,14 @@ fn write_slide(
             seed.id(id);
         }
         seed.class("slide");
-        if let Some(layout) = &slide.layout {
-            seed.set("layout", layout.as_str());
+        if options.fidelity.addresses() {
+            // `layout=` names an entry of the front matter's `layouts:`, and
+            // the catalogue is only written by the levels that write back
+            // (rule 6). A `layout=` at `standard` would point at nothing —
+            // residue in a viewer and a dangling reference in a parser.
+            if let Some(layout) = &slide.layout {
+                seed.set("layout", layout.as_str());
+            }
         }
         if let Some(section) = &slide.section {
             // `p14:sectionLst`, written on every slide of the section rather
@@ -356,8 +366,11 @@ fn write_shape(
     if let Some(preset) = &shape.geometry.preset {
         // `geom=` is identity, not measurement: it is the only thing that says
         // a box is an arrow, so it survives at `standard` where `pos=` does
-        // not.
-        attrs.set("geom", preset.as_str());
+        // not. `rect` is the DrawingML default and says nothing — the same
+        // reason `type=body` above stays unwritten.
+        if preset.as_str() != DEFAULT_PRESET {
+            attrs.set("geom", preset.as_str());
+        }
     }
     if addresses {
         attrs.merge(&placement(shape, writer, true));

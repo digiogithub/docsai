@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`plain` proven, and the degradation rule as a test** (plan v2 Phase 14, seventh increment): the
+  spec's own sentence — *«a plain Markdown viewer must show, per slide, title + bullets + images and
+  nothing else»* — is now checked by CI instead of by a reviewer. Spike P2's residue probe moved
+  into the tree (`docsai-convert/tests/plain_residue.rs`): every deck of `corpus/pptx` is rendered
+  with a viewer that has no container and no attribute extension, and every visible character is
+  classed as content or as syntax that leaked. At `plain` the budget is **zero**, over every deck;
+  at `standard` what may leak is *named* — the `{.slide}` marker and the containers of rules 4 and
+  8, nothing else — so an attribute cannot creep back in behind a percentage. Three writer defects
+  the measurement found are fixed: `layout=` is no longer written at `standard`, where the
+  `layouts:` catalogue it names is absent and the reference pointed at nothing; a slide table drops
+  `col-widths=` at `standard`, the same rule that already dropped an image's size, which leaves a
+  bare GFM table with no container; and `geom=rect` — the DrawingML default, said by every plain box
+  — is written nowhere, exactly as `type=body` already was.
+
 - **Pictures, tables, groups and object stubs on a slide** (plan v2 Phase 14, sixth increment): a
   picture is written as an image line and a table as a GFM table — Markdown has both, so neither
   gets a container — each carrying its *shape's* id, name and position, with the picture's size

@@ -216,7 +216,7 @@ fn standard_writes_the_picture_and_none_of_its_measurements() {
     assert_eq!(
         body_of(&markdown),
         format!(
-            "## Q3 results {{.slide layout=L1}}\n\n\
+            "## Q3 results {{.slide}}\n\n\
              Revenue up 12 %\n\n\
              ![Revenue chart]({path})\n"
         ),
@@ -295,7 +295,7 @@ fn standard_writes_the_table_bare() {
 
     assert_eq!(
         body_of(&markdown),
-        "## Q3 results {.slide layout=L1}\n\n\
+        "## Q3 results {.slide}\n\n\
          Revenue up 12 %\n\n\
          | Region | Revenue |\n\
          | ------ | ------- |\n\
