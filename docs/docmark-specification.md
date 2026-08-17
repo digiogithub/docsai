@@ -823,6 +823,32 @@ never goes back into a package.
 | `layouts:` | The layout catalogue of rule 3. Written at `full` and `agent`; absent at `standard` and `plain` |
 | `skeleton:` | The preserved non-slide package parts (architecture §9.4), as an asset reference. Absent for a document authored from scratch, in which case the writer uses the embedded default template and selects a layout from the content shape |
 
+#### Reading a deck back
+
+The parser is the mirror of the rules above, and three of its answers are part of the format rather
+than of an implementation, because a second reader has to give the same ones.
+
+- **What makes a file a deck** is `source-format: pptx` in the front matter, a `layouts:` or
+  `skeleton:` key, or a `##` heading carrying `.slide`. Nothing else: `##` alone is a heading, and
+  guessing a deck from heading levels would turn every report into a presentation. A `plain` deck
+  writes no front matter and no marker, so it reads back as a text document — that is what a
+  one-way projection is.
+- **Input is tolerant** (analysis §6.6). A deck a human typed carries no attributes at all: a `#`
+  or `##` heading opens a slide with or without `.slide`, its blocks are the implicit body of
+  rule 2, content before the first heading is a slide with no title, and a container class the
+  reader does not know keeps its text as a shape and is warned rather than refused. A heading
+  inside a `:::` container or a code fence is content, not a new slide.
+- **`.shape` is disambiguated by `raw=`**, not by `geom=`: a stub (rule 8) is a marker over markup
+  only the original package can reproduce, and a text box is content. A text box with a rounded
+  outline carries a preset too, and reading it as a stub would freeze editable text into an opaque
+  object. At `standard`, where `raw=` is not written, a stub therefore reads back as a text box —
+  the level does not write back, so it spends nothing it was going to use.
+
+Two more things a reader will notice. `##` is written both for a slide whose title placeholder is
+empty and for a slide that has none, so it reads back as the second: the two write the same line,
+and the empty box is restored from the skeleton. And `p:sldSz` has no front-matter key — the canvas
+lives in the preserved package, and a deck read from DocMark alone does not invent one.
+
 #### Version rule and compatibility
 
 A presentation declares `docmark: "1.2"` whether or not it carries ids: the version describes the

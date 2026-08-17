@@ -216,8 +216,12 @@ test (`docsai-convert/tests/plain_residue.rs`) that renders every corpus deck wi
 no container and no attribute extension: zero residue at `plain`, and at `standard` only the
 `{.slide}` marker and the rule-4/8 containers may show. It found three writer defects, now fixed:
 `layout=` at `standard` (its catalogue is not written there), `col-widths=` on a slide table at
-`standard`, and `geom=rect`, the default nobody chose. Next is **14-H**, the parser; the pptx
-*writer* is Phase 15 — do not start it.
+`standard`, and `geom=rect`, the default nobody chose. The eighth is done: the **parser** reads
+DocMark-P back — front matter, `.slide` headings, every container class, pictures, tables, groups,
+and notes in both syntaxes — and every corpus deck makes the round trip at `full`, `agent` and
+`standard` with its addresses and the kind of every shape intact. Input is tolerant: a deck typed by
+hand, with no attribute anywhere, parses. Next is **14-I**, the goldens and byte idempotence; the
+pptx *writer* is Phase 15 — do not start it.
 
 ## 2. Documents you must read before implementing
 

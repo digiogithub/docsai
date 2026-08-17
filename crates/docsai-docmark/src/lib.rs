@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod attrs;
+mod deck_parser;
 mod deck_writer;
 mod dict;
 mod error;

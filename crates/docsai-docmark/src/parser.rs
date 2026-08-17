@@ -51,6 +51,13 @@ pub fn parse_with_base(
         None => FrontMatter::default(),
     };
 
+    if crate::deck_parser::looks_like_deck(&fm, body) {
+        let mut doc =
+            crate::deck_parser::parse_deck(body, body_line, fm, base_dir, assets, &mut report)?;
+        observe_ids(&mut doc);
+        return Ok((doc, report));
+    }
+
     if crate::sheet_parser::looks_like_workbook(&fm, body) {
         let mut doc = crate::sheet_parser::parse_workbook(
             body,
@@ -64,14 +71,7 @@ pub fn parse_with_base(
         return Ok((doc, report));
     }
 
-    let mut parser = BodyParser {
-        base_dir: base_dir.map(Path::to_path_buf),
-        assets,
-        report: &mut report,
-        footnotes: BTreeMap::new(),
-        styles: fm.styles.clone(),
-        attr_sets: fm.attr_sets.clone(),
-    };
+    let mut parser = BodyParser::new(base_dir, assets, &mut report, &fm);
 
     let blocks = parser.parse_blocks(body, body_line)?;
     let (headers, footers, body_blocks, nested_sections) = partition_structure(blocks);
@@ -155,7 +155,7 @@ fn split_front_matter(markdown: &str) -> Result<(Option<&str>, &str, usize), Par
             let after = &search[idx + 1..]; // starts at ---
             if after == "---" || after.starts_with("---\n") || after.starts_with("---\r") {
                 let yaml = &after_open[..offset + idx];
-                let body = if let Some(rest) = after.strip_prefix("---\n") {
+                let mut body = if let Some(rest) = after.strip_prefix("---\n") {
                     rest
                 } else if after == "---" {
                     ""
@@ -166,11 +166,16 @@ fn split_front_matter(markdown: &str) -> Result<(Option<&str>, &str, usize), Par
                 } else {
                     after.get(3..).unwrap_or("")
                 };
-                // body starts after the closing fence line
-                let start_line = 2 + yaml.bytes().filter(|b| *b == b'\n').count() + 1;
-                // skip optional blank line after closing fence
-                let body = body.strip_prefix('\n').unwrap_or(body);
-                let start_line = start_line + 1;
+                // The first body line: the opening fence, the yaml, the closing
+                // fence, and then whatever `body` starts with.
+                let mut start_line = 2 + yaml.bytes().filter(|b| *b == b'\n').count() + 2;
+                // The blank line the writer leaves after the closing fence is
+                // skipped, and it is still a line of the file: a parse error
+                // that names a line the reader cannot find is worse than none.
+                if let Some(rest) = body.strip_prefix('\n') {
+                    body = rest;
+                    start_line += 1;
+                }
                 return Ok((Some(yaml), body, start_line));
             }
             offset += idx + 1;
@@ -309,10 +314,10 @@ enum ParsedBlock {
     Section { attrs: Attrs, blocks: Vec<Block> },
 }
 
-struct BodyParser<'a> {
+pub(crate) struct BodyParser<'a> {
     base_dir: Option<PathBuf>,
     assets: &'a mut dyn AssetStore,
-    report: &'a mut Report,
+    pub(crate) report: &'a mut Report,
     footnotes: BTreeMap<u32, Vec<Block>>,
     styles: docsai_model::StyleCatalog,
     /// The attribute-set dictionary declared in the front matter (spec §3.7).
@@ -320,10 +325,31 @@ struct BodyParser<'a> {
 }
 
 impl<'a> BodyParser<'a> {
+    /// The block parser of a document, as its front matter configures it.
+    ///
+    /// `deck_parser` builds one too: a slide's content is ordinary Markdown,
+    /// and a second implementation of lists, tables and images is how two
+    /// parsers of the same format drift apart.
+    pub(crate) fn new(
+        base_dir: Option<&Path>,
+        assets: &'a mut dyn AssetStore,
+        report: &'a mut Report,
+        fm: &FrontMatter,
+    ) -> Self {
+        BodyParser {
+            base_dir: base_dir.map(Path::to_path_buf),
+            assets,
+            report,
+            footnotes: BTreeMap::new(),
+            styles: fm.styles.clone(),
+            attr_sets: fm.attr_sets.clone(),
+        }
+    }
+
     /// Replaces the dictionary classes of a block by the attributes they stand
     /// for. Every attribute block read from the body passes through here, so
     /// nothing downstream has to know whether the document used a dictionary.
-    fn expanded(&self, mut attrs: Attrs) -> Attrs {
+    pub(crate) fn expanded(&self, mut attrs: Attrs) -> Attrs {
         attrs.expand(&self.attr_sets);
         attrs
     }
@@ -364,7 +390,7 @@ impl<'a> BodyParser<'a> {
         Ok(regrouped)
     }
 
-    fn parse_normal_blocks(
+    pub(crate) fn parse_normal_blocks(
         &mut self,
         text: &str,
         start_line: usize,
@@ -582,7 +608,11 @@ impl<'a> BodyParser<'a> {
         Ok(table)
     }
 
-    fn parse_gfm_table(&mut self, text: &str, _line: usize) -> Result<Table, ParseError> {
+    pub(crate) fn parse_gfm_table(
+        &mut self,
+        text: &str,
+        _line: usize,
+    ) -> Result<Table, ParseError> {
         let mut rows_raw: Vec<Vec<String>> = Vec::new();
         let mut delimiter_at = None;
         for (idx, line) in text.lines().enumerate() {
@@ -768,7 +798,7 @@ impl<'a> BodyParser<'a> {
         Ok(para)
     }
 
-    fn parse_paragraph_line(
+    pub(crate) fn parse_paragraph_line(
         &mut self,
         text: &str,
         is_heading: bool,
@@ -820,7 +850,10 @@ impl<'a> BodyParser<'a> {
         ))
     }
 
-    fn try_parse_block_image(&mut self, text: &str) -> Result<Option<ImageRef>, ParseError> {
+    pub(crate) fn try_parse_block_image(
+        &mut self,
+        text: &str,
+    ) -> Result<Option<ImageRef>, ParseError> {
         let text = text.trim();
         if !text.starts_with("![") {
             return Ok(None);
@@ -840,47 +873,52 @@ impl<'a> BodyParser<'a> {
         parse_inlines_inner(text, self)
     }
 
+    /// The asset a path in the body refers to: the file beside the document
+    /// when there is one, and otherwise a file of that name already in the
+    /// store — which is what a round trip through a [`MemoryAssetStore`] is.
+    ///
+    /// [`MemoryAssetStore`]: docsai_model::MemoryAssetStore
+    pub(crate) fn find_asset(
+        &mut self,
+        path: &str,
+    ) -> Result<Option<docsai_model::assets::AssetId>, ParseError> {
+        if let Some(base) = &self.base_dir {
+            let full = base.join(path);
+            if full.is_file() {
+                let bytes =
+                    std::fs::read(&full).map_err(|e| ParseError::io(Some(full.clone()), e))?;
+                return Ok(Some(self.assets.put(&bytes)?));
+            }
+        }
+        // Also try path as-is relative to cwd when no base
+        let p = Path::new(path);
+        if p.is_file() {
+            let bytes = std::fs::read(p).map_err(|e| ParseError::io(Some(p.to_path_buf()), e))?;
+            return Ok(Some(self.assets.put(&bytes)?));
+        }
+        let file_name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+        for id in self.assets.ids() {
+            if self
+                .assets
+                .info(&id)
+                .is_some_and(|info| info.file_name == file_name)
+            {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
+    }
+
     fn load_image(
         &mut self,
         path: &str,
         attrs: Attrs,
         alt: String,
     ) -> Result<ImageRef, ParseError> {
-        let mut asset_id = None;
-        if let Some(base) = &self.base_dir {
-            let full = base.join(path);
-            if full.is_file() {
-                let bytes =
-                    std::fs::read(&full).map_err(|e| ParseError::io(Some(full.clone()), e))?;
-                asset_id = Some(self.assets.put(&bytes)?);
-            }
-        }
-        // Also try path as-is relative to cwd when no base
-        if asset_id.is_none() {
-            let p = Path::new(path);
-            if p.is_file() {
-                let bytes =
-                    std::fs::read(p).map_err(|e| ParseError::io(Some(p.to_path_buf()), e))?;
-                asset_id = Some(self.assets.put(&bytes)?);
-            }
-        }
-        // Assets already present in the store (round-trip via MemoryAssetStore).
-        if asset_id.is_none() {
-            let file_name = Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(path);
-            for id in self.assets.ids() {
-                if self
-                    .assets
-                    .info(&id)
-                    .is_some_and(|info| info.file_name == file_name)
-                {
-                    asset_id = Some(id);
-                    break;
-                }
-            }
-        }
+        let asset_id = self.find_asset(path)?;
 
         let width = attrs
             .get("width")
@@ -1360,7 +1398,7 @@ fn find_closing_delim(chars: &[char], start: usize, delim: &str) -> Option<usize
 /// list names its definition and its id there, because a Markdown list has no
 /// attribute slot of its own (spec §3.3, §11.1).
 #[derive(Debug, Default)]
-struct ParaExtras {
+pub(crate) struct ParaExtras {
     list_def: Option<String>,
     list_id: Option<String>,
 }
@@ -1389,6 +1427,20 @@ fn paragraph_format_from_attrs(attrs: &Attrs, is_heading: bool) -> ParaFormat {
                 | "section"
                 | "raw"
                 | "textbox"
+                // The 1.2 profile's structural classes (spec §11.2). A slide
+                // heading carries `.slide`, and a style named `slide` is not
+                // what it means.
+                | "slide"
+                | "ph"
+                | "shape"
+                | "connector"
+                | "group"
+                | "notes"
+                | "chart"
+                | "smartart"
+                | "ole"
+                | "media"
+                | "object"
         ) {
             continue;
         }
@@ -1608,7 +1660,7 @@ fn parse_scope(v: Option<&str>) -> HeaderScope {
     }
 }
 
-fn apply_table_attrs(table: &mut Table, attrs: &Attrs) {
+pub(crate) fn apply_table_attrs(table: &mut Table, attrs: &Attrs) {
     table.id = attrs.id_ref().map(NodeId::new);
     if let Some(style) = attrs.get("style") {
         table.style = Some(StyleId::new(style));
@@ -1780,7 +1832,7 @@ fn normalize_gfm_spans(table: &mut Table) {
     }
 }
 
-fn split_top_level(text: &str) -> Vec<&str> {
+pub(crate) fn split_top_level(text: &str) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start = 0usize;
     let bytes = text.as_bytes();
@@ -1829,7 +1881,7 @@ fn split_top_level(text: &str) -> Vec<&str> {
     chunks
 }
 
-fn split_one_fence(text: &str, line: usize) -> Result<(Attrs, &str, &str), ParseError> {
+pub(crate) fn split_one_fence(text: &str, line: usize) -> Result<(Attrs, &str, &str), ParseError> {
     let text = text.trim_start_matches('\n');
     let mut lines = text.lines();
     let first = lines
@@ -1886,7 +1938,7 @@ fn split_one_fence(text: &str, line: usize) -> Result<(Attrs, &str, &str), Parse
     Err(ParseError::unexpected(line, "unclosed fenced container"))
 }
 
-fn looks_like_table(text: &str) -> bool {
+pub(crate) fn looks_like_table(text: &str) -> bool {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let Some(first) = lines.next() else {
         return false;
@@ -1980,7 +2032,7 @@ fn strip_list_indent(text: &str, marker_len: usize) -> String {
     out
 }
 
-fn strip_heading(text: &str) -> Option<(u8, &str)> {
+pub(crate) fn strip_heading(text: &str) -> Option<(u8, &str)> {
     let mut n = 0usize;
     let bytes = text.as_bytes();
     while n < bytes.len() && bytes[n] == b'#' && n < 6 {
@@ -1996,7 +2048,17 @@ fn strip_heading(text: &str) -> Option<(u8, &str)> {
     }
 }
 
-fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
+pub(crate) fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
+    split_attrs(text, true)
+}
+
+/// Like [`split_trailing_attrs`], for the attribute block of an image line,
+/// which attaches tightly: `![alt](path){#n2 pos="1cm,2cm"}`.
+pub(crate) fn split_tight_attrs(text: &str) -> (&str, Option<Attrs>) {
+    split_attrs(text, false)
+}
+
+fn split_attrs(text: &str, require_space: bool) -> (&str, Option<Attrs>) {
     let text = text.trim_end();
     // Paragraph-level attrs are always emitted with a leading space (`Attrs::suffix`).
     // Span/link/image attrs attach tightly: `[text]{.underline}`, `![](p){width=1}`.
@@ -2023,7 +2085,7 @@ fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
                     depth -= 1;
                     if depth == 0 {
                         // Require whitespace before `{`, or attrs-only line.
-                        if i > 0 && !chars[i - 1].is_whitespace() {
+                        if require_space && i > 0 && !chars[i - 1].is_whitespace() {
                             return (text, None);
                         }
                         let attr_str: String = chars[i..].iter().collect();

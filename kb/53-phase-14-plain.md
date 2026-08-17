@@ -98,4 +98,4 @@ hand-written samples only.
 
 **14-H — the parser**: front matter, `.slide` headings, the container classes, notes in both
 syntaxes, line-level errors and tolerant input — a hand-written deck with no attributes at all has
-to parse.
+to parse. Done, in [[54-phase-14-parser]].

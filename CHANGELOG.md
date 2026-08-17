@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The deck parser** (plan v2 Phase 14, eighth increment): DocMark-P is read back into the IR —
+  front matter, `.slide` headings, the container classes of rules 4 and 8, pictures, tables and
+  groups, and speaker notes in **both** syntaxes, the `::: {.notes}` container and the `standard`
+  blockquote. Every deck of `corpus/pptx` now makes the round trip at `full`, `agent` and
+  `standard` with its slides, its addresses and the *kind* of every shape intact. Input is
+  tolerant, which is what lets a deck be drafted in a text editor: a `#` or `##` heading opens a
+  slide with or without `.slide`, content before the first heading is a slide with no title, and a
+  container class the reader does not know keeps its text as a shape and says so with a warning
+  instead of refusing the file. A `.shape` is a stub when it carries `raw=` and a text box
+  otherwise — `geom=` alone would freeze an editable rounded box into an opaque object. Also
+  fixed: a parse error in the body named a line one short of the real one, because the blank line
+  after the front matter was skipped without being counted.
+
 - **`plain` proven, and the degradation rule as a test** (plan v2 Phase 14, seventh increment): the
   spec's own sentence — *«a plain Markdown viewer must show, per slide, title + bullets + images and
   nothing else»* — is now checked by CI instead of by a reviewer. Spike P2's residue probe moved
