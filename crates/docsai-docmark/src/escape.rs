@@ -27,6 +27,24 @@ const ALWAYS: &[char] = &['\\', '`', '*', '_', '[', ']', '<'];
 /// assert_eq!(escape("a|b", TextContext::Block), "a|b");
 /// ```
 pub fn escape(text: &str, context: TextContext) -> String {
+    // A link label (an image's alt text, notably) can't hold a block break:
+    // Word's AI-generated alt text routinely pairs a short title with a
+    // longer description separated by a blank line, and writing that blank
+    // line straight into `![...]()` splits the label across two paragraphs,
+    // which the parser reads back as literal, unparsed `[`/`]` text.
+    let text: std::borrow::Cow<'_, str> = if context == TextContext::LinkLabel && text.contains('\n')
+    {
+        std::borrow::Cow::Owned(
+            text.split('\n')
+                .map(|line| line.trim_end_matches('\r'))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    let text = text.as_ref();
+
     let mut out = String::with_capacity(text.len());
     let mut at_line_start = true;
     let mut chars = text.chars().peekable();

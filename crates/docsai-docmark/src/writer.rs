@@ -872,12 +872,32 @@ impl<'a> Writer<'a> {
         out
     }
 
+    /// True if any inline in the list is, or (recursively, through nested
+    /// styled runs) contains, a raw fragment — which renders as a
+    /// block-level `:::` fence and can't sit inside `[...]{...}` span syntax.
+    fn contains_raw(inlines: &[Inline]) -> bool {
+        inlines.iter().any(|i| match i {
+            Inline::Raw(_) => true,
+            Inline::Styled { content, .. } => Self::contains_raw(content),
+            _ => false,
+        })
+    }
+
     fn render_inline(&mut self, inline: &Inline, context: TextContext) -> String {
         match inline {
             Inline::Text(text) => escape(text, context),
             Inline::Styled { content, props } => {
                 let inner = self.render_inlines(content, context);
-                self.wrap_styled(inner, props)
+                if Self::contains_raw(content) {
+                    // A raw fragment renders as a block-level `:::` fence with
+                    // blank lines around it (see the Inline::Raw arm below).
+                    // Wrapping that in `[...]{...}` span syntax produces
+                    // unparseable DocMark — spans can't hold block content —
+                    // so styling is dropped for runs that carry one.
+                    inner
+                } else {
+                    self.wrap_styled(inner, props)
+                }
             }
             Inline::Link {
                 target,

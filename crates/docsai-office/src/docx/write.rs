@@ -26,6 +26,17 @@ const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relati
 const NS_WP: &str = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
 const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const NS_PIC: &str = "http://schemas.openxmlformats.org/drawingml/2006/picture";
+// Preserved raw OOXML fragments (VML fallbacks, mc:AlternateContent, wp14 group
+// shapes) reference these prefixes without declaring them locally, so the
+// root elements that host such fragments must declare them up front.
+const NS_MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+const NS_O: &str = "urn:schemas-microsoft-com:office:office";
+const NS_V: &str = "urn:schemas-microsoft-com:vml";
+const NS_W10: &str = "urn:schemas-microsoft-com:office:word";
+const NS_WPG: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
+const NS_WPS: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
+const NS_WP14: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing";
+const NS_W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
 const NS_CT: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 const NS_PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const NS_CORE: &str = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
@@ -1209,7 +1220,7 @@ fn register_hf(
     let root = if is_header { "hdr" } else { "ftr" };
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:{root} xmlns:w="{NS_W}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}">
+<w:{root} xmlns:w="{NS_W}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}" xmlns:mc="{NS_MC}" xmlns:o="{NS_O}" xmlns:v="{NS_V}" xmlns:w10="{NS_W10}" xmlns:wpg="{NS_WPG}" xmlns:wps="{NS_WPS}" xmlns:wp14="{NS_WP14}" xmlns:w14="{NS_W14}">
 {body}
 </w:{root}>"#
     );
@@ -1229,7 +1240,7 @@ fn register_hf(
 fn document_xml(body: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="{NS_W}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}">
+<w:document xmlns:w="{NS_W}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}" xmlns:mc="{NS_MC}" xmlns:o="{NS_O}" xmlns:v="{NS_V}" xmlns:w10="{NS_W10}" xmlns:wpg="{NS_WPG}" xmlns:wps="{NS_WPS}" xmlns:wp14="{NS_WP14}" xmlns:w14="{NS_W14}">
   <w:body>
 {body}
   </w:body>
