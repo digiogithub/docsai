@@ -372,7 +372,13 @@ impl<'a> Writer<'a> {
         match block {
             Block::Paragraph(p) => {
                 let mark = self.ids.mark();
-                let id = paragraph_is_container(p)
+                // A plain paragraph earns an id only by containing something
+                // addressable — *unless* it already carries one: a Word
+                // bookmark read off the source, which a caption's "Tabla de
+                // ilustraciones" entry addresses by name (PAGEREF/hyperlink),
+                // and which must survive even though the caption is plain
+                // text on its own.
+                let id = (paragraph_is_container(p) || p.id.is_some())
                     .then(|| self.ids.take(p))
                     .flatten();
                 let rendered = self.render_paragraph(p, None, &[], id.clone());
@@ -635,7 +641,7 @@ impl<'a> Writer<'a> {
             let body = match (pairs.is_empty(), item.blocks.split_first()) {
                 (false, Some((Block::Paragraph(first), rest))) => {
                     let first_mark = self.ids.mark();
-                    let first_id = paragraph_is_container(first)
+                    let first_id = (paragraph_is_container(first) || first.id.is_some())
                         .then(|| self.ids.take(first))
                         .flatten();
                     let head = self.render_paragraph(first, None, &pairs, first_id.clone());
@@ -839,6 +845,11 @@ impl<'a> Writer<'a> {
                 }
                 if cell.rowspan > 1 {
                     cell_attrs.set("rowspan", cell.rowspan.to_string());
+                }
+                if let Some(background) = &cell.background {
+                    if self.formatting() {
+                        cell_attrs.set("background", background);
+                    }
                 }
                 let body = self.render_blocks(&cell.blocks, 0);
                 out.push_str(&format!(

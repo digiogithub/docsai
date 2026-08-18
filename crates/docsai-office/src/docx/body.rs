@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use docsai_model::addressing::NodeId;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::RawId;
 use docsai_model::list::ListId;
@@ -204,8 +205,13 @@ fn as_heading_or_paragraph(paragraph: Paragraph, ctx: &Ctx<'_>, st: &mut State<'
     match level {
         Some(level) if (1..=9).contains(&level) && !paragraph.is_empty() => {
             st.report.stats.headings += 1;
+            // The bookmark belongs to the heading, the addressable node here
+            // — not to the `Paragraph` nested inside it, which never takes
+            // its own id (see `Paragraph::id`'s doc comment).
+            let id = paragraph.id.clone();
+            let paragraph = Paragraph { id: None, ..paragraph };
             Block::Heading(Heading {
-                id: None,
+                id,
                 level,
                 paragraph,
             })
@@ -331,15 +337,29 @@ fn read_paragraph(
         }
     }
 
-    let content = read_inlines(p, ctx, st);
+    let (content, bookmarks) = read_inlines_with_bookmarks(p, ctx, st);
+    let id = bookmark_node_id(&bookmarks);
     (
         Paragraph {
-            id: None,
+            id,
             format,
             content,
         },
         numbering,
     )
+}
+
+/// Picks a bookmark to carry forward as the paragraph's (or, for a heading,
+/// the heading's) DocMark id, so internal links that address it by that name
+/// — a TOC's hyperlinks and `PAGEREF` fields, chiefly — still resolve after a
+/// round trip. A paragraph can open more than one bookmark; the first
+/// DocMark-legal name wins, since ordering in the source reflects nothing
+/// meaningful here.
+fn bookmark_node_id(bookmarks: &[String]) -> Option<NodeId> {
+    bookmarks
+        .iter()
+        .map(|name| NodeId::new(name.clone()))
+        .find(NodeId::is_valid)
 }
 
 /// A run may emit content *or* field-control markers; the paragraph-level loop
@@ -352,6 +372,11 @@ enum Piece {
     FieldSeparate,
     FieldEnd,
     Instruction(String),
+    /// A `w:bookmarkStart` name, carried out so the paragraph it opens in can
+    /// take it as its DocMark id. Internal hyperlinks and TOC/PAGEREF fields
+    /// address headings by this name (e.g. `_Toc234329254`); dropping it
+    /// silently, as `IGNORED` used to, leaves those links pointing nowhere.
+    Bookmark(String),
 }
 
 impl Piece {
@@ -369,14 +394,27 @@ struct FieldBuilder {
 /// Reads the inline children of a paragraph (or of a hyperlink, or of an
 /// inserted run range).
 fn read_inlines(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Vec<Inline> {
+    read_inlines_with_bookmarks(parent, ctx, st).0
+}
+
+/// Same, plus the names of any `w:bookmarkStart` elements found directly in
+/// `parent` (not inside nested hyperlinks or fields, where they don't occur
+/// in practice).
+fn read_inlines_with_bookmarks(
+    parent: &Element,
+    ctx: &Ctx<'_>,
+    st: &mut State<'_>,
+) -> (Vec<Inline>, Vec<String>) {
     let mut pieces = Vec::new();
     collect_pieces(parent, ctx, st, &mut pieces);
 
     let mut out: Vec<Inline> = Vec::new();
+    let mut bookmarks: Vec<String> = Vec::new();
     let mut fields: Vec<FieldBuilder> = Vec::new();
 
     for piece in pieces {
         match piece {
+            Piece::Bookmark(name) => bookmarks.push(name),
             Piece::FieldBegin => fields.push(FieldBuilder {
                 instruction: String::new(),
                 result: Vec::new(),
@@ -414,7 +452,7 @@ fn read_inlines(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Vec<Inli
     for field in fields {
         out.push(build_field(field));
     }
-    out
+    (out, bookmarks)
 }
 
 fn build_field(field: FieldBuilder) -> Inline {
@@ -477,6 +515,11 @@ fn collect_pieces(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut
                 what: "w:commentReference".into(),
                 why: "comments are out of scope in v1".into(),
             }),
+            "bookmarkStart" => {
+                if let Some(name) = child.attr("name") {
+                    out.push(Piece::Bookmark(name.to_string()));
+                }
+            }
             name if IGNORED.contains(&name) => {}
             _ => {
                 let fragment = st.raw(child, ctx);

@@ -1033,7 +1033,12 @@ fn parse_inlines_inner(text: &str, ctx: &mut BodyParser<'_>) -> Result<Vec<Inlin
         if c == '[' && i + 2 < chars.len() && chars[i + 1] == '^' {
             if let Some(end) = find_closing_bracket(&chars, i + 2) {
                 let inner: String = chars[i + 2..end].iter().collect();
-                if inner.chars().all(|ch| ch.is_ascii_digit()) {
+                // `[^]` (empty) is not a footnote reference — plain `^` text,
+                // typically followed by its own `{...}` span — but `.all()`
+                // on an empty string is vacuously true, so this must be
+                // checked explicitly or a bare caret becomes a phantom
+                // footnote `[^0]` with unparseable placeholder content.
+                if !inner.is_empty() && inner.chars().all(|ch| ch.is_ascii_digit()) {
                     flush_text(&mut text_buf, &mut out);
                     let n: u32 = inner.parse().unwrap_or(0);
                     let mut next = end + 1;

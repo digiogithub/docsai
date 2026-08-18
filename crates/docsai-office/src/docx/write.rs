@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::io::{Seek, Write};
 
+use docsai_model::addressing::NodeId;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{
     AlignKeyword, Anchor, AxisPos, Flip, ImageRef, RelBase, WrapMode, WrapSide,
@@ -111,6 +112,8 @@ struct WriterCtx<'a> {
     list_nums: BTreeMap<String, i64>,
     /// drawing unique ids
     drawing_id: u32,
+    /// `w:bookmarkStart`/`w:bookmarkEnd` unique ids (spec: unique per document).
+    bookmark_id: u32,
 }
 
 impl<'a> WriterCtx<'a> {
@@ -129,6 +132,7 @@ impl<'a> WriterCtx<'a> {
             next_footnote: 1,
             list_nums: BTreeMap::new(),
             drawing_id: 1,
+            bookmark_id: 1,
         }
     }
 
@@ -427,7 +431,7 @@ fn write_heading(h: &Heading, ctx: &mut WriterCtx<'_>, out: &mut String) {
         .as_ref()
         .map(|s| s.as_str().to_string())
         .unwrap_or_else(|| format!("Heading{}", h.level.min(9)));
-    write_paragraph(&h.paragraph, ctx, out, None, Some(&style));
+    write_paragraph_with_bookmark(&h.paragraph, ctx, out, None, Some(&style), h.id.as_ref());
 }
 
 fn write_list(list: &List, ctx: &mut WriterCtx<'_>, out: &mut String) {
@@ -491,6 +495,21 @@ fn write_paragraph(
     list_ctx: Option<(&str, u8)>,
     style_override: Option<&str>,
 ) {
+    write_paragraph_with_bookmark(p, ctx, out, list_ctx, style_override, p.id.as_ref());
+}
+
+/// A paragraph, plus (when `bookmark` is `Some`) the `w:bookmarkStart`/
+/// `w:bookmarkEnd` pair that lets an internal link address it by that exact
+/// id — the mechanism a TOC's hyperlinks and `PAGEREF` fields rely on (spec
+/// §9's node ids double as Word bookmark names on the way back).
+fn write_paragraph_with_bookmark(
+    p: &Paragraph,
+    ctx: &mut WriterCtx<'_>,
+    out: &mut String,
+    list_ctx: Option<(&str, u8)>,
+    style_override: Option<&str>,
+    bookmark: Option<&NodeId>,
+) {
     out.push_str("<w:p>");
     let style = style_override
         .map(str::to_string)
@@ -519,7 +538,21 @@ fn write_paragraph(
         }
         out.push_str("</w:pPr>");
     }
+    let bookmark_num_id = bookmark.map(|_| {
+        let n = ctx.bookmark_id;
+        ctx.bookmark_id += 1;
+        n
+    });
+    if let (Some(name), Some(n)) = (bookmark, bookmark_num_id) {
+        out.push_str(&format!(
+            r#"<w:bookmarkStart w:id="{n}" w:name="{}"/>"#,
+            esc_attr(name.as_str())
+        ));
+    }
     write_inlines(&p.content, ctx, out, &RunProps::default());
+    if let Some(n) = bookmark_num_id {
+        out.push_str(&format!(r#"<w:bookmarkEnd w:id="{n}"/>"#));
+    }
     out.push_str("</w:p>");
 }
 
