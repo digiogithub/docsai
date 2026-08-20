@@ -37,6 +37,30 @@ impl DirAssetStore {
         &self.written
     }
 
+    /// Removes the file written for `id`, keeping the bytes in memory.
+    ///
+    /// For the one asset a document may hold without referring to it: a deck's
+    /// preserved package, which the reader always stores and which `standard`
+    /// and `plain` name nowhere. Leaving it would drop a copy of the whole
+    /// original next to a document whose point is being readable. The bytes
+    /// stay in the store because the IR still names them.
+    pub fn discard(&mut self, id: &AssetId) -> Result<(), AssetError> {
+        let Some((info, _)) = self.entries.get(id) else {
+            return Ok(());
+        };
+        let path = self.dir.join(&info.file_name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(AssetError::Io(e.to_string())),
+        }
+        self.written.retain(|written| written != &path);
+        // The directory was created for this file and may now be empty; an
+        // empty `assets/` is the same surprise in a smaller box.
+        let _ = std::fs::remove_dir(&self.dir);
+        Ok(())
+    }
+
     /// Moves the file written for `id` to `to`, and reports it there.
     ///
     /// Everything a reader puts in lands under `img-<hash8>.<ext>`, which is

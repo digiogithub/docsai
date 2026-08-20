@@ -844,6 +844,11 @@ than of an implementation, because a second reader has to give the same ones.
   object. At `standard`, where `raw=` is not written, a stub therefore reads back as a text box —
   the level does not write back, so it spends nothing it was going to use.
 
+- **A slide has one notes page.** More than one notes block under the same slide — two blockquotes,
+  or a `::: {.notes}` and a blockquote — is one page with their blocks in order, never the last one
+  replacing the others. Writing a second blockquote is what «add a note» looks like at `standard`,
+  and dropping the first would lose text that is on the screen.
+
 Two more things a reader will notice. `##` is written both for a slide whose title placeholder is
 empty and for a slide that has none, so it reads back as the second: the two write the same line,
 and the empty box is restored from the skeleton. And `p:sldSz` has no front-matter key — the canvas

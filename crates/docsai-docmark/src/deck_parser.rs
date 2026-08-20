@@ -255,7 +255,7 @@ fn parse_slide(
             if attrs.has_class("notes") {
                 // An empty container is an empty notes page, which is not the
                 // same document as a slide with no notes page at all.
-                slide.notes = Some(parser.parse_normal_blocks(inner, chunk.line)?);
+                add_notes(&mut slide, parser.parse_normal_blocks(inner, chunk.line)?);
                 continue;
             }
             if let Some(shape) = parse_shape(&attrs, inner, chunk.line, parser)? {
@@ -266,7 +266,10 @@ fn parse_slide(
         if is_blockquote(trimmed) {
             // `standard` writes the notes as a blockquote, and PresentationML
             // has no blockquote for slide content to be mistaken for (rule 5).
-            slide.notes = Some(parser.parse_normal_blocks(&unquote(trimmed), chunk.line)?);
+            add_notes(
+                &mut slide,
+                parser.parse_normal_blocks(&unquote(trimmed), chunk.line)?,
+            );
             continue;
         }
         if looks_like_table(trimmed) {
@@ -508,6 +511,21 @@ fn try_picture(text: &str, parser: &mut BodyParser<'_>) -> Result<Option<Shape>,
     shape.geometry.size = None;
     shape.kind = ShapeKind::Picture(image);
     Ok(Some(shape))
+}
+
+/// Adds blocks to the slide's notes page, keeping what is already there.
+///
+/// A slide has one notes page, and a reviewer who writes a second blockquote
+/// under a slide that already had notes means «and also this» — so the two
+/// become two paragraphs of one page. Replacing would drop text the reader can
+/// see on screen without a word, which is the silent loss `AGENTS.md` §7 rule 3
+/// forbids. Found by the P4 hand-edit gate (14-K), which is what the gate is
+/// for.
+fn add_notes(slide: &mut Slide, blocks: Vec<Block>) {
+    match &mut slide.notes {
+        Some(notes) => notes.extend(blocks),
+        None => slide.notes = Some(blocks),
+    }
 }
 
 fn is_blockquote(text: &str) -> bool {

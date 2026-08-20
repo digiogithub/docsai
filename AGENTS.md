@@ -232,8 +232,14 @@ measured and **is not met**: `--fidelity agent` costs 96–102 % of `full` over 
 ≤ 15 % of analysis §6.5 — the two levels differ by one line, because what `agent` drops these decks
 barely carry and the geometry §6.5 wanted collapsed is written at `agent` by design. The criterion
 is in the suite as an `#[ignore]`d test rather than softened; closing it changes what a level means,
-which is a specification decision. Next is **14-K**, the P4 hand-edit gate and the phase close; the
-pptx *writer* is Phase 15 — do not start it.
+which is a specification decision. The eleventh is done and **Phase 14 is closed**: the P4 gate was
+run — three `standard` decks edited as text without consulting the spec — and it found the one thing
+four increments of writer tests could not, because they never asked what happens when a *person*
+writes: a second notes blockquote replaced the first instead of joining it, losing visible text
+without a warning. A slide has one notes page; fixed in the parser and written into the spec. The
+phase's three criteria are met and the fourth, the inherited `agent` ≤ 15 %, is open in writing.
+Next is **Phase 15**, the pptx writer and the anti-repair gate — a new phase, so read
+`docs/development-plan-v2.md` and open its plan in the KB before touching anything.
 
 ## 2. Documents you must read before implementing
 

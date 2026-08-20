@@ -102,6 +102,8 @@ before running `convert deck.pptx -o -` inside `corpus/`.
 
 ## Next
 
+Done, in [[57-phase-14-p4-gate]].
+
 **14-K — the P4 gate and the phase close**: three `standard` decks hand-edited without consulting
 the spec, recorded with what broke, then docs, README, `AGENTS.md` status and the acceptance
 criteria.

@@ -354,6 +354,24 @@ fn a_multi_block_blockquote_keeps_its_shape() {
 }
 
 #[test]
+fn two_notes_blocks_on_one_slide_are_one_notes_page() {
+    // A slide has one notes page, so a second blockquote under it is «and also
+    // this», not «instead of that». Replacing dropped text a reader can see on
+    // screen, which is the silent loss §7 rule 3 forbids; the P4 hand-edit gate
+    // of 14-K found it, because adding a note is what a reviewer does.
+    let (deck, warnings) = read(
+        "---\ndocmark: \"1.2\"\nsource-format: pptx\n---\n\n\
+         ## Q3 {.slide}\n\n\
+         > La primera nota.\n\n\
+         > La segunda, escrita después.\n",
+    );
+
+    let notes = deck.slides[0].notes.as_ref().expect("notes");
+    assert_eq!(notes.len(), 2, "one of the two notes was dropped");
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[test]
 fn an_empty_notes_container_is_an_empty_notes_page() {
     let (deck, _) = read(
         "---\ndocmark: \"1.2\"\nsource-format: pptx\n---\n\n\

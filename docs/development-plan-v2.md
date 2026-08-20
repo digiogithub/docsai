@@ -244,10 +244,12 @@ Tasks:
    CI, as for docx.
 
 Acceptance criteria:
-- [ ] `serialize(parse(md)) == md` byte-for-byte on every pptx golden.
-- [ ] Risk P4 gate: a reviewer hand-edits three `--fidelity standard` decks (retitle a slide,
-      add a bullet, swap an image) without consulting the spec; failures block the phase.
-- [ ] `plain` output of a deck is valid CommonMark and readable as a document.
+- [x] `serialize(parse(md)) == md` byte-for-byte on every pptx golden.
+- [x] Risk P4 gate: a reviewer hand-edits three `--fidelity standard` decks (retitle a slide,
+      add a bullet, swap an image) without consulting the spec; failures block the phase. Passed
+      with one defect found and fixed: a second notes blockquote replaced the first instead of
+      joining it.
+- [x] `plain` output of a deck is valid CommonMark and readable as a document.
 
 ## Phase 15 — PPTX writing and the anti-repair gate (4–5 weeks)
 

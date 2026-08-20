@@ -724,9 +724,19 @@ fn write_skeleton_package(
     let Document::Presentation(deck) = document else {
         return Ok(());
     };
-    let (Some(skeleton), true) = (deck.skeleton.as_ref(), options.fidelity.addresses()) else {
+    let Some(skeleton) = deck.skeleton.as_ref() else {
         return Ok(());
     };
+    if !options.fidelity.addresses() {
+        // The level writes no `skeleton:` (rule 6), and the reader stored the
+        // package anyway: without this, a readable deck arrives with a copy of
+        // the whole original beside it under an image's name.
+        return store.discard(&skeleton.asset).map_err(|source| {
+            ConvertError::Invalid(format!(
+                "the preserved package could not be removed: {source}"
+            ))
+        });
+    }
     // The name is the serializer's, taken from the reference it wrote, so the
     // file and the `skeleton:` line cannot drift apart.
     let reference = docsai_docmark::skeleton_path(&options.assets_dir, &skeleton.asset);

@@ -167,9 +167,31 @@ fn the_readable_levels_leave_no_package_behind() {
                 "{stem} at {}: the reference is a full/agent one",
                 fidelity.as_str()
             );
+            // Not only `_skeleton/`: the reader stores the package whatever
+            // the level, so before 14-K it landed flat in `assets/` under an
+            // image's name — a copy of the whole original next to a document
+            // whose point is being readable.
+            let base = output.parent().unwrap();
             assert!(
-                !output.parent().unwrap().join("assets/_skeleton").exists(),
+                !base.join("assets/_skeleton").exists(),
                 "{stem} at {}: a package was written that nothing refers to",
+                fidelity.as_str()
+            );
+            let package_bytes = std::fs::read(&deck).expect("reads the original deck");
+            let loose: Vec<_> = std::fs::read_dir(base.join("assets"))
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| {
+                            std::fs::read(e.path()).is_ok_and(|bytes| bytes == package_bytes)
+                        })
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert!(
+                loose.is_empty(),
+                "{stem} at {}: the original package is beside the document as {loose:?}",
                 fidelity.as_str()
             );
         }

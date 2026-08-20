@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The P4 gate, and Phase 14 closed** (plan v2 Phase 14, eleventh and last increment): risk P4 —
+  *«DocMark-P becomes unreadable»* — is answered the way plan v2 asks, by editing three `standard`
+  decks as text without consulting the specification: retitle a slide, add a bullet, swap an image,
+  and then everything else a person does while they are in the file — add a slide by typing a
+  heading, delete one, type a table, drop the front matter, mistype a fence. All of it works, and
+  the sixteen edits are pinned in `docsai-convert/tests/p4_hand_edit.rs` so they cannot quietly
+  stop working.
+
+  One defect found, and it is the edit a reviewer is most likely to make: **adding a note to a
+  slide that already had one replaced it**. At `standard` the notes are a blockquote, so a second
+  note looks like a second blockquote, and the parser assigned rather than joined — text visible on
+  screen disappeared with no warning. A slide has one notes page: more than one notes block under
+  it, blockquote or `::: {.notes}`, is that page with the blocks in order. Written into the
+  specification, not just into the parser.
+
+  A second defect went with it: converting a deck at `standard` or `plain` left a copy of the whole
+  original package beside the document as `assets/img-<hash>.bin`, referenced by nothing. The
+  levels that name no package now leave none, and the empty `assets/` goes too.
+
 - **A deck converts** (plan v2 Phase 14, tenth increment): the refusal added in Phase 13 is gone —
   `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `outline`, `tokens`, `search` and
   `read --select` work over a presentation with no work of their own, because they all go through
