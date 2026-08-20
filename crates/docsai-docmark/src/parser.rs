@@ -912,6 +912,31 @@ impl<'a> BodyParser<'a> {
         Ok(None)
     }
 
+    /// The preserved package a `skeleton:` path refers to, when the file is
+    /// not beside the document but its bytes are already in the store.
+    ///
+    /// The path the serializer writes is `deck-<hash>.pptx`, where the hash is
+    /// the head of the asset id — the content, in other words, so the name is
+    /// enough to find the bytes again without the file. `find_asset` cannot do
+    /// it: the store keeps the package under the name it had in its package,
+    /// not under the one the reference was built from.
+    pub(crate) fn find_skeleton(
+        &mut self,
+        path: &str,
+    ) -> Result<Option<docsai_model::assets::AssetId>, ParseError> {
+        if let Some(id) = self.find_asset(path)? {
+            return Ok(Some(id));
+        }
+        let Some(hash) = skeleton_hash(path) else {
+            return Ok(None);
+        };
+        Ok(self
+            .assets
+            .ids()
+            .into_iter()
+            .find(|id| skeleton_hash(&crate::frontmatter::skeleton_path("", id)) == Some(hash)))
+    }
+
     fn load_image(
         &mut self,
         path: &str,
@@ -2055,6 +2080,14 @@ pub(crate) fn strip_heading(text: &str) -> Option<(u8, &str)> {
 
 pub(crate) fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
     split_attrs(text, true)
+}
+
+/// The content hash inside a `…/_skeleton/deck-<hash>.pptx` reference.
+fn skeleton_hash(path: &str) -> Option<&str> {
+    path.rsplit('/')
+        .next()?
+        .strip_prefix("deck-")?
+        .strip_suffix(".pptx")
 }
 
 /// Like [`split_trailing_attrs`], for the attribute block of an image line,

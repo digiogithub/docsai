@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deck goldens and byte idempotence** (plan v2 Phase 14, ninth increment): the seventeen decks of
+  `corpus/pptx` are pinned by their DocMark-P as `<name>.expected.dmk.md`, in the same test and with
+  the same `DOCSAI_UPDATE_GOLDENS=1` ritual as the docx, xlsx, odt and ods corpora; the
+  `<name>.expected.inspect.json` of Phase 13 stay beside them and answer a different question. On
+  top of the goldens, `serialize(parse(md)) == md` is checked byte for byte over every deck: what a
+  round trip through DocMark-P costs a document that nobody edited is now zero, so an edit changes
+  what it touches and nothing else. A `skeleton:` reference resolves against the asset store when
+  the package is not beside the document — the reference is built from the content hash, so the
+  name is enough to find the bytes again.
+
 - **The deck parser** (plan v2 Phase 14, eighth increment): DocMark-P is read back into the IR —
   front matter, `.slide` headings, the container classes of rules 4 and 8, pictures, tables and
   groups, and speaker notes in **both** syntaxes, the `::: {.notes}` container and the `standard`

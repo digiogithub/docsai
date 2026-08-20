@@ -33,9 +33,12 @@ performance and adversarial corpora of Phase 8 will be added separately; the
 
 ## Golden files
 
-Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`, and the degraded `doc/`
-fixtures) has its expected DocMark beside it as `<name>.expected.dmk.md` when a
-golden is maintained. They are compared by the tests in
+Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`, `pptx/`, and the
+degraded `doc/` fixtures) has its expected DocMark beside it as
+`<name>.expected.dmk.md` when a golden is maintained. The decks of `pptx/` also
+keep an `<name>.expected.inspect.json`: that one pins the IR seen from outside,
+the DocMark golden pins the text a person edits, and the two answer different
+questions. They are compared by the tests in
 `crates/docsai-convert/tests/goldens.rs` (OOXML/ODF) and
 `crates/docsai-convert/tests/doc_phase5.rs` (legacy `.doc`). To update OOXML/ODF
 goldens:

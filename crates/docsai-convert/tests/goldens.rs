@@ -39,37 +39,49 @@ fn documents(subdir: &str, extension: &str) -> Vec<PathBuf> {
     paths
 }
 
+/// Reads a corpus document with the reader its extension names, into the
+/// asset store the caller owns.
+fn read(path: &Path, assets: &mut MemoryAssetStore) -> (Document, ConversionReport, Format) {
+    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    // One closure cannot serve both readers: the two crates have their own
+    // `ReadError`, and a closure is not generic over its argument.
+    macro_rules! fail {
+        () => {
+            |e| panic!("{}: {e}", path.display())
+        };
+    }
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "xlsx" => {
+            let (document, report) = docsai_office::read_xlsx(file, assets).unwrap_or_else(fail!());
+            (document, report, Format::Xlsx)
+        }
+        "odt" => {
+            let (document, report) = docsai_odf::read_odt(file, assets).unwrap_or_else(fail!());
+            (document, report, Format::Odt)
+        }
+        "ods" => {
+            let (document, report) = docsai_odf::read_ods(file, assets).unwrap_or_else(fail!());
+            (document, report, Format::Ods)
+        }
+        "pptx" | "pptm" => {
+            let (document, report) = docsai_office::read_pptx(file, assets).unwrap_or_else(fail!());
+            (document, report, Format::Pptx)
+        }
+        _ => {
+            let (document, report) = docsai_office::read_docx(file, assets).unwrap_or_else(fail!());
+            (document, report, Format::Docx)
+        }
+    }
+}
+
 /// Converts a corpus document, with a stable `assets/` prefix so the golden
 /// does not depend on where the test ran.
 fn convert(
     path: &Path,
     fidelity: Fidelity,
 ) -> (String, ConversionReport, MemoryAssetStore, Vec<RawSidecar>) {
-    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut assets = MemoryAssetStore::new();
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let (document, mut report, source_format) = match ext {
-        "xlsx" => {
-            let (document, report) = docsai_office::read_xlsx(file, &mut assets)
-                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            (document, report, Format::Xlsx)
-        }
-        "odt" => {
-            let (document, report) = docsai_odf::read_odt(file, &mut assets)
-                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            (document, report, Format::Odt)
-        }
-        "ods" => {
-            let (document, report) = docsai_odf::read_ods(file, &mut assets)
-                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            (document, report, Format::Ods)
-        }
-        _ => {
-            let (document, report) = docsai_office::read_docx(file, &mut assets)
-                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            (document, report, Format::Docx)
-        }
-    };
+    let (document, mut report, source_format) = read(path, &mut assets);
 
     if let Err(errors) = docsai_model::validate::validate(&document) {
         panic!("{}: invalid IR: {errors:?}", path.display());
@@ -189,6 +201,21 @@ fn first_difference(expected: &str, actual: &str) -> String {
         expected.lines().count(),
         actual.lines().count()
     )
+}
+
+/// Phase 14-I: the deck corpus is pinned by its DocMark-P, exactly as the
+/// other three corpora are pinned by theirs.
+///
+/// The `<name>.expected.inspect.json` of 13-K stay beside these files and
+/// check a different thing: that is the IR seen from outside, this is the
+/// text a person edits.
+#[test]
+fn the_pptx_corpus_matches_its_goldens() {
+    let mut decks = documents("pptx", "pptx");
+    decks.extend(documents("pptx", "pptm"));
+    decks.sort();
+    assert!(decks.len() >= 17, "only {} decks found", decks.len());
+    assert_goldens(&decks);
 }
 
 #[test]
@@ -388,24 +415,19 @@ fn docx_roundtrip_is_idempotent() {
     }
 }
 
-/// Phase 2: `serialize(parse(md)) == md` over every docx golden.
+/// `serialize(parse(md)) == md` over a corpus' goldens.
 ///
 /// Image goldens reference `assets/img-*.png` that only exist inside the
-/// companion `.docx`; the store is seeded from that package first so asset
-/// ids stay stable without checking loose media into the corpus.
-#[test]
-fn serialize_parse_is_identity_on_docx_goldens() {
-    for document in documents("docx", "docx") {
-        let golden = golden_path(&document);
+/// companion package; the store is seeded from it first so asset ids stay
+/// stable without checking loose media into the corpus.
+fn assert_serialize_parse_identity(docs: &[PathBuf]) {
+    for document in docs {
+        let golden = golden_path(document);
         let md = std::fs::read_to_string(&golden)
             .unwrap_or_else(|e| panic!("{}: {e}", golden.display()));
         let mut assets = MemoryAssetStore::new();
-        let file = std::fs::File::open(&document)
-            .unwrap_or_else(|e| panic!("{}: {e}", document.display()));
-        let _ = docsai_office::read_docx(file, &mut assets)
-            .unwrap_or_else(|e| panic!("{}: {e}", document.display()));
-        let base = golden.parent();
-        let (doc, _) = docsai_docmark::parse_with_base(&md, base, &mut assets)
+        let (_, _, source_format) = read(document, &mut assets);
+        let (doc, _) = docsai_docmark::parse_with_base(&md, golden.parent(), &mut assets)
             .unwrap_or_else(|e| panic!("{}: {e}", golden.display()));
         let (out, _) = docsai_docmark::serialize(
             &doc,
@@ -414,7 +436,7 @@ fn serialize_parse_is_identity_on_docx_goldens() {
                 fidelity: Fidelity::Full,
                 ids: docsai_model::addressing::IdPolicy::Assign,
                 assets_dir: "assets".into(),
-                source_format: Format::Docx,
+                source_format,
                 raw: docsai_docmark::RawPolicy::Sidecar,
                 ..Options::default()
             },
@@ -426,6 +448,24 @@ fn serialize_parse_is_identity_on_docx_goldens() {
             golden.display()
         );
     }
+}
+
+/// Phase 2: `serialize(parse(md)) == md` over every docx golden.
+#[test]
+fn serialize_parse_is_identity_on_docx_goldens() {
+    assert_serialize_parse_identity(&documents("docx", "docx"));
+}
+
+/// Phase 14-I: the same claim for the decks. `deck_parse_corpus.rs` shows the
+/// slides, the shapes and their kinds survive a round trip; this is the
+/// stronger form — the text a person edits comes back byte for byte, so a
+/// hand edit changes what it touches and nothing else.
+#[test]
+fn serialize_parse_is_identity_on_pptx_goldens() {
+    let mut decks = documents("pptx", "pptx");
+    decks.extend(documents("pptx", "pptm"));
+    decks.sort();
+    assert_serialize_parse_identity(&decks);
 }
 
 /// Writes a synthetic document of roughly 50 pages: paragraphs, headings and

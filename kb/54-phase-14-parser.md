@@ -90,5 +90,7 @@ mirror: DocMark-P → `Presentation`.
 
 ## Next
 
+Done, in [[55-phase-14-goldens]].
+
 **14-I — goldens and idempotence**: `<name>.expected.md` beside every pptx fixture at the levels
 the docx goldens use, and `serialize(parse(md)) == md` byte for byte over all of them.

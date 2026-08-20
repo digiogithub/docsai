@@ -220,8 +220,12 @@ no container and no attribute extension: zero residue at `plain`, and at `standa
 DocMark-P back — front matter, `.slide` headings, every container class, pictures, tables, groups,
 and notes in both syntaxes — and every corpus deck makes the round trip at `full`, `agent` and
 `standard` with its addresses and the kind of every shape intact. Input is tolerant: a deck typed by
-hand, with no attribute anywhere, parses. Next is **14-I**, the goldens and byte idempotence; the
-pptx *writer* is Phase 15 — do not start it.
+hand, with no attribute anywhere, parses. The ninth is done: **goldens and byte idempotence** — the
+seventeen decks of `corpus/pptx` are pinned by their DocMark-P as `<name>.expected.dmk.md`, in the
+same test and by the same mechanism as the other three corpora, and `serialize(parse(md)) == md`
+holds byte for byte over all of them, which is what makes a hand edit change what it touches and
+nothing else. Next is **14-J**, the deck through `docsai convert`; the pptx *writer* is Phase 15 —
+do not start it.
 
 ## 2. Documents you must read before implementing
 

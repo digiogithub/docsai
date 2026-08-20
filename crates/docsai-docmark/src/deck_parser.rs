@@ -76,7 +76,7 @@ pub fn parse_deck(
     let mut parser = BodyParser::new(base_dir, assets, report, &fm);
 
     let skeleton = match &fm.skeleton {
-        Some(path) => match parser.find_asset(path)? {
+        Some(path) => match parser.find_skeleton(path)? {
             Some(asset) => Some(SkeletonRef {
                 asset,
                 rebuilt_parts: Vec::new(),
