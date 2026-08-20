@@ -135,7 +135,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Pptx,
         read: true,
         write: false,
-        note: "Phase 13 read-only: `inspect` reports the slide inventory; DocMark-P and writing are Phase 14",
+        note: "Phase 14 read-only: converts to DocMark-P; writing a pptx package is Phase 15",
     },
     FormatSupport {
         format: Format::DocMark,

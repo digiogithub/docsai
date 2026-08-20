@@ -111,13 +111,15 @@ status, and the acceptance criteria checked here.
 
 ## Acceptance criteria (tracked here)
 
-- [ ] `serialize(parse(md)) == md` byte-for-byte on every pptx golden.
+- [x] `serialize(parse(md)) == md` byte-for-byte on every pptx golden ([[55-phase-14-goldens]]).
 - [ ] Risk P4 gate: a reviewer hand-edits three `--fidelity standard` decks without consulting the
       spec; failures block the phase.
 - [ ] `plain` output of a deck is valid CommonMark and readable as a document.
 - [ ] **Inherited from Phase 13, deferred with a reason**: `--fidelity agent` on a deck is ≤ 15 %
       of the `full` token count. It could not be measured without this phase's serializer
-      ([[34-phase-13-plan]]), and 14-J is where it becomes a number.
+      ([[34-phase-13-plan]]), and 14-J is where it becomes a number. **Measured and not met**:
+      96–102 % over the corpus ([[56-phase-14-convert]]). The gap is what a *level means*, not a
+      bug in the pipeline, so closing it is a decision to take rather than a fix to apply.
 
 ## Rules that bind this phase
 

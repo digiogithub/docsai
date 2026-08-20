@@ -224,8 +224,16 @@ hand, with no attribute anywhere, parses. The ninth is done: **goldens and byte 
 seventeen decks of `corpus/pptx` are pinned by their DocMark-P as `<name>.expected.dmk.md`, in the
 same test and by the same mechanism as the other three corpora, and `serialize(parse(md)) == md`
 holds byte for byte over all of them, which is what makes a hand edit change what it touches and
-nothing else. Next is **14-J**, the deck through `docsai convert`; the pptx *writer* is Phase 15 —
-do not start it.
+nothing else. The tenth is done: **the deck converts** — the 13-K refusal is gone, `docsai convert
+deck.pptx -o deck.dmk.md` writes DocMark-P with the preserved package beside it as
+`assets/_skeleton/deck-<hash>.pptx`, and `outline`, `tokens`, `search` and `read --select` follow
+from the serializer with no work of their own. The Phase 13 criterion deferred into this phase was
+measured and **is not met**: `--fidelity agent` costs 96–102 % of `full` over the corpus, not the
+≤ 15 % of analysis §6.5 — the two levels differ by one line, because what `agent` drops these decks
+barely carry and the geometry §6.5 wanted collapsed is written at `agent` by design. The criterion
+is in the suite as an `#[ignore]`d test rather than softened; closing it changes what a level means,
+which is a specification decision. Next is **14-K**, the P4 hand-edit gate and the phase close; the
+pptx *writer* is Phase 15 — do not start it.
 
 ## 2. Documents you must read before implementing
 

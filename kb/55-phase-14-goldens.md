@@ -75,5 +75,7 @@ hide a docx regression inside a presentation change.
 
 ## Next
 
+Done, in [[56-phase-14-convert]].
+
 **14-J — the deck converts**: lift the `write_document` refusal so `docsai convert deck.pptx -o
 deck.dmk.md` works end to end, with `--fidelity agent` at or under 15 % of `full`.

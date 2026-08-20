@@ -37,7 +37,7 @@ mod writer;
 mod yaml;
 
 pub use error::ParseError;
-pub use frontmatter::selection_front_matter;
+pub use frontmatter::{selection_front_matter, skeleton_path};
 pub use ids::NodeFragment;
 pub use parser::{parse, parse_with_base};
 

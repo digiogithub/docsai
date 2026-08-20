@@ -387,17 +387,6 @@ fn write_document(
 
     match target {
         Format::DocMark => {
-            // A deck reads (13-K) long before it serialises: DocMark-P is
-            // Phase 14. The serializer would hand back an empty body with a
-            // warning, and a caller redirecting stdout to a file would end up
-            // with a document that lost every slide and looked like a success.
-            // Refusing is the honest answer until the profile exists.
-            if document.is_presentation() {
-                return Err(ConvertError::Unsupported {
-                    from: source_format,
-                    to: target,
-                });
-            }
             let docmark_options = DocMarkOptions {
                 fidelity: options.fidelity,
                 ids: options.id_policy(),
@@ -411,6 +400,7 @@ fn write_document(
                 docsai_docmark::serialize(&document, store, &docmark_options);
             report.merge(write_report);
             let sidecars = write_raw_sidecars(&document, &docmark_options, assets_dir)?;
+            write_skeleton_package(&document, &docmark_options, assets_dir, store)?;
 
             if let Some(output) = file_output {
                 ensure_parent(output)?;
@@ -714,6 +704,42 @@ fn default_assets_dir(input: &Path, output: Option<&Path>) -> PathBuf {
 /// The body already points at these files by name, so a failure here is a
 /// document that references bytes nobody wrote: it is an error, never a
 /// warning. Nothing happens unless the options actually put raw-blocks aside.
+/// Writes the preserved package the deck's `skeleton:` points at.
+///
+/// The store already holds the bytes — every asset a reader puts in a
+/// [`DirAssetStore`] lands in `assets/` under its own name — but the reference
+/// the serializer writes is `_skeleton/deck-<hash>.pptx`, built from the
+/// content hash rather than from the package's own file name. A document whose
+/// front matter names a file nobody wrote is a document that cannot be written
+/// back over its original, which is the whole point of keeping the skeleton.
+///
+/// Nothing to do when the level writes no reference: `standard` and `plain`
+/// carry no `skeleton:` line (spec §11.2 rule 6).
+fn write_skeleton_package(
+    document: &Document,
+    options: &DocMarkOptions,
+    assets_dir: &Path,
+    store: &mut DirAssetStore,
+) -> Result<(), ConvertError> {
+    let Document::Presentation(deck) = document else {
+        return Ok(());
+    };
+    let (Some(skeleton), true) = (deck.skeleton.as_ref(), options.fidelity.addresses()) else {
+        return Ok(());
+    };
+    // The name is the serializer's, taken from the reference it wrote, so the
+    // file and the `skeleton:` line cannot drift apart.
+    let reference = docsai_docmark::skeleton_path(&options.assets_dir, &skeleton.asset);
+    let name = reference.rsplit('/').next().unwrap_or(&reference);
+    let path = assets_dir.join("_skeleton").join(name);
+    store.relocate(&skeleton.asset, &path).map_err(|source| {
+        ConvertError::Invalid(format!(
+            "the preserved package the deck refers to could not be written to {}: {source}",
+            path.display()
+        ))
+    })
+}
+
 pub(crate) fn write_raw_sidecars(
     document: &Document,
     options: &DocMarkOptions,
@@ -770,27 +796,27 @@ mod tests {
     }
 
     #[test]
-    fn a_deck_reads_but_does_not_convert_yet() {
-        // 13-K made a deck readable so `inspect` could report it. Writing it as
-        // DocMark is Phase 14, and until then the refusal is the honest answer:
-        // the serializer would produce an empty body with a warning, and a
-        // caller redirecting that to a file would lose every slide silently.
+    fn a_deck_converts_and_takes_its_package_with_it() {
+        // 13-K refused this: the serializer had no DocMark-P and would have
+        // written an empty body, so a caller redirecting it to a file would
+        // have lost every slide and been told it worked. The profile exists
+        // now, and what the refusal is replaced by is a document whose
+        // `skeleton:` names a file that was actually written.
         let dir = temp_dir("deck");
+        let output = dir.join("out.dmk.md");
         let deck =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/pptx/basic-slides.pptx");
-        let error = convert_file(&deck, Some(&dir.join("out.md")), &ConvertOptions::default())
-            .expect_err("DocMark-P is Phase 14");
-        assert!(
-            matches!(
-                error,
-                ConvertError::Unsupported {
-                    from: Format::Pptx,
-                    to: Format::DocMark
-                }
-            ),
-            "{error:?}"
-        );
-        assert!(!dir.join("out.md").exists(), "nothing half-written");
+        let outcome = convert_file(&deck, Some(&output), &ConvertOptions::default())
+            .expect("a deck converts to DocMark-P");
+
+        assert_eq!(outcome.source_format, Format::Pptx);
+        let reference = outcome
+            .markdown
+            .lines()
+            .find_map(|line| line.strip_prefix("skeleton: "))
+            .expect("the deck carries its preserved package");
+        assert!(dir.join(reference).is_file(), "{reference} was not written");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

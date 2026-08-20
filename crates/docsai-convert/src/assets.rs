@@ -36,6 +36,30 @@ impl DirAssetStore {
     pub fn written(&self) -> &[PathBuf] {
         &self.written
     }
+
+    /// Moves the file written for `id` to `to`, and reports it there.
+    ///
+    /// Everything a reader puts in lands under `img-<hash8>.<ext>`, which is
+    /// the right name for a picture and the wrong one for a deck's preserved
+    /// package: that one is referenced as `_skeleton/deck-<hash>.pptx`, so the
+    /// flat copy would be the same bytes twice, under a name nothing points at.
+    /// Moving rather than copying keeps one asset one file.
+    pub fn relocate(&mut self, id: &AssetId, to: &Path) -> Result<(), AssetError> {
+        let Some((info, _)) = self.entries.get(id) else {
+            return Err(AssetError::Io(format!("{id} is not in the store")));
+        };
+        let from = self.dir.join(&info.file_name);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| AssetError::Io(e.to_string()))?;
+        }
+        std::fs::rename(&from, to).map_err(|e| AssetError::Io(e.to_string()))?;
+        for path in &mut self.written {
+            if *path == from {
+                *path = to.to_path_buf();
+            }
+        }
+        Ok(())
+    }
 }
 
 impl AssetStore for DirAssetStore {
