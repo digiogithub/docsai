@@ -63,7 +63,7 @@ against, and the first honest answer to «is a written deck still the deck we re
 Slides rebuilt from the IR into `ppt/slides/slideN.xml` and substituted into the skeleton at the
 names `rebuilt_parts` licenses. Placeholders (title, body, the rest), paragraphs, runs and their
 deltas — the mirror of [[37-phase-13-slide-text]] and [[38-phase-13-cascade]]: a property the
-cascade already implies is not written back as a direct one.
+cascade already implies is not written back as a direct one. Done, in [[63-phase-15-slides]].
 
 ### 15-C — pictures, tables and media
 

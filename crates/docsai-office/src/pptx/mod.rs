@@ -45,6 +45,7 @@ mod raw;
 mod skeleton;
 mod text;
 pub mod write;
+mod write_text;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek};

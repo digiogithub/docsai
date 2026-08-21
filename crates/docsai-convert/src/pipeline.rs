@@ -421,7 +421,7 @@ fn write_document(
                 report,
             })
         }
-        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods => {
+        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods | Format::Pptx => {
             let ext = target.as_str();
             let output = file_output.ok_or_else(|| {
                 ConvertError::Invalid(format!(

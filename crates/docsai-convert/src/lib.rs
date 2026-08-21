@@ -137,8 +137,8 @@ pub const SUPPORT: &[FormatSupport] = &[
     FormatSupport {
         format: Format::Pptx,
         read: true,
-        write: false,
-        note: "Phase 15 in progress: converts to DocMark-P; the package writer re-emits the preserved skeleton (15-A) and starts regenerating slides in 15-B",
+        write: true,
+        note: "Phase 15 in progress: writing rebuilds a slide's text into the preserved package; pictures, tables, notes and added slides are copied with a warning",
     },
     FormatSupport {
         format: Format::DocMark,
@@ -190,9 +190,10 @@ mod tests {
         assert!(can_write(Format::Ods));
         assert!(can_read(Format::DocMark));
         assert!(can_write(Format::DocMark));
-        // Read since 13-K, for `inspect`; writing waits for DocMark-P.
+        // Read since 13-K, for `inspect`; written since 15-B, into the
+        // package the deck was read from.
         assert!(can_read(Format::Pptx));
-        assert!(!can_write(Format::Pptx));
+        assert!(can_write(Format::Pptx));
     }
 
     #[test]

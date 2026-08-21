@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A deck goes back into its package** (plan v2 Phase 15, second increment): `docsai convert
+  deck.dmk.md -o deck.pptx` writes a `.pptx` again, and `SUPPORT` says `pptx: write yes`. The unit
+  of rewriting is a **text body**, not a package and not a slide: the `a:p` sequence inside a
+  placeholder or a text box is rebuilt from the document, and everything around it — `p:spPr`, the
+  `a:bodyPr` with its autofit scale, the shapes that are not text, the transition and the timing —
+  is the bytes that were read. A deck nobody edited therefore comes out byte for byte as it went
+  in over the whole corpus, and a retitled slide differs in exactly the run that was retyped: a
+  conversion is not a diff.
+
+  What the writer cannot yet put back it **keeps and names**: a picture, a table, a chart or a
+  preserved object (15-C, 15-D), a speaker notes page (15-E), a hyperlink needing a new
+  relationship, a field whose GUID nothing recorded, a slide added or removed. Each is a
+  `Degraded` warning saying what was copied and which increment lifts it, so a caller who edited
+  the model and got the original back learns it from the report rather than from the file.
+
+  One attribute is written from outside the model on purpose: `a:rPr@lang`. It is spell-check
+  metadata with no IR field and it is on every run PowerPoint writes, so the slide's own language
+  is read off its runs and put back — and only when they all agree.
+
 - **The pptx package comes back out** (plan v2 Phase 15, first increment): `docsai-office` writes a
   `.pptx` for the first time — as the package it read. `write_pptx` re-emits the preserved skeleton
   ZIP entry by entry, in the original member order, copying each entry's *stored* bytes with its

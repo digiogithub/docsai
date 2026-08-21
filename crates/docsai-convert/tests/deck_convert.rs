@@ -269,3 +269,51 @@ fn references(markdown: &str) -> Vec<String> {
     }
     out
 }
+
+/// The cycle the phase exists to close (plan v2 Phase 15-B): a deck converted
+/// to DocMark, edited as text, and written back into the package it came from.
+///
+/// The pipeline is what is under test here, not the writer — the writer's own
+/// tests live in `docsai-office`. What can only be seen from here is that the
+/// `skeleton:` reference written on the way out is resolved on the way back in,
+/// so the package the edit lands in is the one the document names.
+#[test]
+fn a_deck_edited_as_docmark_goes_back_into_its_package() {
+    let dir = scratch("write-back");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("basic-slides.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let edited = source.replace("Informe trimestral", "Informe reescrito");
+    assert_ne!(edited, source, "the fixture no longer holds the title");
+    std::fs::write(&markdown, &edited).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    let outcome = convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+    assert_eq!(outcome.target_format, Format::Pptx);
+
+    // Read the written package with the reader, which is the only opinion that
+    // counts about what is in it.
+    let mut assets = MemoryAssetStore::new();
+    let file = std::fs::File::open(&package).expect("the package was written");
+    let (document, _) = docsai_convert::read_document(file, Some("deck.pptx"), &mut assets)
+        .map(|(document, _, report)| (document, report))
+        .expect("reads the written package");
+    let Document::Presentation(deck) = document else {
+        panic!("the written package is not a deck");
+    };
+    assert_eq!(
+        deck.slides[0].title().as_deref(),
+        Some("Informe reescrito"),
+        "the edit is not in the package"
+    );
+    assert_eq!(deck.slides.len(), 2, "a slide was lost on the way back");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -46,7 +46,7 @@ pub const READABLE: &[Format] = &[
 ];
 
 /// Formats this crate can write today.
-pub const WRITABLE: &[Format] = &[Format::Docx, Format::Xlsx];
+pub const WRITABLE: &[Format] = &[Format::Docx, Format::Xlsx, Format::Pptx];
 
 /// Reads a `.docx` document.
 pub fn read_docx<R: Read + Seek>(

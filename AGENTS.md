@@ -244,8 +244,15 @@ Current work is **Phase 15**: the pptx writer and the anti-repair gate (plan
 order, with each entry's compression method, CRC and stored bytes copied rather than inflated and
 re-deflated, which is what a `Package` rebuild cannot do. No slide is regenerated from the model
 yet, and the writer says so with a warning instead of pretending otherwise; that is why `SUPPORT`
-still answers `pptx: write no` and `convert … -o deck.pptx` is still refused. The slides start
-coming from the IR in 15-B.
+still answers `pptx: write no` and `convert … -o deck.pptx` is still refused. The second is done: **the slide comes from
+the model** — the unit of rewriting is a text body, so a placeholder's `a:p` sequence is rebuilt
+from the document and everything around it (`p:spPr`, `a:bodyPr` and its autofit, the shapes that
+are not text, transition and timing) stays the bytes that were read. A deck nobody edited comes out
+byte for byte as it went in; a retitled slide differs in the run that was retyped. `SUPPORT` now
+says `pptx: write yes` and the convert pipeline routes it. What the writer cannot put back it keeps
+and names in a warning: pictures, tables, charts and preserved objects (15-C, 15-D), notes pages
+and added or removed slides (15-E), hyperlinks and fields. Next is **15-C**: pictures, tables and
+media, re-injected from the asset store without recompression.
 
 ## 2. Documents you must read before implementing
 
