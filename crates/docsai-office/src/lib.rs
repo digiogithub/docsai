@@ -141,6 +141,19 @@ pub fn write_xlsx<W: std::io::Write + std::io::Seek>(
     xlsx::write::write_xlsx(document, assets, writer)
 }
 
+/// Writes a `.pptx` presentation.
+///
+/// Phase 15-A re-emits the preserved package unchanged; the slides start coming
+/// from the model in 15-B, which is why `docsai-convert`'s `SUPPORT` still
+/// answers `write: false` for `pptx`.
+pub fn write_pptx<W: std::io::Write + std::io::Seek>(
+    document: &Document,
+    assets: &dyn AssetStore,
+    writer: W,
+) -> Result<ConversionReport, WriteError> {
+    pptx::write::write_pptx(document, assets, writer)
+}
+
 /// Writes any Office document this crate supports.
 pub fn write<W: std::io::Write + std::io::Seek>(
     format: Format,
@@ -151,6 +164,7 @@ pub fn write<W: std::io::Write + std::io::Seek>(
     match format {
         Format::Docx => write_docx(document, assets, writer),
         Format::Xlsx => write_xlsx(document, assets, writer),
+        Format::Pptx => write_pptx(document, assets, writer),
         other => Err(WriteError::Unsupported(other.to_string())),
     }
 }

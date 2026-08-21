@@ -238,8 +238,14 @@ four increments of writer tests could not, because they never asked what happens
 writes: a second notes blockquote replaced the first instead of joining it, losing visible text
 without a warning. A slide has one notes page; fixed in the parser and written into the spec. The
 phase's three criteria are met and the fourth, the inherited `agent` ≤ 15 %, is open in writing.
-Next is **Phase 15**, the pptx writer and the anti-repair gate — a new phase, so read
-`docs/development-plan-v2.md` and open its plan in the KB before touching anything.
+Current work is **Phase 15**: the pptx writer and the anti-repair gate (plan
+`kb/61-phase-15-plan.md`). The first of eleven increments is done: **the package comes back out** —
+`docsai_office::write_pptx` re-emits the preserved skeleton entry by entry, in the original member
+order, with each entry's compression method, CRC and stored bytes copied rather than inflated and
+re-deflated, which is what a `Package` rebuild cannot do. No slide is regenerated from the model
+yet, and the writer says so with a warning instead of pretending otherwise; that is why `SUPPORT`
+still answers `pptx: write no` and `convert … -o deck.pptx` is still refused. The slides start
+coming from the IR in 15-B.
 
 ## 2. Documents you must read before implementing
 

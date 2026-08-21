@@ -138,7 +138,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Pptx,
         read: true,
         write: false,
-        note: "Phase 14 read-only: converts to DocMark-P; writing a pptx package is Phase 15",
+        note: "Phase 15 in progress: converts to DocMark-P; the package writer re-emits the preserved skeleton (15-A) and starts regenerating slides in 15-B",
     },
     FormatSupport {
         format: Format::DocMark,

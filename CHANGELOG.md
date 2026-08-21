@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The pptx package comes back out** (plan v2 Phase 15, first increment): `docsai-office` writes a
+  `.pptx` for the first time — as the package it read. `write_pptx` re-emits the preserved skeleton
+  ZIP entry by entry, in the original member order, copying each entry's *stored* bytes with its
+  compression method, CRC and timestamp rather than inflating and re-deflating it. That is the
+  difference spike P3 measured: a package rebuilt through the in-memory `Package` comes out
+  alphabetised, recompressed and re-timestamped even when every part is identical, and a different
+  file is a file PowerPoint gets to have an opinion about. Over the whole pptx corpus the written
+  archive matches the one that was read member for member, byte for byte, including a chart's
+  embedded workbook, a diagram's `dgm:` parts and a `.pptm` macro payload.
+
+  What this increment does *not* do is regenerate a slide from the model, and it says so: writing a
+  deck emits a `Degraded` warning naming the increment that lifts it (15-B). `SUPPORT` still
+  answers `pptx: write no` and `docsai convert … -o deck.pptx` is still refused, on purpose — a
+  conversion that silently ignored the edits in the document would be worse than the refusal it
+  replaced. A deck with no preserved package is a typed error naming 15-G, not an empty file.
+
 - **The P4 gate, and Phase 14 closed** (plan v2 Phase 14, eleventh and last increment): risk P4 —
   *«DocMark-P becomes unreadable»* — is answered the way plan v2 asks, by editing three `standard`
   decks as text without consulting the specification: retitle a slide, add a bullet, swap an image,
