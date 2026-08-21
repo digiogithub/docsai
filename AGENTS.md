@@ -251,8 +251,16 @@ are not text, transition and timing) stays the bytes that were read. A deck nobo
 byte for byte as it went in; a retitled slide differs in the run that was retyped. `SUPPORT` now
 says `pptx: write yes` and the convert pipeline routes it. What the writer cannot put back it keeps
 and names in a warning: pictures, tables, charts and preserved objects (15-C, 15-D), notes pages
-and added or removed slides (15-E), hyperlinks and fields. Next is **15-C**: pictures, tables and
-media, re-injected from the asset store without recompression.
+and added or removed slides (15-E), hyperlinks and fields. The third is done: **pictures, tables and
+media** — a picture's bitmap, alt text, drawn size and crop, a table's cell text and a run's
+hyperlinks all come from the model now, with the media re-injected as the bytes the asset store
+holds (nothing re-encodes an image) and the parts that have to agree with it *spliced*: the slide's
+`_rels` gains only the relationships the deck did not already have, `[Content_Types].xml` only a
+`Default` for an extension it never carried. An unedited deck is still byte for byte the one that
+was read, `_rels` included. A table whose grid moved is copied and named (15-G writes an `a:tbl`
+from the model), and a link no relationship can state as it stands is refused rather than pointed
+at nothing. Next is **15-D**: raw re-injection — a shape kept only as a raw fragment returns as its
+original XML at its original z-order.
 
 ## 2. Documents you must read before implementing
 

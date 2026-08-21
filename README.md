@@ -37,7 +37,7 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
-| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text** is rebuilt from the document, and pictures, tables, notes and added slides are still copied from it with a warning (v2 P15 continues) |
+| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, and charts, preserved objects, notes and added slides are still copied from it with a warning (v2 P15 continues) |
 | PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
 | OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |

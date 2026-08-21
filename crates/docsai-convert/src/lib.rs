@@ -138,7 +138,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Pptx,
         read: true,
         write: true,
-        note: "Phase 15 in progress: writing rebuilds a slide's text into the preserved package; pictures, tables, notes and added slides are copied with a warning",
+        note: "Phase 15 in progress: writing rebuilds a slide's text, its pictures, its tables and its links into the preserved package; charts, preserved objects, notes and added slides are copied with a warning",
     },
     FormatSupport {
         format: Format::DocMark,

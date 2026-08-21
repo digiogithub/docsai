@@ -366,7 +366,7 @@ fn parent_dir(part: &str) -> String {
     }
 }
 
-fn rels_part_name(part: &str) -> Option<String> {
+pub(crate) fn rels_part_name(part: &str) -> Option<String> {
     let dir = parent_dir(part);
     let file = part.rsplit('/').next()?;
     Some(if dir.is_empty() {

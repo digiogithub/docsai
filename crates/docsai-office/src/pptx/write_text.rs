@@ -18,16 +18,34 @@
 //!   read, arriving at the same value it started as.
 //!
 //! What this module refuses is as load-bearing as what it writes. An inline it
-//! cannot put back — an image, a footnote, a hyperlink needing a relationship
-//! that is not in the part yet, a field needing an id nothing recorded — is an
-//! `Err` naming it, and the caller keeps the original shape rather than writing
-//! a shape with a hole in it (`AGENTS.md` §7 rule 3).
+//! cannot put back — an image, a footnote, a field needing an id nothing
+//! recorded — is an `Err` naming it, and the caller keeps the original shape
+//! rather than writing a shape with a hole in it (`AGENTS.md` §7 rule 3).
+//!
+//! A hyperlink is the one inline that needs something outside the part: an
+//! `r:id` that exists in the slide's own `_rels`. Since 15-C the caller supplies
+//! a [`Links`] that hands one over — reusing the relationship the deck already
+//! had whenever the target is unchanged, so a link that was read comes back as
+//! the bytes it was read from — and a target it cannot make a relationship for
+//! is still a refusal rather than a run with the link quietly removed.
 
 use docsai_model::style::{Align, FontProps, LineHeight, Underline, VertAlign};
 use docsai_model::text::{Block, BreakKind, Inline, Paragraph, RunProps};
 
 /// Why a body could not be written, in words a warning can carry.
 pub(super) type Unsupported = String;
+
+/// The part's relationships, seen from the text writer.
+///
+/// DrawingML states a hyperlink as an `r:id` on the run, so the text cannot be
+/// written without the part that holds the ids. The trait keeps that dependency
+/// one call wide: this module asks for an id and knows nothing about how the
+/// relationship part is stored, spliced or numbered.
+pub(super) trait Links {
+    /// The relationship id for a hyperlink target, allocating one if the part
+    /// does not already have it, or `None` when it cannot be expressed.
+    fn hyperlink(&mut self, target: &str) -> Option<String>;
+}
 
 /// Writes the `a:p` sequence of one text body.
 ///
@@ -37,13 +55,14 @@ pub(super) fn write_body(
     blocks: &[Block],
     bulleted: bool,
     lang: Option<&str>,
+    links: &mut dyn Links,
 ) -> Result<String, Unsupported> {
     let mut flat = Vec::new();
     flatten(blocks, None, &mut flat)?;
 
     let mut out = String::new();
     for entry in &flat {
-        write_paragraph(entry, bulleted, lang, &mut out)?;
+        write_paragraph(entry, bulleted, lang, links, &mut out)?;
     }
     Ok(out)
 }
@@ -92,13 +111,14 @@ fn write_paragraph(
     entry: &Flat<'_>,
     bulleted: bool,
     lang: Option<&str>,
+    links: &mut dyn Links,
     out: &mut String,
 ) -> Result<(), Unsupported> {
     let paragraph = entry.paragraph;
     let mut body = String::new();
     write_ppr(entry, bulleted, &mut body);
     for inline in &paragraph.content {
-        write_inline(inline, &RunProps::default(), lang, &mut body)?;
+        write_inline(inline, &RunProps::default(), lang, None, links, &mut body)?;
     }
     // An empty paragraph carries an `a:endParaRPr`: it is where the properties
     // of the text that would be typed there live, and every producer writes
@@ -106,7 +126,12 @@ fn write_paragraph(
     if !paragraph.format.run_direct.is_empty() || paragraph.is_empty() {
         body.push_str("<a:endParaRPr");
         write_font_attrs(&paragraph.format.run_direct, &mut body);
-        write_font_children(&paragraph.format.run_direct, &mut body, "a:endParaRPr");
+        write_font_children(
+            &paragraph.format.run_direct,
+            None,
+            &mut body,
+            "a:endParaRPr",
+        );
     }
     if body.is_empty() {
         out.push_str("<a:p/>");
@@ -212,12 +237,14 @@ fn write_inline(
     inline: &Inline,
     base: &RunProps,
     lang: Option<&str>,
+    link: Option<&str>,
+    links: &mut dyn Links,
     out: &mut String,
 ) -> Result<(), Unsupported> {
     match inline {
         Inline::Text(text) => {
             out.push_str("<a:r>");
-            write_rpr(base, lang, out);
+            write_rpr(base, lang, link, out);
             out.push_str("<a:t>");
             out.push_str(&esc_text(text));
             out.push_str("</a:t></a:r>");
@@ -226,7 +253,7 @@ fn write_inline(
         Inline::Styled { content, props } => {
             let merged = merge(base, props);
             for inline in content {
-                write_inline(inline, &merged, lang, out)?;
+                write_inline(inline, &merged, lang, link, links, out)?;
             }
             Ok(())
         }
@@ -235,9 +262,24 @@ fn write_inline(
             Ok(())
         }
         Inline::Break(other) => Err(format!("a {other:?} break")),
-        // A hyperlink is `a:hlinkClick r:id=…`, and the id has to exist in the
-        // slide's relationship part. Writing relationships is 15-C.
-        Inline::Link { target, .. } => Err(format!("the hyperlink to `{target}`")),
+        // A hyperlink is not an element of its own here: it is `a:hlinkClick`
+        // on the properties of every run it covers, which is why the id travels
+        // down rather than wrapping anything. A nested link wins over the one
+        // around it, exactly as the reader reads it back.
+        Inline::Link {
+            target,
+            content,
+            props,
+        } => {
+            let Some(id) = links.hyperlink(target) else {
+                return Err(format!("the hyperlink to `{target}`"));
+            };
+            let merged = merge(base, props);
+            for inline in content {
+                write_inline(inline, &merged, lang, Some(&id), links, out)?;
+            }
+            Ok(())
+        }
         // `a:fld` is identified by a GUID the IR does not record, and inventing
         // one changes the field's identity in the file. 15-E revisits it with
         // the deck's own parts.
@@ -256,8 +298,8 @@ fn merge(base: &RunProps, over: &RunProps) -> RunProps {
     }
 }
 
-fn write_rpr(props: &RunProps, lang: Option<&str>, out: &mut String) {
-    if props.direct.is_empty() && lang.is_none() {
+fn write_rpr(props: &RunProps, lang: Option<&str>, link: Option<&str>, out: &mut String) {
+    if props.direct.is_empty() && lang.is_none() && link.is_none() {
         return;
     }
     out.push_str("<a:rPr");
@@ -270,7 +312,7 @@ fn write_rpr(props: &RunProps, lang: Option<&str>, out: &mut String) {
         out.push_str(&format!(" lang=\"{}\"", esc_attr(lang)));
     }
     write_font_attrs(&props.direct, out);
-    write_font_children(&props.direct, out, "a:rPr");
+    write_font_children(&props.direct, link, out, "a:rPr");
 }
 
 /// The attribute half of `CT_TextCharacterProperties`, and the opening `>` or
@@ -302,9 +344,10 @@ fn write_font_attrs(font: &FontProps, out: &mut String) {
     }
 }
 
-/// The child half, in schema order: fill, highlight, then the typeface.
-fn write_font_children(font: &FontProps, out: &mut String, tag: &str) {
-    let has_children = font.color.is_some() || font.highlight.is_some() || font.name.is_some();
+/// The child half, in schema order: fill, highlight, the typeface, the link.
+fn write_font_children(font: &FontProps, link: Option<&str>, out: &mut String, tag: &str) {
+    let has_children =
+        font.color.is_some() || font.highlight.is_some() || font.name.is_some() || link.is_some();
     if !has_children {
         out.push_str("/>");
         return;
@@ -330,6 +373,11 @@ fn write_font_children(font: &FontProps, out: &mut String, tag: &str) {
         // it inherited, which is the case where the reference was already not
         // doing the work.
         out.push_str(&format!("<a:latin typeface=\"{}\"/>", esc_attr(name)));
+    }
+    if let Some(id) = link {
+        // `CT_TextCharacterProperties` puts the link after the typeface and
+        // before `rtl`; the id names a relationship of the part being written.
+        out.push_str(&format!("<a:hlinkClick r:id=\"{}\"/>", esc_attr(id)));
     }
     out.push_str(&format!("</{tag}>"));
 }

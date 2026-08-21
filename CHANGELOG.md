@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pictures, tables and media come back too** (plan v2 Phase 15, third increment): the splice that
+  rebuilt a slide's text now reaches what a text body is not. A picture's bitmap, alt text, drawn
+  size and crop; the text of a table's cells; and the hyperlinks a run carries. Media goes into the
+  package **as the asset store holds it** — the bytes that came out of the source document, with no
+  re-encoding — under a new `ppt/media/` part, and the parts that have to agree with it are spliced
+  rather than regenerated: the slide's `_rels` gains only the relationships the deck did not have,
+  keeping every id it already used, and `[Content_Types].xml` gains a `Default` only for an
+  extension the deck had never carried. An unedited deck still comes out byte for byte as it went
+  in over the whole corpus, `_rels` included. A table whose *grid* moved is still copied whole and
+  named, because writing an `a:tbl` from the model rather than splicing it belongs with the deck
+  that has no skeleton to preserve (15-G), and a link whose target no relationship can state as it
+  stands is still refused rather than written as an `r:id` pointing at nothing.
+
 - **A deck goes back into its package** (plan v2 Phase 15, second increment): `docsai convert
   deck.dmk.md -o deck.pptx` writes a `.pptx` again, and `SUPPORT` says `pptx: write yes`. The unit
   of rewriting is a **text body**, not a package and not a slide: the `a:p` sequence inside a

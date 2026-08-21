@@ -317,3 +317,108 @@ fn a_deck_edited_as_docmark_goes_back_into_its_package() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 15-C through the pipeline: a table cell edited in the Markdown is in the
+/// package, and the grid around it is the one that was read.
+#[test]
+fn a_table_cell_edited_as_docmark_reaches_the_package() {
+    let dir = scratch("write-back-table");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("tables-simple.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let edited = source.replace("Norte", "Noroeste");
+    assert_ne!(edited, source, "the fixture no longer holds the cell");
+    std::fs::write(&markdown, &edited).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+
+    let mut assets = MemoryAssetStore::new();
+    let file = std::fs::File::open(&package).expect("the package was written");
+    let (document, _) = docsai_convert::read_document(file, Some("deck.pptx"), &mut assets)
+        .map(|(document, _, report)| (document, report))
+        .expect("reads the written package");
+    let Document::Presentation(deck) = document else {
+        panic!("the written package is not a deck");
+    };
+    let table = deck.slides[0]
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.kind {
+            docsai_model::presentation::ShapeKind::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("the table survived the round trip");
+    assert_eq!(table.rows.len(), 3, "the grid changed shape");
+    let cell = format!("{:?}", table.rows[1].cells[0]);
+    assert!(
+        cell.contains("Noroeste"),
+        "the edit is not in the package: {cell}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A picture pointed at another file in the Markdown: the new file's bytes are
+/// the ones that end up in `ppt/media/`, and the deck declares the extension it
+/// had never carried.
+#[test]
+fn an_image_swapped_in_docmark_reaches_the_package() {
+    // A 1×1 transparent GIF: a real file, and an extension this deck lacks.
+    const TINY_GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\
+                              !\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\
+                              \x00\x00\x02\x02D\x01\x00;";
+    let dir = scratch("write-back-image");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("images-anchored.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    std::fs::write(dir.join("assets").join("otra.gif"), TINY_GIF).expect("writes the new image");
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let start = source.find("](assets/").expect("the deck names its image");
+    let end = source[start..].find(')').expect("a closing bracket") + start;
+    let edited = format!("{}](assets/otra.gif{}", &source[..start], &source[end..]);
+    std::fs::write(&markdown, &edited).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+
+    let bytes = std::fs::read(&package).expect("the package was written");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable package");
+    let mut media = Vec::new();
+    std::io::Read::read_to_end(
+        &mut zip
+            .by_name("ppt/media/image2.gif")
+            .expect("the new media part"),
+        &mut media,
+    )
+    .expect("reads it");
+    assert_eq!(media, TINY_GIF, "the image was not stored as its own bytes");
+
+    let mut types = String::new();
+    std::io::Read::read_to_string(
+        &mut zip
+            .by_name("[Content_Types].xml")
+            .expect("the content types"),
+        &mut types,
+    )
+    .expect("reads it");
+    assert!(
+        types.contains("Extension=\"gif\""),
+        "the new extension is not declared: {types}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

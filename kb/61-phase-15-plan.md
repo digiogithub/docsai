@@ -70,7 +70,8 @@ cascade already implies is not written back as a direct one. Done, in [[63-phase
 Media re-injected from the `AssetStore` **without recompression** (the bytes that came out are
 the bytes that go in), the slide's relationship part rewritten to match, and tables written back
 through the DrawingML table writer. Content types for a media extension the skeleton did not
-already declare.
+already declare. Done, in [[64-phase-15-media]], where the table writer turned out to be the wrong
+tool: a cell is a text body, and the grid around it is preserved like everything else.
 
 ### 15-D — raw re-injection
 
