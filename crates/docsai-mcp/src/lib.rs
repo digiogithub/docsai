@@ -11,27 +11,30 @@
 mod config;
 mod images;
 mod input;
+mod schema;
 mod server;
 mod tools;
 
 pub use config::{
-    McpConfig, DEFAULT_MAX_INPUT_BYTES, DEFAULT_TIMEOUT_SECS, ENV_MAX_INPUT_BYTES, ENV_TIMEOUT_SECS,
+    McpConfig, DEFAULT_MAX_INLINE_TOKENS, DEFAULT_MAX_INPUT_BYTES, DEFAULT_TIMEOUT_SECS,
+    ENV_MAX_INLINE_TOKENS, ENV_MAX_INPUT_BYTES, ENV_STRUCTURED, ENV_TIMEOUT_SECS,
 };
 pub use images::ImagePolicy;
 pub use server::DocsaiServer;
 
 /// Names of the tools the server exposes (architecture §6).
 ///
-/// The last three are the Phase 11 agent-native primitives, and they are what
-/// an agent should reach for first: `outline_document` says what is in a
-/// document, `search_document` says where it says something, and
-/// `read_selection` hands over just that part. `convert_to_markdown` remains
-/// the tool that reads a whole document — the expensive one.
+/// The last four are what an agent should reach for first: `estimate_tokens`
+/// says what a document costs, `outline_document` says what is in it,
+/// `search_document` says where it says something, and `read_selection` hands
+/// over just that part. The two converters move whole documents, and with the
+/// E2/E3 pass they move them **between files**, not through the response.
 pub const TOOLS: &[&str] = &[
     "convert_to_markdown",
     "convert_from_markdown",
     "inspect_document",
     "list_supported_formats",
+    "estimate_tokens",
     "outline_document",
     "search_document",
     "read_selection",
@@ -106,13 +109,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_tool_set_is_the_four_converters_plus_the_three_primitives() {
-        assert_eq!(TOOLS.len(), 7);
+    fn the_tool_set_is_the_four_converters_plus_the_four_primitives() {
+        assert_eq!(TOOLS.len(), 8);
         for expected in [
             "convert_to_markdown",
             "convert_from_markdown",
             "inspect_document",
             "list_supported_formats",
+            "estimate_tokens",
             "outline_document",
             "search_document",
             "read_selection",

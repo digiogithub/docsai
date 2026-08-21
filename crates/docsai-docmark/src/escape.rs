@@ -32,17 +32,17 @@ pub fn escape(text: &str, context: TextContext) -> String {
     // longer description separated by a blank line, and writing that blank
     // line straight into `![...]()` splits the label across two paragraphs,
     // which the parser reads back as literal, unparsed `[`/`]` text.
-    let text: std::borrow::Cow<'_, str> = if context == TextContext::LinkLabel && text.contains('\n')
-    {
-        std::borrow::Cow::Owned(
-            text.split('\n')
-                .map(|line| line.trim_end_matches('\r'))
-                .collect::<Vec<_>>()
-                .join(" "),
-        )
-    } else {
-        std::borrow::Cow::Borrowed(text)
-    };
+    let text: std::borrow::Cow<'_, str> =
+        if context == TextContext::LinkLabel && text.contains('\n') {
+            std::borrow::Cow::Owned(
+                text.split('\n')
+                    .map(|line| line.trim_end_matches('\r'))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        } else {
+            std::borrow::Cow::Borrowed(text)
+        };
     let text = text.as_ref();
 
     let mut out = String::with_capacity(text.len());

@@ -9,7 +9,7 @@
 > `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
 > Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
 > and `cargo-dist` release packaging. Phase 7 adds the MCP stdio server
-> (`docsai mcp`), now with seven tools. That plan
+> (`docsai mcp`), now with eight tools. That plan
 > ([`docs/development-plan.md`](docs/development-plan.md)) is **delivered and superseded**.
 >
 > **Next: [development plan v2](docs/development-plan-v2.md)** — agent-native docsai
@@ -276,25 +276,54 @@ Registration in an MCP client (e.g. Claude Desktop / Claude Code / MCP Inspector
 }
 ```
 
-Tools: `outline_document`, `search_document`, `read_selection`,
-`convert_to_markdown`, `convert_from_markdown`, `inspect_document`,
-`list_supported_formats`. Each accepts a filesystem `path` **or**
-`content_base64` + `filename`. Logs always go to **stderr**; stdout is the
+Tools: `estimate_tokens`, `outline_document`, `search_document`,
+`read_selection`, `convert_to_markdown`, `convert_from_markdown`,
+`inspect_document`, `list_supported_formats`. Each accepts a filesystem `path`
+**or** `content_base64` + `filename`. Logs always go to **stderr**; stdout is the
 JSON-RPC channel only.
 
-The first three are the ones to reach for. They are the MCP face of `docsai
-outline`, `docsai search` and `docsai read --select`, and together they answer
-"change the third heading of this report" without ever sending the report:
+The first four are the ones to reach for. They are the MCP face of `docsai
+tokens`, `docsai outline`, `docsai search` and `docsai read --select`, and
+together they answer "change the third heading of this report" without ever
+sending the report:
 
 ```text
-outline_document { path }                     → n1 heading, n12 heading, … (3.8 % of the document)
+estimate_tokens  { path }                     → full 9 083 · agent 8 744 · standard 8 698 · plain 8 545
+outline_document { path }                     → n1 heading, n12 heading, … with outline-ratio
 search_document  { path, query: "riesgo" }    → s12 #n12, select "#n12", the words around it
 read_selection   { path, select: "#n12" }     → that node as DocMark, with its etag
-convert_from_markdown { markdown, target_format: "docx" }
 ```
 
-`convert_to_markdown` is the whole document, and the expensive path.
-Its `include_images` chooses what image payload comes back:
+**A whole document moves between files, not through the conversation.** Give
+`convert_to_markdown` an `output_path` and it writes the DocMark and answers
+with a receipt; give `convert_from_markdown` a `markdown_path` and an output
+`path` and the package is written the same way. The written `.dmk.md` is itself
+an input to `outline_document`, `search_document` and `read_selection`, so the
+edit loop never pays for the document twice:
+
+```text
+convert_to_markdown   { path: "report.docx", output_path: "report.dmk.md" }
+                                              → wrote report.dmk.md (42 727 bytes, 9 083 tokens at full)
+outline_document      { path: "report.dmk.md" }
+read_selection        { path: "report.dmk.md", select: "#n12" }
+convert_from_markdown { markdown_path: "report.dmk.md", target_format: "docx", path: "out.docx" }
+```
+
+**What a session costs is measured, not claimed.**
+[`crates/docsai-mcp/tests/goldens/wire-cost.md`](crates/docsai-mcp/tests/goldens/wire-cost.md)
+records the bytes and tokens of the framed JSON-RPC that actually crossed the
+transport for each canonical agent task, handshake included, and CI fails on a
+regression. Today: fixing a typo in a 30-page report and writing the docx back
+costs **998 tokens**; adding a row to a sheet, **837**; locating and reading one
+slide of a 40-slide deck, **1 217**. The tool listing every session opens with
+costs 1 770 — more than any single task, which is why the schemas published by
+`tools/list` are trimmed of everything a caller cannot act on (6 470 bytes, down
+from 9 403).
+
+Without an `output_path`, `convert_to_markdown` still returns the DocMark
+inline — up to `DOCSAI_MCP_MAX_INLINE_TOKENS`, past which it refuses and names
+the argument that fixes it. Its `include_images` chooses what image payload
+comes back:
 
 | Value | The client gets |
 |---|---|
@@ -313,6 +342,12 @@ document with one 1200 × 900 screenshot the response goes from 906 709 bytes at
 > where `convert_to_markdown` used to return every image inline. Pass
 > `include_images: "full"` for the old behaviour; clients that already passed
 > `assets: "inline-base64"` keep working unchanged.
+>
+> **Breaking changes** (E-pass, [`kb/58`](kb/58-mcp-token-efficiency-plan.md)):
+> responses no longer carry `structuredContent` unless `DOCSAI_MCP_STRUCTURED=1`;
+> `outline_document` returns one level and 200 nodes by default (`depth: 0` asks
+> for every level); and `convert_to_markdown` refuses to inline a document over
+> `DOCSAI_MCP_MAX_INLINE_TOKENS` instead of returning it. Silence means cheap.
 
 Environment:
 
@@ -320,6 +355,8 @@ Environment:
 |---|---|---|
 | `DOCSAI_MCP_MAX_INPUT_BYTES` | `52428800` (50 MiB) | Cap on path size and decoded base64 |
 | `DOCSAI_MCP_TIMEOUT_SECS` | `120` (`0` = off) | Per-tool wall-clock timeout |
+| `DOCSAI_MCP_MAX_INLINE_TOKENS` | `2000` (`0` = off) | Largest DocMark a response carries inline before `output_path` is required |
+| `DOCSAI_MCP_STRUCTURED` | `0` | Also send `structuredContent`; off, a response says everything once |
 
 Details in [`docs/architecture.md`](docs/architecture.md) §6 and [`kb/10-phase-7-mcp.md`](kb/10-phase-7-mcp.md).
 

@@ -229,11 +229,12 @@ Tools exposed:
 
 | Tool | Input | Output |
 |---|---|---|
-| `convert_to_markdown` | `path` (or `content_base64` + `filename`), `fidelity`, `assets` = `inline-base64`\|`files`, `include_images` | DocMark (text), image payloads, `report` |
-| `convert_from_markdown` | `markdown`, `target_format`, optional assets | base64 file or written `path`, `report` |
+| `convert_to_markdown` | `path` (or `content_base64` + `filename`), **`output_path`**, `fidelity`, `assets` = `inline-base64`\|`files`, `include_images` | with `output_path`: a receipt (path, `bytes_written`, `document_tokens`, `report`). Without it: DocMark inline, up to `DOCSAI_MCP_MAX_INLINE_TOKENS` |
+| `convert_from_markdown` | **`markdown_path`** + `path`, or `markdown` for a fragment; `target_format`, optional assets or `assets_dir` | written `path` (base64 only when no path is given), `report` |
 | `inspect_document` | `path`/`content_base64` | structure JSON (same shape as `inspect --json`) |
 | `list_supported_formats` | — | support matrix with status per direction |
-| `outline_document` | `path`/`content_base64`, `depth`, `fidelity` | tree of addressable nodes with id, kind, preview, token cost (same shape as `outline --json`) |
+| `estimate_tokens` | `path`/`content_base64` | what the document costs at `full`, `agent`, `standard` and `plain`, measured, in one call |
+| `outline_document` | `path`/`content_base64`, `depth` (**1** by default), `max_nodes`, `cursor`, `preview_chars`, `fidelity` | tree of addressable nodes with id, kind, preview, token cost, plus `outline-ratio`, `omitted` and `next-cursor` |
 | `search_document` | `path`/`content_base64`, `query`, `context`, `limit`, `fidelity` | hits: an address, a selector when there is one, and the words around each match |
 | `read_selection` | `path`/`content_base64`, `select`, `fidelity` | self-contained DocMark for those nodes, with etags (same shape as `read --select --json`) |
 
@@ -243,9 +244,34 @@ Decisions:
 - Large responses: DocMark as `text content`; binaries as base64 resource with correct MIME.
 - The server is stateless; each tool call is an independent conversion (no persistent temp
   files unless the client asks for `assets=files`).
-- The **last three tools are the intended path** (plan v2 Phase 11): map, find, read the part.
-  `convert_to_markdown` returns the whole document and is the expensive one; the server says
-  so in its `instructions`, which is the only place an agent reads before choosing a tool.
+- The **last four tools are the intended path** (plan v2 Phase 11, extended by the E-pass of
+  `kb/58`): price it, map it, find it, read the part. The server says so in its
+  `instructions`, which is the only place an agent reads before choosing a tool.
+- **A document travels between files, never through the response** (E2/E3). `output_path` on
+  `convert_to_markdown` and `markdown_path` on `convert_from_markdown` are the supported way
+  to move a whole document; the written `.dmk.md` is a first-class input to `outline_document`,
+  `search_document` and `read_selection`, so the loop closes without the text ever being paid
+  for as tokens. Inline DocMark survives for fragments, under a token ceiling that names
+  `output_path` when it is hit.
+- **One representation per response** (E1). `CallToolResult::structured` sends the same facts
+  twice — escaped inside `content[0].text` and again as `structuredContent` — so the server
+  builds the text block only. Where a result has a compact reading form (outline, search,
+  selection, budget) that form *is* the text, and the JSON object is sent as well only under
+  `DOCSAI_MCP_STRUCTURED=1`.
+- **The tool listing is published in its cheapest equivalent form** (E7). `list_tools` is
+  overridden rather than derived: the schemas `schemars` writes are correct and verbose, and
+  `tools/list` is the one response a session pays for before it has done any work.
+  `crate::schema::slim` removes the dialect URI, the `"default": null` of an optional field,
+  the `["T", "null"]` nullable union (`required` already says what may be left out) and a
+  `"format": "uint"` that sits beside its own `"minimum": 0`. Field names, `required` and
+  descriptions are never touched — those are what a caller reads to build a call. 9 403 → 6 470
+  bytes with a tool added.
+- **The wire cost of the agent loop is a golden** (E8). `crates/docsai-mcp/tests/wire_cost.rs`
+  drives a real client over a counting duplex and records the framed JSON-RPC bytes and
+  `o200k_base` tokens of each canonical task in both directions, handshake included. An update
+  that inflates the suite by more than 5 % is refused unless
+  `DOCSAI_ACCEPT_TOKEN_INFLATION=1` is set, the same trade as the corpus token budget. Paths in
+  the requests are relative so the numbers describe the loop and not the checkout directory.
 - `include_images` = `none|refs|thumbnails|full`, default **`refs`**. It changes the
   *payload*, never the markdown: the body keeps its `assets/…` links at every rung, so no
   rung is a lossy conversion and a client can come back for `full` later. Every rung reports

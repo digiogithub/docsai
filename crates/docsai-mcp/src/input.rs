@@ -141,14 +141,14 @@ pub fn decode_assets(
     Ok(out)
 }
 
-/// Asset supplied by the client for reverse conversion.
+/// One media file supplied inline.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct IncomingAsset {
-    /// Deterministic name as referenced from DocMark (`img-<hash>.png`).
+    /// Name as referenced from DocMark, e.g. `img-<hash>.png`.
     pub file_name: String,
-    /// Standard base64 of the raw bytes.
+    /// Standard base64 of the bytes.
     pub content_base64: String,
-    /// Optional MIME type; sniffed from bytes when omitted.
+    /// MIME type; sniffed when omitted.
     #[serde(default)]
     pub content_type: Option<String>,
 }
@@ -183,7 +183,7 @@ fn enforce_path_readable(path: &Path, config: &McpConfig) -> Result<(), ConvertE
     Ok(())
 }
 
-fn sniff_content_type(bytes: &[u8]) -> &'static str {
+pub(crate) fn sniff_content_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']) {
         "image/png"
     } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
@@ -208,6 +208,8 @@ mod tests {
         McpConfig {
             max_input_bytes: 1024,
             timeout: None,
+            structured: false,
+            max_inline_tokens: None,
         }
     }
 

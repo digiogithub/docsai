@@ -1,19 +1,29 @@
-//! MCP server handler exposing the four docsai tools over stdio.
+//! MCP server handler exposing the docsai tools over stdio.
+//!
+//! The handlers are thin on purpose: argument shapes and the work both live in
+//! [`crate::tools`], and this module decides only *how a result crosses the
+//! wire* — one representation by default (E1), the object as well when
+//! `DOCSAI_MCP_STRUCTURED=1` names a client that consumes it.
 
 use std::sync::Arc;
 
 use docsai_convert::ConvertError;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
+    model::{
+        CallToolResult, ContentBlock, Implementation, ListToolsResult, PaginatedRequestParams,
+        ResultType, ServerCapabilities, ServerInfo,
+    },
+    service::RequestContext,
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
-use serde::Deserialize;
-use serde_json::Value;
 
 use crate::config::McpConfig;
-use crate::input::IncomingAsset;
-use crate::tools;
+use crate::schema::slim;
+use crate::tools::{
+    self, ConvertFromMarkdownArgs, ConvertToMarkdownArgs, DocumentArgs, OutlineDocumentArgs,
+    ReadSelectionArgs, SearchDocumentArgs, ToolOutput,
+};
 
 /// The docsai MCP server (architecture §6).
 #[derive(Clone)]
@@ -38,274 +48,112 @@ impl Default for DocsaiServer {
     }
 }
 
-/// Arguments for `convert_to_markdown`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ConvertToMarkdownArgs {
-    /// Filesystem path to the source document (local MCP clients).
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Base64-encoded document bytes (remote / embedded content).
-    #[serde(default)]
-    pub content_base64: Option<String>,
-    /// File name hint required with `content_base64` (e.g. `report.docx`).
-    #[serde(default)]
-    pub filename: Option<String>,
-    /// Fidelity: `full` (default), `agent`, `standard`, or `plain`.
-    #[serde(default)]
-    pub fidelity: Option<String>,
-    /// Asset delivery: `inline-base64` or `files` (writes media under `assets_dir`).
-    #[serde(default)]
-    pub assets: Option<String>,
-    /// Directory for `assets=files` (required with base64 input).
-    #[serde(default)]
-    pub assets_dir: Option<String>,
-    /// Image payload: `none`, `refs` (default), `thumbnails`, or `full`.
-    /// The markdown always keeps its `![](assets/…)` links whichever is chosen.
-    #[serde(default)]
-    pub include_images: Option<String>,
-}
-
-/// Arguments for `outline_document`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct OutlineDocumentArgs {
-    /// Filesystem path to the source document.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Base64-encoded document bytes.
-    #[serde(default)]
-    pub content_base64: Option<String>,
-    /// File name hint required with `content_base64`.
-    #[serde(default)]
-    pub filename: Option<String>,
-    /// Levels of the tree to return; all of them when omitted.
-    #[serde(default)]
-    pub depth: Option<usize>,
-    /// Fidelity: `full` (default) or `agent`; the lossy levels address nothing.
-    #[serde(default)]
-    pub fidelity: Option<String>,
-}
-
-/// Arguments for `read_selection`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ReadSelectionArgs {
-    /// Filesystem path to the source document.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Base64-encoded document bytes.
-    #[serde(default)]
-    pub content_base64: Option<String>,
-    /// File name hint required with `content_base64`.
-    #[serde(default)]
-    pub filename: Option<String>,
-    /// Selector: `s4`, `s7-s9`, `#n7`, `type:heading`, `text:foo`, comma-separated.
-    pub select: String,
-    /// Fidelity: `full` (default) or `agent`.
-    #[serde(default)]
-    pub fidelity: Option<String>,
-}
-
-/// Arguments for `search_document`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SearchDocumentArgs {
-    /// Filesystem path to the source document.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Base64-encoded document bytes.
-    #[serde(default)]
-    pub content_base64: Option<String>,
-    /// File name hint required with `content_base64`.
-    #[serde(default)]
-    pub filename: Option<String>,
-    /// Case-insensitive literal to look for.
-    pub query: String,
-    /// Characters quoted either side of a match (default 48).
-    #[serde(default)]
-    pub context: Option<usize>,
-    /// Blocks listed before the rest are only counted (default 20).
-    #[serde(default)]
-    pub limit: Option<usize>,
-    /// Fidelity: any level; text is findable even where ids are not.
-    #[serde(default)]
-    pub fidelity: Option<String>,
-}
-
-/// Arguments for `convert_from_markdown`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ConvertFromMarkdownArgs {
-    /// DocMark source text.
-    pub markdown: String,
-    /// Target format: `docx`, `xlsx`, `odt`, `ods`, or `docmark`.
-    pub target_format: String,
-    /// Optional output path; when omitted the package is returned as base64.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Media referenced by the markdown (`file_name` + `content_base64`).
-    #[serde(default)]
-    pub assets: Vec<IncomingAsset>,
-}
-
-/// Arguments for `inspect_document`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct InspectDocumentArgs {
-    /// Filesystem path to the source document.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Base64-encoded document bytes.
-    #[serde(default)]
-    pub content_base64: Option<String>,
-    /// File name hint required with `content_base64`.
-    #[serde(default)]
-    pub filename: Option<String>,
-}
-
 #[tool_router]
 impl DocsaiServer {
     #[tool(
         name = "convert_to_markdown",
-        description = "Convert a whole Office/LibreOffice document to DocMark (extended Markdown). Accepts a filesystem path or base64 content. Returns markdown, image payloads per include_images (default `refs`: names and sizes, no bytes), and a conversion report. For a large document prefer outline_document + read_selection."
+        description = "Convert a whole document to DocMark. With `output_path` it is written to disk and the answer is a receipt; without one it comes back inline, up to the server's token ceiling. To read only part of a document, use outline_document and read_selection instead."
     )]
     async fn convert_to_markdown(
         &self,
         Parameters(args): Parameters<ConvertToMarkdownArgs>,
     ) -> Result<CallToolResult, McpError> {
         let config = Arc::clone(&self.config);
-        self.run_tool(move || {
-            tools::tool_convert_to_markdown(
-                args.path.as_deref(),
-                args.content_base64.as_deref(),
-                args.filename.as_deref(),
-                args.fidelity.as_deref(),
-                args.assets.as_deref(),
-                args.assets_dir.as_deref(),
-                args.include_images.as_deref(),
-                &config,
-            )
-        })
-        .await
+        self.run_tool(move || tools::tool_convert_to_markdown(&args, &config))
+            .await
     }
 
     #[tool(
         name = "convert_from_markdown",
-        description = "Convert DocMark markdown back to an Office/LibreOffice package (docx, xlsx, odt, ods). Returns base64 bytes or writes to path."
+        description = "Convert DocMark back to docx, xlsx, odt or ods. `markdown_path` + `path` converts file to file; `markdown` is for fragments, and only a call with no `path` answers with base64."
     )]
     async fn convert_from_markdown(
         &self,
         Parameters(args): Parameters<ConvertFromMarkdownArgs>,
     ) -> Result<CallToolResult, McpError> {
         let config = Arc::clone(&self.config);
-        self.run_tool(move || {
-            tools::tool_convert_from_markdown(
-                &args.markdown,
-                &args.target_format,
-                args.path.as_deref(),
-                &args.assets,
-                &config,
-            )
-        })
-        .await
+        self.run_tool(move || tools::tool_convert_from_markdown(&args, &config))
+            .await
     }
 
     #[tool(
         name = "inspect_document",
-        description = "Inspect document structure without converting: metadata, styles, sections/sheets, media, stats, and warnings. Same JSON shape as `docsai inspect --json`."
+        description = "Structure without content: metadata, styles, sections or sheets, media, stats, warnings. Same shape as `docsai inspect --json`."
     )]
     async fn inspect_document(
         &self,
-        Parameters(args): Parameters<InspectDocumentArgs>,
+        Parameters(args): Parameters<DocumentArgs>,
     ) -> Result<CallToolResult, McpError> {
         let config = Arc::clone(&self.config);
-        self.run_tool(move || {
-            tools::tool_inspect_document(
-                args.path.as_deref(),
-                args.content_base64.as_deref(),
-                args.filename.as_deref(),
-                &config,
-            )
-        })
-        .await
+        self.run_tool(move || tools::tool_inspect_document(&args, &config))
+            .await
+    }
+
+    #[tool(
+        name = "estimate_tokens",
+        description = "Measured cost of reading this document at all four fidelity levels, in one call. A few dozen tokens whatever its size — call it before deciding to read."
+    )]
+    async fn estimate_tokens(
+        &self,
+        Parameters(args): Parameters<DocumentArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_tool(move || tools::tool_estimate_tokens(&args, &config))
+            .await
     }
 
     #[tool(
         name = "list_supported_formats",
-        description = "List formats this docsai build can read and write, with status notes."
+        description = "Formats this build reads and writes, with status notes."
     )]
     async fn list_supported_formats(&self) -> Result<CallToolResult, McpError> {
-        Ok(json_result(tools::tool_list_supported_formats()))
+        Ok(self.result(tools::tool_list_supported_formats()))
     }
 
     #[tool(
         name = "outline_document",
-        description = "Map a document without reading it: the tree of addressable nodes with stable id, kind, a short preview and the token cost of each, plus what the whole document would cost. Costs a few percent of the document. Start here, then read_selection or search_document."
+        description = "Map a document without reading it: addressable nodes with id, kind, preview and cost, plus what the map itself cost (`outline-ratio`). One level and 200 nodes by default; `omitted` and `next-cursor` say what was left out."
     )]
     async fn outline_document(
         &self,
         Parameters(args): Parameters<OutlineDocumentArgs>,
     ) -> Result<CallToolResult, McpError> {
         let config = Arc::clone(&self.config);
-        self.run_tool(move || {
-            tools::tool_outline_document(
-                args.path.as_deref(),
-                args.content_base64.as_deref(),
-                args.filename.as_deref(),
-                args.fidelity.as_deref(),
-                args.depth,
-                &config,
-            )
-        })
-        .await
+        self.run_tool(move || tools::tool_outline_document(&args, &config))
+            .await
     }
 
     #[tool(
         name = "search_document",
-        description = "Find where a document says something, without returning the document. Case-insensitive literal; each hit gives an address and the words around the match. A hit on an addressed block also names the selector that reads it back with read_selection; a hit on ordinary prose gives a relative address (`n12.b2`) and no selector."
+        description = "Where a document says something, without returning the document. Each hit gives the words around the match and an address; on an addressed block that address is a selector read_selection takes."
     )]
     async fn search_document(
         &self,
         Parameters(args): Parameters<SearchDocumentArgs>,
     ) -> Result<CallToolResult, McpError> {
         let config = Arc::clone(&self.config);
-        self.run_tool(move || {
-            tools::tool_search_document(
-                args.path.as_deref(),
-                args.content_base64.as_deref(),
-                args.filename.as_deref(),
-                &args.query,
-                args.context,
-                args.limit,
-                args.fidelity.as_deref(),
-                &config,
-            )
-        })
-        .await
+        self.run_tool(move || tools::tool_search_document(&args, &config))
+            .await
     }
 
     #[tool(
         name = "read_selection",
-        description = "Read part of a document as valid self-contained DocMark: the exact bytes the whole document would write for those nodes, plus the minimum front matter to parse and write it back (next-id, partial: true, and an etag per node for an if-match write). Selector terms: s4, s7-s9, #n7, type:heading, text:foo."
+        description = "Part of a document as self-contained DocMark: the exact bytes it would write for those nodes, plus the front matter to write them back (next-id, partial, per-node etag). Selectors: s4, s7-s9, #n7, type:heading, text:foo."
     )]
     async fn read_selection(
         &self,
         Parameters(args): Parameters<ReadSelectionArgs>,
     ) -> Result<CallToolResult, McpError> {
         let config = Arc::clone(&self.config);
-        self.run_tool(move || {
-            tools::tool_read_selection(
-                args.path.as_deref(),
-                args.content_base64.as_deref(),
-                args.filename.as_deref(),
-                &args.select,
-                args.fidelity.as_deref(),
-                &config,
-            )
-        })
-        .await
+        self.run_tool(move || tools::tool_read_selection(&args, &config))
+            .await
     }
 }
 
 impl DocsaiServer {
     async fn run_tool<F>(&self, work: F) -> Result<CallToolResult, McpError>
     where
-        F: FnOnce() -> Result<Value, ConvertError> + Send + 'static,
+        F: FnOnce() -> Result<ToolOutput, ConvertError> + Send + 'static,
     {
         let timeout = self.config.timeout;
         let join = tokio::task::spawn_blocking(work);
@@ -324,7 +172,7 @@ impl DocsaiServer {
         };
 
         match result {
-            Ok(Ok(value)) => Ok(json_result(value)),
+            Ok(Ok(output)) => Ok(self.result(output)),
             Ok(Err(error)) => Ok(convert_error_result(error)),
             Err(join_err) => Err(McpError::internal_error(
                 format!("tool task failed: {join_err}"),
@@ -332,32 +180,74 @@ impl DocsaiServer {
             )),
         }
     }
+
+    /// One representation per response, unless a client asked for both.
+    ///
+    /// `CallToolResult::structured` sends the same facts twice — escaped inside
+    /// `content[0].text` and again as an object — and an agent pays for both.
+    /// The text block is the one every client reads, so it is the one that is
+    /// always sent.
+    fn result(&self, output: ToolOutput) -> CallToolResult {
+        let mut result = CallToolResult::success(vec![ContentBlock::text(output.text)]);
+        if self.config.structured {
+            result.structured_content = Some(output.value);
+        }
+        result
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for DocsaiServer {
+    /// The tool list, published in its cheapest equivalent form (E7).
+    ///
+    /// Overriding this is what stops `#[tool_handler]` from generating the
+    /// default `list_all()` version: the schemas `schemars` derives are
+    /// correct and verbose, and this is the one response a session pays for
+    /// before it has done any work. See [`crate::schema::slim`] for what comes
+    /// off and why nothing a caller reads does.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        let tools = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|mut tool| {
+                tool.input_schema = Arc::new(slim(&tool.input_schema));
+                tool
+            })
+            .collect();
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: None,
+            cache_scope: None,
+        })
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("docsai", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Bidirectional converter between Office/LibreOffice documents and DocMark. \
-                 On a document of any size, work through the addressing primitives rather \
-                 than reading it whole: outline_document to see what is in it, \
-                 search_document to find where it says something, read_selection to get \
-                 just that part back as self-contained DocMark you can edit and write with \
-                 convert_from_markdown. convert_to_markdown returns the whole document and \
-                 is the expensive path; its images now default to include_images=refs \
-                 (names and sizes, no bytes) — ask for thumbnails or full when you need to \
-                 see them. Also: inspect_document, list_supported_formats. Prefer path mode \
-                 on local machines; use content_base64 + filename when the client cannot \
-                 share a filesystem path. Logs always go to stderr; stdout is reserved for \
-                 MCP JSON-RPC.",
+                 Documents belong on disk, not in a context window: convert_to_markdown with \
+                 an `output_path` writes the DocMark and answers with a receipt, and \
+                 convert_from_markdown with `markdown_path` + `path` converts it back — \
+                 neither sends the document. What is in it comes from the addressing \
+                 primitives, which accept the written `.dmk.md` as readily as the original: \
+                 estimate_tokens for what it costs, outline_document for what is in it, \
+                 search_document for where it says something, read_selection for just that \
+                 part as self-contained DocMark. Images default to include_images=refs \
+                 (names and sizes, no bytes). Also: inspect_document, \
+                 list_supported_formats. Prefer path mode on local machines; use \
+                 content_base64 + filename when the client cannot share a filesystem path. \
+                 Logs always go to stderr; stdout is reserved for MCP JSON-RPC.",
             )
     }
-}
-
-fn json_result(value: Value) -> CallToolResult {
-    CallToolResult::structured(value)
 }
 
 fn convert_error_result(error: ConvertError) -> CallToolResult {

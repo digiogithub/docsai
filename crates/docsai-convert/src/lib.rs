@@ -40,7 +40,10 @@ pub use service::{
     ToMarkdownResult,
 };
 pub use style_map::{apply_style_map, StyleMap, StyleTarget};
-pub use tokens::{token_report, token_report_path, NodeTokens, TokenReport};
+pub use tokens::{
+    token_budget_input, token_report, token_report_path, FidelityCost, NodeTokens, TokenBudget,
+    TokenReport,
+};
 
 use docsai_model::Format;
 

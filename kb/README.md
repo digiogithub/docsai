@@ -42,6 +42,9 @@ Practical difference between the two folders:
 | [26 — jj, not git](26-jj-vcs.md) | This repository is driven by Jujutsu; what git misreports, what `git commit` left behind, and the command map |
 | [27 — Phase 11 G](27-phase-11-search.md) | `docsai search`: why the unit is the block and not the addressed node, and the relative address prose gets |
 | [28 — Phase 11 H](28-phase-11-mcp.md) | The three primitives over MCP, `include_images` as a ladder of cost, and the phase close |
+| [58 — MCP token efficiency plan](58-mcp-token-efficiency-plan.md) | Measured waste in the MCP responses (double serialization, outline at 93 % of a deck, documents through the context window) and the E1–E8 fix |
+| [59 — MCP efficiency E1–E5](59-mcp-e1-e5.md) | One representation per response, `output_path` / `markdown_path`, a bounded outline, and `estimate_tokens` |
+| [60 — MCP efficiency E7–E8](60-mcp-e7-e8.md) | A trimmed `tools/list` (9 403 → 6 470 bytes) and a golden that measures the bytes and tokens each agent task puts on the wire |
 
 ## Status in one line
 

@@ -14,12 +14,14 @@
 use std::path::Path;
 
 use docsai_docmark::{serialize_traced, Fidelity, NodeFragment, Options as DocMarkOptions};
+use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
 use docsai_model::{Document, Format, NodeId, NodeKind};
 use serde::Serialize;
 
 use crate::assets::DirAssetStore;
 use crate::pipeline::{read_path_with_options, ConvertOptions};
+use crate::service::{with_scratch_document, SourceInput};
 use crate::ConvertError;
 
 /// The encoding every count in this crate uses.
@@ -117,6 +119,101 @@ pub fn token_report_path(
     let mut report = token_report(&doc, &assets, &docmark);
     report.path = Some(input.display().to_string());
     Ok(report)
+}
+
+/// Every fidelity level, in the order an agent should consider them.
+pub const FIDELITY_LEVELS: [Fidelity; 4] = [
+    Fidelity::Full,
+    Fidelity::Agent,
+    Fidelity::Standard,
+    Fidelity::Plain,
+];
+
+/// What one fidelity level costs, without the per-node detail.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FidelityCost {
+    pub fidelity: &'static str,
+    pub total: usize,
+    pub front_matter: usize,
+    pub body: usize,
+    pub bytes: usize,
+    /// Addressable nodes at this level; `0` where the level writes no ids, and
+    /// therefore where `read_selection` has nothing to address.
+    pub nodes: usize,
+}
+
+/// What a document costs at every fidelity level.
+///
+/// The one call that answers "can I afford to read this, and at which level" —
+/// a few dozen tokens against a document of any size. Reading happens once and
+/// the four levels are serialized from the same IR, so this costs one parse,
+/// not four.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TokenBudget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub source_format: String,
+    pub encoding: &'static str,
+    pub levels: Vec<FidelityCost>,
+}
+
+impl TokenBudget {
+    /// The form an agent reads: one line per level.
+    pub fn render_text(&self) -> String {
+        let mut out = format!("{} {}\n", self.source_format, self.encoding);
+        for level in &self.levels {
+            out.push_str(&format!(
+                "{} {} tokens {} bytes {} nodes\n",
+                level.fidelity, level.total, level.bytes, level.nodes
+            ));
+        }
+        out
+    }
+}
+
+/// Costs a path or in-memory document at every fidelity level (the MCP
+/// `estimate_tokens` tool).
+pub fn token_budget_input(
+    source: SourceInput<'_>,
+    options: &ConvertOptions,
+) -> Result<TokenBudget, ConvertError> {
+    let (mut budget, label) = with_scratch_document(source, options, true, |doc, assets, base| {
+        let levels = FIDELITY_LEVELS
+            .iter()
+            .map(|&fidelity| {
+                let level_options = DocMarkOptions {
+                    fidelity,
+                    // The per-fidelity default, not the caller's override: the
+                    // point of the table is what each level *costs as itself*.
+                    ids: if fidelity.addresses() {
+                        IdPolicy::Assign
+                    } else {
+                        IdPolicy::Never
+                    },
+                    ..base.clone()
+                };
+                let report = token_report(doc, assets, &level_options);
+                FidelityCost {
+                    fidelity: fidelity.as_str(),
+                    total: report.total,
+                    front_matter: report.front_matter,
+                    body: report.body,
+                    bytes: report.bytes,
+                    nodes: report.nodes.len(),
+                }
+            })
+            .collect();
+        TokenBudget {
+            path: None,
+            source_format: base.source_format.as_str().to_string(),
+            encoding: ENCODING,
+            levels,
+        }
+    })?;
+    budget.path = label;
+    Ok(budget)
 }
 
 fn report_from(

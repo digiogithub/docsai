@@ -23,6 +23,11 @@ fn test_config() -> McpConfig {
     McpConfig {
         max_input_bytes: 20 * 1024 * 1024,
         timeout: Some(std::time::Duration::from_secs(60)),
+        // These tests assert on fields, so they ask for the object; the
+        // default — text only — is what `one_representation_per_response`
+        // checks.
+        structured: true,
+        max_inline_tokens: None,
     }
 }
 
@@ -52,8 +57,16 @@ async fn connect_duplex() -> (
     rmcp::service::RunningService<rmcp::RoleClient, ()>,
     JoinHandle<anyhow::Result<()>>,
 ) {
+    connect_with(test_config()).await
+}
+
+async fn connect_with(
+    config: McpConfig,
+) -> (
+    rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    JoinHandle<anyhow::Result<()>>,
+) {
     let (server_transport, client_transport) = tokio::io::duplex(64 * 1024);
-    let config = test_config();
     let server = tokio::spawn(async move {
         let running = serve_transport(config, server_transport).await?;
         running.waiting().await?;
@@ -277,6 +290,116 @@ async fn session_of_many_conversions_stays_stable() -> anyhow::Result<()> {
         ok.fetch_add(1, Ordering::SeqCst);
     }
     assert_eq!(ok.load(Ordering::SeqCst), 25);
+
+    client.cancel().await?;
+    let _ = server.await;
+    Ok(())
+}
+
+/// E1: a response says everything once.
+///
+/// `CallToolResult::structured` sent the same object twice — escaped in the
+/// text block and again as `structuredContent` — and the client paid for both.
+/// The default is now the text block alone, and for the primitives that text is
+/// the compact reading form, not the JSON.
+#[tokio::test]
+async fn one_representation_per_response_by_default() -> anyhow::Result<()> {
+    let config = McpConfig {
+        structured: false,
+        ..test_config()
+    };
+    let (client, server) = connect_with(config).await;
+    let path = corpus("long-report.docx").display().to_string();
+
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("outline_document")
+                .with_arguments(args_object(json!({ "path": path }))),
+        )
+        .await?;
+    assert_ne!(result.is_error, Some(true), "{:?}", result.content);
+    assert!(
+        result.structured_content.is_none(),
+        "the object is opt-in since E1"
+    );
+    let text = result
+        .content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("document-tokens="), "{text}");
+    assert!(
+        serde_json::from_str::<Value>(&text).is_err(),
+        "the text form of an outline is the outline, not its JSON"
+    );
+
+    client.cancel().await?;
+    let _ = server.await;
+    Ok(())
+}
+
+/// E2 + E3: the document moves between files, and the response is a receipt.
+#[tokio::test]
+async fn a_document_moves_between_files_not_through_the_response() -> anyhow::Result<()> {
+    let (client, server) = connect_duplex().await;
+    let dir = tempfile::tempdir()?;
+    let markdown = dir.path().join("report.dmk.md");
+    let package = dir.path().join("again.docx");
+
+    let receipt = call(
+        &client,
+        "convert_to_markdown",
+        json!({
+            "path": corpus("long-report.docx").display().to_string(),
+            "output_path": markdown.display().to_string()
+        }),
+    )
+    .await?;
+    assert!(receipt.get("markdown").is_none(), "{receipt}");
+    assert_eq!(receipt["output_path"], markdown.display().to_string());
+    assert!(markdown.exists());
+
+    // The written file is a first-class input to the primitives.
+    let outline = call(
+        &client,
+        "outline_document",
+        json!({ "path": markdown.display().to_string() }),
+    )
+    .await?;
+    assert!(!outline["nodes"].as_array().unwrap().is_empty());
+
+    let back = call(
+        &client,
+        "convert_from_markdown",
+        json!({
+            "markdown_path": markdown.display().to_string(),
+            "target_format": "docx",
+            "path": package.display().to_string()
+        }),
+    )
+    .await?;
+    assert!(back["content_base64"].is_null(), "{back}");
+    assert!(package.exists());
+
+    client.cancel().await?;
+    let _ = server.await;
+    Ok(())
+}
+
+/// E5: the one call that prices the document before anything reads it.
+#[tokio::test]
+async fn estimate_tokens_prices_the_document_for_almost_nothing() -> anyhow::Result<()> {
+    let (client, server) = connect_duplex().await;
+    let budget = call(
+        &client,
+        "estimate_tokens",
+        json!({ "path": corpus("long-report.docx").display().to_string() }),
+    )
+    .await?;
+    let levels = budget["levels"].as_array().unwrap();
+    assert_eq!(levels.len(), 4);
+    assert!(levels.iter().all(|l| l["total"].as_u64().unwrap() > 0));
 
     client.cancel().await?;
     let _ = server.await;

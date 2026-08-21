@@ -209,7 +209,10 @@ fn as_heading_or_paragraph(paragraph: Paragraph, ctx: &Ctx<'_>, st: &mut State<'
             // — not to the `Paragraph` nested inside it, which never takes
             // its own id (see `Paragraph::id`'s doc comment).
             let id = paragraph.id.clone();
-            let paragraph = Paragraph { id: None, ..paragraph };
+            let paragraph = Paragraph {
+                id: None,
+                ..paragraph
+            };
             Block::Heading(Heading {
                 id,
                 level,
