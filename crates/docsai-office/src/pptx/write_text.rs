@@ -281,8 +281,10 @@ fn write_inline(
             Ok(())
         }
         // `a:fld` is identified by a GUID the IR does not record, and inventing
-        // one changes the field's identity in the file. 15-E revisits it with
-        // the deck's own parts.
+        // one changes the field's identity in the file. Putting a field back
+        // needs the *model* to keep that GUID, which is a `docsai-model` change
+        // no increment of Phase 15 takes: 15-E, which the write-side table of
+        // 15-B pointed at, rewrites the deck's own parts and not its runs.
         Inline::Field { instruction, .. } => Err(format!("the `{instruction}` field")),
         Inline::Image(_) => Err("an inline image".into()),
         Inline::Footnote(_) => Err("a footnote".into()),

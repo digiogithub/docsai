@@ -86,7 +86,11 @@ differs from it.
 
 `ppt/notesSlides/notesSlideN.xml` regenerated for the slides that have notes, `p:sldIdLst` and
 `p14:sectionLst` updated when slides were added, removed or reordered — the only edits to
-`ppt/presentation.xml`, which is otherwise copied.
+`ppt/presentation.xml`, which is otherwise copied. Done, in [[66-phase-15-notes]], where a slide
+removed or reordered is written and a slide *added* is refused by name: there is no part to splice
+it into, and writing one is 15-G. The increment's real difficulty was that nothing in the chain
+carries an identity for a slide, so which package part a model slide *is* has to be recovered from
+its content.
 
 ### 15-F — `Warning::AutofitStale` on the way out
 

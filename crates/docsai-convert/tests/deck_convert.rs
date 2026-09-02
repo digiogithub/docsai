@@ -475,3 +475,115 @@ fn a_preserved_object_survives_the_docmark_round_trip() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 15-E through the pipeline: a note retyped in the Markdown is in the notes
+/// page, and the notes page nobody touched is the one that was read.
+#[test]
+fn a_note_edited_as_docmark_reaches_its_notes_page() {
+    let dir = scratch("write-back-notes");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("notes-speaker.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let edited = source.replace(
+        "Insistir en que el 12 % es interanual.",
+        "Insistir en que es interanual, y en el margen.",
+    );
+    assert_ne!(edited, source, "the fixture no longer holds the note");
+    std::fs::write(&markdown, &edited).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+
+    let notes = part_of(&package, "ppt/notesSlides/notesSlide1.xml");
+    assert!(
+        notes.contains("Insistir en que es interanual, y en el margen."),
+        "the edited note is not in the notes page: {notes}"
+    );
+    assert!(
+        notes.contains("No entrar en el desglose por región."),
+        "the rest of the note was lost: {notes}"
+    );
+    // The page is a printed page: its thumbnail placeholder is furniture the
+    // writer never touches.
+    assert!(
+        notes.contains("sldImg"),
+        "the notes page lost its furniture"
+    );
+    let untouched = part_of(&package, "ppt/notesSlides/notesSlide2.xml");
+    assert!(
+        untouched.contains("Si preguntan por el proveedor"),
+        "the notes page nobody edited changed: {untouched}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 15-E through the pipeline: a slide deleted as text leaves the package, and
+/// takes its own parts with it.
+#[test]
+fn a_slide_deleted_in_docmark_leaves_the_package() {
+    let dir = scratch("write-back-removed");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("basic-slides.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let at = source
+        .find("## Siguientes pasos")
+        .expect("the fixture no longer holds the second slide");
+    std::fs::write(&markdown, &source[..at]).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+
+    let mut assets = MemoryAssetStore::new();
+    let file = std::fs::File::open(&package).expect("the package was written");
+    let (document, _, _) = docsai_convert::read_document(file, Some("deck.pptx"), &mut assets)
+        .expect("reads the written package");
+    let Document::Presentation(deck) = document else {
+        panic!("the written package is not a deck");
+    };
+    assert_eq!(
+        deck.slides.len(),
+        1,
+        "the deleted slide is still in the deck"
+    );
+    assert_eq!(
+        deck.slides[0].title().as_deref(),
+        Some("Informe trimestral")
+    );
+
+    let file = std::fs::File::open(&package).expect("the package was written");
+    let mut zip = zip::ZipArchive::new(file).expect("the written package is a zip");
+    assert!(
+        zip.by_name("ppt/slides/slide2.xml").is_err(),
+        "the deleted slide's text is still in the file"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One part of a written package, as text.
+fn part_of(package: &Path, part: &str) -> String {
+    let file = std::fs::File::open(package).expect("the package was written");
+    let mut zip = zip::ZipArchive::new(file).expect("the written package is a zip");
+    let mut xml = String::new();
+    std::io::Read::read_to_string(
+        &mut zip.by_name(part).unwrap_or_else(|e| panic!("{part}: {e}")),
+        &mut xml,
+    )
+    .expect("the part is text");
+    xml
+}

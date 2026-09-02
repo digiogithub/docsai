@@ -106,5 +106,6 @@ Increment **15-D** of [[61-phase-15-plan]], on top of [[64-phase-15-media]]. The
 
 ## Next
 
-15-E: notes pages regenerated for the slides that have them, `p:sldIdLst` and `p14:sectionLst`
-updated when slides move — the only edits to `ppt/presentation.xml`, which is otherwise copied.
+15-E, done in [[66-phase-15-notes]]: notes pages regenerated for the slides that have them,
+`p:sldIdLst` and `p14:sectionLst` updated when slides move — the only edits to
+`ppt/presentation.xml`, which is otherwise copied.

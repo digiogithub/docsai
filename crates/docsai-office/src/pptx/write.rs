@@ -1,4 +1,4 @@
-//! The `.pptx` writer (Phase 15, increments 15-A to 15-C).
+//! The `.pptx` writer (Phase 15, increments 15-A to 15-E).
 //!
 //! The reader's counterpart, and the place where spike P3's rule is enforced
 //! rather than restated:
@@ -48,12 +48,24 @@
 //! package's is written back over it. A fragment in another dialect is dropped
 //! with `Warning::RawBlockDropped` rather than emitted as nonsense.
 //!
+//! Since 15-E the writer reaches the two parts that are the *deck's* rather
+//! than a slide's. A **notes page** is rewritten like any other text body,
+//! through the slide's own relationships and never by number; and when the
+//! model's slides are not the package's — one removed, or the order changed —
+//! `p:sldIdLst` and `p14:sectionLst` are restated, the removed slide's parts
+//! leave the archive with it, and `ppt/presentation.xml` is otherwise copied.
+//! Which package slide a model slide *is* has to be recovered from the content
+//! (see [`align`]): nothing in this chain carries an identity for a slide.
+//!
 //! What the writer cannot yet put back it **keeps and reports**: a chart's
-//! data (Phase 16), a notes page (15-E), a field, a table whose grid
-//! changed, a slide added or removed. Each one is a `Degraded` warning naming
-//! what was copied and the increment that lifts it, because a caller who edited
-//! the model and got the original back has to be able to learn that from the
-//! report rather than from the file (`AGENTS.md` §7 rule 3).
+//! data (Phase 16), a field (whose GUID the IR does not record), a table whose
+//! grid changed, a slide *added* or a notes page the deck does not have (both
+//! 15-G, which writes a part rather than into one). Each one is a `Degraded`
+//! warning naming what was copied and the increment that lifts it, because a
+//! caller who edited the model and got the original back has to be able to
+//! learn that from the report rather than from the file (`AGENTS.md` §7 rule
+//! 3) — and, just as much, a loss that did *not* happen must not be reported
+//! as one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Seek, Write};
@@ -62,7 +74,7 @@ use std::ops::Range;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{ImageGeometry, ImageRef};
 use docsai_model::presentation::{
-    Placeholder, Presentation, RawShape, ShapeKind, SkeletonRef, Slide,
+    PhType, Placeholder, Presentation, RawShape, ShapeKind, SkeletonRef, Slide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::text::{RawFragment, Table};
@@ -135,6 +147,15 @@ fn skeleton_bytes<'a>(
 ///
 /// That is spike P3's `rewrite` mode rather than its `naive` one, applied one
 /// level further in: preserve everything, and rebuild only what the IR models.
+///
+/// Two parts that are not a slide come out of here too, both of them 15-E: a
+/// slide's **notes page**, rewritten the same way and reached the same way the
+/// reader reached it; and the **deck's own part**, edited — not rebuilt — in
+/// the two places that state which slides the deck has and what order they are
+/// in. The order of the work is deliberate: a slide list that cannot be
+/// restated stops the slides from being rewritten at all, because the model's
+/// third slide written into a part the file still calls the fourth is the one
+/// corruption a warning cannot repair.
 fn rebuild_slides(
     deck: &Presentation,
     skeleton: &[u8],
@@ -156,7 +177,7 @@ fn rebuild_slides(
         }
     };
 
-    let parts = match slide_parts(&package) {
+    let parts = match deck_parts(&package) {
         Some(parts) => parts,
         None => {
             report.warn(Warning::Degraded {
@@ -169,22 +190,44 @@ fn rebuild_slides(
         }
     };
 
-    // A slide added or removed in the model moves `p:sldIdLst`, the package
-    // relationships and the content types, which is Phase 15-E. Rewriting the
-    // parts that happen to line up would put the edits of slide 3 into slide 4.
-    if parts.len() != deck.slides.len() {
+    // Which package slide each model slide *is*. Neither the deck nor DocMark
+    // carries an identity for a slide, so it is recovered from the content —
+    // see [`align`], which is also where a slide the model added is refused.
+    let map = match align(&parts.entries, &deck.slides) {
+        Ok(map) => map,
+        Err(reason) => {
+            report.warn(Warning::Degraded {
+                what: "every slide of the written deck".into(),
+                why: format!("{reason}, so the package was copied unchanged"),
+            });
+            return rebuild;
+        }
+    };
+
+    // The deck's own part comes first: a slide list that cannot be restated is
+    // a deck whose slides must not be rewritten either, because writing the
+    // model's third slide into a part the file still calls the fourth is the
+    // corruption this ordering exists to prevent.
+    let restated = match restate_deck(&package, &parts, deck, &map) {
+        Ok(restated) => restated,
+        Err(reason) => {
+            report.warn(Warning::Degraded {
+                what: "the deck's slide list".into(),
+                why: format!("{reason}, so the package was copied unchanged"),
+            });
+            return rebuild;
+        }
+    };
+    for reason in &restated.kept {
         report.warn(Warning::Degraded {
-            what: "every slide of the written deck".into(),
-            why: format!(
-                "the model holds {} slide(s) and the preserved package {}; adding or \
-                 removing a slide rewrites the deck's own parts, which is plan v2 \
-                 Phase 15-E, so the package was copied unchanged",
-                deck.slides.len(),
-                parts.len()
-            ),
+            what: "the deck's slide list".into(),
+            why: format!("{reason}: the preserved package's own answer stands"),
         });
-        return rebuild;
     }
+    for (name, bytes) in restated.parts {
+        rebuild.put(&package, name, bytes);
+    }
+    rebuild.removals = restated.removed;
 
     let mut media = Media::new(&package, assets);
     // The payloads are one deck-wide list and the stubs point into it by id
@@ -195,32 +238,26 @@ fn rebuild_slides(
         .map(|fragment| (fragment.id.as_str(), fragment))
         .collect();
 
-    for (index, (part, slide)) in parts.iter().zip(&deck.slides).enumerate() {
+    for (index, (&entry, slide)) in map.iter().zip(&deck.slides).enumerate() {
         let number = index + 1;
-        let Ok(source) = package.text(part) else {
+        let part = &parts.entries[entry].part;
+        let Some(Parsed { source, root }) = &parts.entries[entry].parsed else {
             report.warn(Warning::Degraded {
                 what: format!("slide {number}"),
                 why: format!("`{part}` is not readable as XML, so it was copied unchanged"),
             });
             continue;
         };
-        let Ok(root) = Element::parse(part, source.as_bytes()) else {
+        let source = source.as_str();
+        // The notes page is a part of its own, reached through the slide's own
+        // relationships — the same door the reader went through.
+        if let Err(reason) = rewrite_notes(&package, part, slide, &mut rebuild) {
             report.warn(Warning::Degraded {
                 what: format!("slide {number}"),
-                why: format!("`{part}` did not parse, so it was copied unchanged"),
-            });
-            continue;
-        };
-        // The notes page is its own part, and rewriting it moves the notes
-        // master and the deck's relationships with it: 15-E. Copying it is
-        // right; copying it in silence would not be.
-        if slide.notes.is_some() {
-            report.warn(Warning::Degraded {
-                what: format!("the speaker notes of slide {number}"),
-                why: "the notes page is a part of its own and is copied from the \
-                      preserved package (plan v2 Phase 15-E), so an edit to the \
-                      notes in the model is not in the file"
-                    .into(),
+                why: format!(
+                    "{reason}: it was copied from the preserved package, so an edit \
+                     to it in the model is not in the file"
+                ),
             });
         }
         let mut rels = PartRels::new(&package, part);
@@ -231,7 +268,7 @@ fn rebuild_slides(
             media: &mut media,
             fragments: &fragments,
         };
-        match rewrite_slide(&root, source, slide, &mut outside) {
+        match rewrite_slide(root, source, slide, &mut outside) {
             Ok(Rewritten { xml, kept, dropped }) => {
                 for (id, format) in dropped {
                     report.warn(Warning::RawBlockDropped { id, format });
@@ -262,7 +299,7 @@ fn rebuild_slides(
     for (name, bytes) in std::mem::take(&mut media.added) {
         rebuild.additions.insert(name, bytes);
     }
-    if let Some((name, xml)) = content_types(&package, &media) {
+    if let Some((name, xml)) = content_types(&package, &media, &rebuild.removals) {
         rebuild.put(&package, name, xml.into_bytes());
     }
     rebuild
@@ -277,6 +314,9 @@ fn rebuild_slides(
 struct Rebuild {
     replacements: BTreeMap<String, Vec<u8>>,
     additions: BTreeMap<String, Vec<u8>>,
+    /// Members the written archive does not carry at all: the parts a removed
+    /// slide takes with it (15-E).
+    removals: BTreeSet<String>,
 }
 
 impl Rebuild {
@@ -290,21 +330,472 @@ impl Rebuild {
     }
 }
 
-/// The slide parts of a package, in `p:sldIdLst` order — the reader's rule, so
-/// the *n*th slide of the model is the *n*th part here whatever they are named.
-fn slide_parts(package: &Package) -> Option<Vec<String>> {
+/// The deck's own part, and the `p:sldId` entries that name its slides.
+///
+/// `ppt/presentation.xml` is **not** in
+/// [`SkeletonRef::rebuilt_parts`](docsai_model::presentation::SkeletonRef) and
+/// deliberately stays out of it: the IR does not hold that part's content, only
+/// two facts stated inside it — the order of the slides and which section each
+/// one is in. So it is not rebuilt, it is *edited*, in those two places and
+/// nowhere else, and every other byte of it — `p:sldSz`, the master and notes-
+/// master lists, the presentation-wide text styles, the custom shows — is the
+/// bytes that were read.
+struct DeckParts {
+    /// The part's own name, `ppt/presentation.xml` by convention.
+    main: String,
+    /// Its text, which the two edits of this increment are spliced into.
+    source: String,
+    root: Element,
+    /// One entry per `p:sldId` that resolves to a slide part of this package,
+    /// in `p:sldIdLst` order — the reader's own rule, so the *n*th entry here
+    /// is the *n*th slide the reader produced whatever the parts are named.
+    entries: Vec<SlideEntry>,
+    /// `p:sldId` children that resolve to nothing. A deck that carries one is
+    /// already degraded (the reader warned about it), and its slide list
+    /// cannot be restated without silently dropping the entry, so restating is
+    /// refused rather than done wrong.
+    unresolved: usize,
+}
+
+/// One `p:sldId`: what it points at, and where it is written.
+struct SlideEntry {
+    /// `p:sldId@id`, the deck-wide id `p14:sectionLst` refers to.
+    id: i64,
+    /// `p:sldId@r:id`, the relationship the part is named through.
+    rel: String,
+    part: String,
+    /// The element's own bytes inside `ppt/presentation.xml`, so a list that
+    /// was reordered is written from the entries that were read rather than
+    /// from entries this writer made up.
+    span: Range<usize>,
+    /// The slide part itself, when it reads and parses.
+    parsed: Option<Parsed>,
+}
+
+/// A part and the tree parsed out of it, kept together because every splice
+/// needs both: the tree for the spans, the text for the bytes between them.
+struct Parsed {
+    source: String,
+    root: Element,
+}
+
+fn deck_parts(package: &Package) -> Option<DeckParts> {
     let types = crate::package::ContentTypes::read(package);
     let main = super::main_part(package, &types).ok()?;
-    let root = super::parse(package, &main).ok()?;
+    let source = package.text(&main).ok()?.to_string();
+    let root = Element::parse(&main, source.as_bytes()).ok()?;
     let rels = package.relationships(&main);
-    Some(
-        super::slide_entries(&root)
+
+    let mut entries = Vec::new();
+    let mut unresolved = 0;
+    for entry in root
+        .child("sldIdLst")
+        .into_iter()
+        .flat_map(|list| list.children_named("sldId"))
+    {
+        let resolved = super::rel_id(entry)
+            .and_then(|id| rels.get(id).map(|rel| (id, rel)))
+            .filter(|(_, rel)| !rel.external);
+        let Some((rel_id, rel)) = resolved else {
+            unresolved += 1;
+            continue;
+        };
+        let parsed = package.text(&rel.target).ok().and_then(|text| {
+            Element::parse(&rel.target, text.as_bytes())
+                .ok()
+                .map(|root| Parsed {
+                    source: text.to_string(),
+                    root,
+                })
+        });
+        entries.push(SlideEntry {
+            id: entry.attr_i64("id").unwrap_or_default(),
+            rel: rel_id.to_string(),
+            part: rel.target.clone(),
+            span: entry.span.clone(),
+            parsed,
+        });
+    }
+    Some(DeckParts {
+        main,
+        source,
+        root,
+        entries,
+        unresolved,
+    })
+}
+
+/// What a slide is recognised by when a model and a package have to be matched.
+///
+/// A slide has no identity anywhere in this chain: `p:sldId@id` is the deck's
+/// bookkeeping and the IR does not keep it, DocMark's `{#n7}` is assigned on
+/// serialisation and the package has never heard of it. So the only witness
+/// that the model's second slide is the package's fifth is what the slide
+/// *says*, and this is the part of it both sides can state: the slide's name,
+/// its title and how many shapes it has.
+#[derive(PartialEq, Eq)]
+struct Signature {
+    name: Option<String>,
+    title: Option<String>,
+    shapes: usize,
+}
+
+fn model_signature(slide: &Slide) -> Signature {
+    Signature {
+        name: slide.name.clone(),
+        title: slide.title().map(|title| collapse(&title)),
+        shapes: slide.shapes.len(),
+    }
+}
+
+fn part_signature(root: &Element) -> Option<Signature> {
+    let tree = root.path(&["cSld", "spTree"])?;
+    let title = tree
+        .children_named("sp")
+        .find(|sp| {
+            sp.path(&["nvSpPr", "nvPr", "ph"])
+                .is_some_and(|ph| PhType::parse(ph.attr("type").unwrap_or_default()).is_title())
+        })
+        .and_then(|sp| sp.child("txBody"))
+        .map(|body| {
+            let paragraphs: Vec<String> = body
+                .children_named("p")
+                .map(|p| p.deep_text())
+                .filter(|text| !text.is_empty())
+                .collect();
+            collapse(&paragraphs.join(" "))
+        })
+        .filter(|title| !title.is_empty());
+    Some(Signature {
+        name: super::csld_name(root),
+        title,
+        shapes: tree
+            .children()
+            .filter(|child| !matches!(child.name.as_str(), "nvGrpSpPr" | "grpSpPr"))
+            .count(),
+    })
+}
+
+/// Runs of whitespace as one space, because the two sides count them
+/// differently: a line break is a node in the IR and a `a:br` element with no
+/// text in the part.
+fn collapse(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Which package slide part each model slide is written into.
+///
+/// Three passes, weakest claim last:
+///
+/// 1. a slide that is where it was and says what it said keeps its own part —
+///    which is the whole corpus, and the reason an unedited deck is untouched;
+/// 2. a slide the package still states verbatim *somewhere else* has moved, and
+///    takes its part with it: that is what makes a reorder a reorder rather
+///    than every slide from the second one on being rewritten in place;
+/// 3. what is left is a slide that was edited, paired in order with the parts
+///    that are left. A deck where the same edit removed one slide and retyped
+///    another still lands right, because the untouched slides anchor it.
+///
+/// A part no model slide claims was **removed**. A model slide with no part
+/// left to claim is a slide that was *added*, and there is nothing to splice
+/// it into: writing a slide part from the model rather than into one is the
+/// deck-with-no-skeleton work of 15-G, so it is refused by name.
+fn align(entries: &[SlideEntry], slides: &[Slide]) -> Result<Vec<usize>, String> {
+    if slides.len() > entries.len() {
+        return Err(format!(
+            "the model holds {} slide(s) and the preserved package {}; a slide part \
+             written from the model rather than spliced into one is plan v2 Phase 15-G",
+            slides.len(),
+            entries.len()
+        ));
+    }
+    if slides.is_empty() && !entries.is_empty() {
+        return Err("the model holds no slides at all, and a deck whose \
+                    `p:sldIdLst` is empty is not a deck PowerPoint opens"
+            .to_string());
+    }
+
+    let stated: Vec<Option<Signature>> = entries
+        .iter()
+        .map(|entry| entry.parsed.as_ref().and_then(|p| part_signature(&p.root)))
+        .collect();
+    let wanted: Vec<Signature> = slides.iter().map(model_signature).collect();
+
+    let mut taken = vec![false; entries.len()];
+    let mut map: Vec<Option<usize>> = vec![None; slides.len()];
+    for (i, want) in wanted.iter().enumerate() {
+        if stated.get(i).and_then(Option::as_ref) == Some(want) {
+            map[i] = Some(i);
+            taken[i] = true;
+        }
+    }
+    for (i, want) in wanted.iter().enumerate() {
+        if map[i].is_some() {
+            continue;
+        }
+        if let Some(j) = (0..entries.len()).find(|&j| !taken[j] && stated[j].as_ref() == Some(want))
+        {
+            map[i] = Some(j);
+            taken[j] = true;
+        }
+    }
+    let mut free = (0..entries.len()).filter(|&j| !taken[j]);
+    for slot in map.iter_mut().filter(|slot| slot.is_none()) {
+        *slot = free.next();
+    }
+    map.into_iter()
+        .collect::<Option<Vec<usize>>>()
+        .ok_or_else(|| "the model's slides cannot be matched to the package's".to_string())
+}
+
+/// What restating the deck's own parts produced.
+///
+/// Every one of these is an edit or a removal, never a regeneration: the
+/// `p:sldId` entries that stay are the bytes that were read, in the model's
+/// order, and a `p14:section` keeps its name and its GUID and changes only
+/// which slides it lists.
+#[derive(Debug, Default)]
+struct DeckRestated {
+    /// Parts to write with new bytes.
+    parts: Vec<(String, Vec<u8>)>,
+    /// Parts the archive does not carry any more.
+    removed: BTreeSet<String>,
+    /// What could not be restated, in words a warning can carry.
+    kept: Vec<String>,
+}
+
+fn restate_deck(
+    package: &Package,
+    parts: &DeckParts,
+    deck: &Presentation,
+    map: &[usize],
+) -> Result<DeckRestated, String> {
+    let mut restated = DeckRestated::default();
+    let removed: Vec<usize> = (0..parts.entries.len())
+        .filter(|j| !map.contains(j))
+        .collect();
+
+    let mut edits: Vec<(Range<usize>, String)> = Vec::new();
+    if let Some(edit) = slide_list_edit(parts, map) {
+        edits.push(edit);
+    }
+    edits.extend(section_edits(parts, deck, map, &mut restated.kept));
+    if !edits.is_empty() && parts.unresolved > 0 {
+        return Err(format!(
+            "the deck names {} slide(s) this writer cannot resolve to a part, and \
+             restating `p:sldIdLst` would drop them",
+            parts.unresolved
+        ));
+    }
+
+    if !removed.is_empty() {
+        // A custom show names its slides through the same relationships, and
+        // this writer does not model one: removing a slide would leave the show
+        // pointing at nothing, which is a repair dialog rather than a deck.
+        if parts.root.child("custShowLst").is_some() {
+            return Err("the deck has custom shows, which name the slides through \
+                        relationships this writer does not restate"
+                .into());
+        }
+        for &j in &removed {
+            let entry = &parts.entries[j];
+            let mut gone = vec![entry.part.clone()];
+            let slide_rels = package.relationships(&entry.part);
+            if let Some(notes) = super::notes::part(&slide_rels) {
+                gone.push(notes.to_string());
+            }
+            for name in std::mem::take(&mut gone) {
+                if let Some(rels) = rels_part_name(&name) {
+                    gone.push(rels);
+                }
+                gone.push(name);
+            }
+            restated
+                .removed
+                .extend(gone.into_iter().filter(|name| package.has_part(name)));
+        }
+        // Nothing that stays may point at something that goes. A hyperlink
+        // from another slide, a thumbnail, a part nobody has looked at yet: a
+        // dangling relationship is exactly what P3 measured LibreOffice
+        // accepting and PowerPoint refusing.
+        for name in package.part_names() {
+            if name == parts.main || name.ends_with(".rels") || restated.removed.contains(name) {
+                continue;
+            }
+            for (_, rel) in package.relationships(name).iter() {
+                if !rel.external && restated.removed.contains(&rel.target) {
+                    return Err(format!(
+                        "`{name}` points at `{}`, which a removed slide takes with it",
+                        rel.target
+                    ));
+                }
+            }
+        }
+        restated
+            .parts
+            .push(deck_rels_without(package, parts, &removed)?);
+    }
+
+    if !edits.is_empty() {
+        restated.parts.push((
+            parts.main.clone(),
+            splice(&parts.source, edits).into_bytes(),
+        ));
+    }
+    Ok(restated)
+}
+
+/// `p:sldIdLst` restated in the model's order, or `None` when it already says
+/// what the model says — which is the case that keeps an unedited deck's
+/// `ppt/presentation.xml` byte for byte the part that was read.
+fn slide_list_edit(parts: &DeckParts, map: &[usize]) -> Option<(Range<usize>, String)> {
+    let list = parts.root.child("sldIdLst")?;
+    let children: Vec<&Element> = list.children_named("sldId").collect();
+    let range = children.first()?.span.start..children.last()?.span.end;
+    let wanted: String = map
+        .iter()
+        .map(|&j| &parts.source[parts.entries[j].span.clone()])
+        .collect();
+    (wanted != parts.source[range.clone()]).then_some((range, wanted))
+}
+
+/// `p14:sectionLst` restated: each section keeps its name and its id and lists
+/// the slides the model puts in it, in the model's order.
+///
+/// Sections live in an extension and a deck without them is the normal case,
+/// so every step of the path is optional and an absent `p14:sectionLst` is no
+/// edit at all rather than one that writes an empty one.
+fn section_edits(
+    parts: &DeckParts,
+    deck: &Presentation,
+    map: &[usize],
+    kept: &mut Vec<String>,
+) -> Vec<(Range<usize>, String)> {
+    let mut edits = Vec::new();
+    let sections: Vec<&Element> = parts
+        .root
+        .child("extLst")
+        .into_iter()
+        .flat_map(|list| list.children_named("ext"))
+        .filter_map(|ext| ext.child("sectionLst"))
+        .flat_map(|list| list.children_named("section"))
+        .collect();
+    if sections.is_empty() {
+        return edits;
+    }
+
+    let named: BTreeSet<&str> = sections.iter().filter_map(|s| s.attr("name")).collect();
+    // What the deck currently says, by the slide id `p14:sectionLst` refers to.
+    // A model that states no section for a slide is not a model asking for it
+    // to be taken out of every section: it is a model that does not state it,
+    // and the package's own answer stands — the rule the whole writer follows.
+    let mut current: BTreeMap<i64, &str> = BTreeMap::new();
+    for section in &sections {
+        let Some(name) = section.attr("name") else {
+            continue;
+        };
+        for id in section
+            .child("sldIdLst")
             .into_iter()
-            .filter_map(|entry| rels.get(entry.rel_id.as_deref()?).cloned())
-            .filter(|rel| !rel.external)
-            .map(|rel| rel.target)
-            .collect(),
-    )
+            .flat_map(|list| list.children_named("sldId"))
+            .filter_map(|entry| entry.attr_i64("id"))
+        {
+            current.insert(id, name);
+        }
+    }
+
+    // Where each slide goes, and the ones that cannot go where they are asked.
+    let mut wanted_section: Vec<Option<&str>> = Vec::with_capacity(map.len());
+    let mut unnamed: Vec<String> = Vec::new();
+    for (index, &j) in map.iter().enumerate() {
+        let current = current.get(&parts.entries[j].id).copied();
+        match deck.slides[index].section.as_deref() {
+            Some(name) if named.contains(name) => wanted_section.push(Some(name)),
+            Some(name) => {
+                unnamed.push(format!("slide {} in `{name}`", index + 1));
+                wanted_section.push(current);
+            }
+            None => wanted_section.push(current),
+        }
+    }
+    if !unnamed.is_empty() {
+        kept.push(format!(
+            "the deck has no section to put {}, and creating one needs a \
+             `p14:section` GUID nothing recorded",
+            unnamed.join(", ")
+        ));
+    }
+
+    for section in sections {
+        let Some(name) = section.attr("name") else {
+            continue;
+        };
+        let Some(list) = section.child("sldIdLst") else {
+            kept.push(format!(
+                "the deck's section `{name}` states no slide list to restate"
+            ));
+            continue;
+        };
+        let known: Vec<(i64, &Element)> = list
+            .children_named("sldId")
+            .filter_map(|entry| Some((entry.attr_i64("id")?, entry)))
+            .collect();
+        // The namespace the deck itself writes these in, taken off the
+        // element rather than assumed: `p14` is a convention, not a rule.
+        let ns = if list.prefix.is_empty() {
+            String::new()
+        } else {
+            format!("{}:", list.prefix)
+        };
+        let mut wanted = String::new();
+        for (i, &j) in map.iter().enumerate() {
+            if wanted_section[i] != Some(name) {
+                continue;
+            }
+            let entry = &parts.entries[j];
+            match known.iter().find(|(id, _)| *id == entry.id) {
+                // The entry the deck already had, byte for byte.
+                Some((_, element)) => wanted.push_str(&parts.source[element.span.clone()]),
+                None => wanted.push_str(&format!("<{ns}sldId id=\"{}\"/>", entry.id)),
+            }
+        }
+        let restated = if wanted.is_empty() {
+            format!("<{ns}sldIdLst/>")
+        } else {
+            format!("<{ns}sldIdLst>{wanted}</{ns}sldIdLst>")
+        };
+        if restated != parts.source[list.span.clone()] {
+            edits.push((list.span.clone(), restated));
+        }
+    }
+    edits
+}
+
+/// `ppt/_rels/presentation.xml.rels` without the relationships of the slides
+/// that were removed. Spliced, so the relationships that stay keep their ids,
+/// their order and their bytes.
+fn deck_rels_without(
+    package: &Package,
+    parts: &DeckParts,
+    removed: &[usize],
+) -> Result<(String, Vec<u8>), String> {
+    let name = rels_part_name(&parts.main)
+        .ok_or_else(|| format!("`{}` has no relationship part to restate", parts.main))?;
+    let source = package
+        .text(&name)
+        .map_err(|_| format!("`{name}` is not readable as XML"))?;
+    let root =
+        Element::parse(&name, source.as_bytes()).map_err(|_| format!("`{name}` did not parse"))?;
+    let gone: BTreeSet<&str> = removed
+        .iter()
+        .map(|&j| parts.entries[j].rel.as_str())
+        .collect();
+    let edits: Vec<(Range<usize>, String)> = root
+        .children_named("Relationship")
+        .filter(|rel| gone.contains(rel.attr("Id").unwrap_or_default()))
+        .map(|rel| (rel.span.clone(), String::new()))
+        .collect();
+    Ok((name, splice(source, edits).into_bytes()))
 }
 
 /// One slide part rewritten, and what inside it was left as it was.
@@ -470,6 +961,112 @@ fn rewrite_slide(
         kept,
         dropped,
     })
+}
+
+/// Puts a slide's speaker notes back into the notes page that holds them.
+///
+/// The part is reached through the **slide's own relationships**, never by
+/// number: `notesSlide7.xml` belonging to the seventh slide is a convention
+/// PowerPoint happens to follow and a converter is free to break. The reader
+/// goes through the same door ([`super::notes::part`]), so the page this writes
+/// is the page whose text the IR actually holds — the condition
+/// [`SkeletonRef::rebuilt_parts`] states, checked at the door rather than
+/// against a list, because a deck that came back through DocMark carries no
+/// list at all.
+///
+/// The unit of rewriting is the same as everywhere else: the `a:p` sequence of
+/// one text body. The thumbnail of the slide, the header, the footer, the date
+/// and the page number around it are the notes master's furniture and the
+/// bytes that were read.
+fn rewrite_notes(
+    package: &Package,
+    slide_part: &str,
+    slide: &Slide,
+    rebuild: &mut Rebuild,
+) -> Result<(), String> {
+    let slide_rels = package.relationships(slide_part);
+    let notes_part = super::notes::part(&slide_rels).map(str::to_string);
+    let (blocks, notes_part) = match (&slide.notes, notes_part) {
+        (None, None) => return Ok(()),
+        (None, Some(part)) => {
+            return Err(format!(
+                "its speaker notes, which the model does not hold and `{part}` still \
+                 states: deleting a notes page takes the deck's own parts with it"
+            ))
+        }
+        (Some(_), None) => {
+            return Err(
+                "its speaker notes, which the deck has no notes page to state: \
+                        writing one needs a part of its own and a notes master to hang \
+                        it from, which is plan v2 Phase 15-G"
+                    .into(),
+            )
+        }
+        (Some(blocks), Some(part)) => (blocks, part),
+    };
+
+    let source = package.text(&notes_part).map_err(|_| {
+        format!("its speaker notes, whose part `{notes_part}` is not readable as XML")
+    })?;
+    let root = Element::parse(&notes_part, source.as_bytes())
+        .map_err(|_| format!("its speaker notes, whose part `{notes_part}` did not parse"))?;
+    let tree = root
+        .path(&["cSld", "spTree"])
+        .ok_or_else(|| format!("its speaker notes, whose part `{notes_part}` has no shape tree"))?;
+
+    // The reader's rule, unchanged: a shape with no `p:ph` at all, or with a
+    // body-like one, is the note; everything else on the page is furniture.
+    let bodies: Vec<&Element> = tree
+        .children_named("sp")
+        .filter(|sp| {
+            let ph = sp.path(&["nvSpPr", "nvPr", "ph"]);
+            let is_note = ph
+                .map(|ph| PhType::parse(ph.attr("type").unwrap_or_default()).is_body())
+                .unwrap_or(true);
+            is_note && sp.child("txBody").is_some()
+        })
+        .collect();
+    if bodies.is_empty() && blocks.is_empty() {
+        // A notes page with nothing to write the notes into, and no notes to
+        // write. Nothing was lost, so nothing is reported.
+        return Ok(());
+    }
+    // The reader concatenates the text of every note-like shape on the page,
+    // so a page with two of them cannot be written back: the model no longer
+    // records where one note ended and the next began.
+    let [body] = bodies[..] else {
+        return Err(format!(
+            "its speaker notes, which `{notes_part}` states over {} text shape(s) and \
+             the model holds as one note",
+            bodies.len()
+        ));
+    };
+    let tx_body = body.child("txBody").expect("the filter required one");
+
+    let mut rels = PartRels::new(package, &notes_part);
+    let paragraphs =
+        write_text::write_body(blocks, false, editing_language(tree).as_deref(), &mut rels)
+            .map_err(|reason| format!("its speaker notes, which hold {reason}"))?;
+    let range = paragraph_range(tx_body);
+    let edit = if paragraphs.is_empty() && !source[range.clone()].trim().is_empty() {
+        // `CT_TextBody` needs a paragraph; emptying the page means writing the
+        // empty one rather than none at all.
+        (range, "<a:p/>".to_string())
+    } else {
+        (range, paragraphs)
+    };
+    let xml = splice(source, vec![edit]);
+    if xml != source {
+        rebuild
+            .replacements
+            .insert(notes_part.clone(), xml.into_bytes());
+    }
+    // A hyperlink typed into a note needs a relationship in the notes page's
+    // own `_rels`, exactly as one typed into a slide does.
+    if let Some((name, xml)) = rels.rewritten() {
+        rebuild.put(package, name, xml.into_bytes());
+    }
+    Ok(())
 }
 
 /// What became of one raw fragment on the way out.
@@ -990,10 +1587,13 @@ impl Links for PartRels {
         if let Some(id) = self.id_of_target(target) {
             return Some(id);
         }
-        // An internal target — another slide of this deck — is a relationship
-        // whose target is a part name, and minting one means knowing which part
-        // the model's target refers to. Until 15-E settles that, a link the
-        // deck did not already have is refused rather than pointed at nothing.
+        // An internal target — another slide of this deck — is not a hyperlink
+        // relationship at all: PowerPoint writes a `slide`-typed one and marks
+        // the `a:hlinkClick` with `action="ppaction://hlinksldjump"`, and the
+        // IR records neither the action nor which slide the target names. 15-E
+        // gives the writer the slide-to-part map and still does not settle
+        // this, because the missing half is in the model. A link the deck did
+        // not already have is refused rather than pointed at nothing.
         is_external(target).then(|| self.relate(HYPERLINK_REL, target, true))
     }
 }
@@ -1079,9 +1679,13 @@ impl<'a> Media<'a> {
 /// A part with no content type is the one thing in an OPC package PowerPoint
 /// refuses outright, and it is spliced rather than rebuilt for the same reason
 /// everything else here is: the overrides a deck carries are its own.
-fn content_types(package: &Package, media: &Media<'_>) -> Option<(String, String)> {
+fn content_types(
+    package: &Package,
+    media: &Media<'_>,
+    removed: &BTreeSet<String>,
+) -> Option<(String, String)> {
     const PART: &str = "[Content_Types].xml";
-    if media.extensions.is_empty() {
+    if media.extensions.is_empty() && removed.is_empty() {
         return None;
     }
     let source = package.text(PART).ok()?;
@@ -1090,6 +1694,19 @@ fn content_types(package: &Package, media: &Media<'_>) -> Option<(String, String
         .children_named("Default")
         .filter_map(|default| default.attr("Extension"))
         .map(str::to_ascii_lowercase)
+        .collect();
+
+    // A part that is gone takes its `Override` with it: an override naming a
+    // part the package does not carry is exactly the kind of inconsistency an
+    // OPC consumer is entitled to refuse.
+    let mut edits: Vec<(Range<usize>, String)> = root
+        .children_named("Override")
+        .filter(|over| {
+            over.attr("PartName")
+                .and_then(|name| name.strip_prefix('/'))
+                .is_some_and(|name| removed.contains(name))
+        })
+        .map(|over| (over.span.clone(), String::new()))
         .collect();
 
     let mut entries = String::new();
@@ -1103,14 +1720,14 @@ fn content_types(package: &Package, media: &Media<'_>) -> Option<(String, String
             esc_attr(content_type)
         ));
     }
-    if entries.is_empty() {
+    if !entries.is_empty() {
+        let at = source.rfind("</Types>")?;
+        edits.push((at..at, entries));
+    }
+    if edits.is_empty() {
         return None;
     }
-    let at = source.rfind("</Types>")?;
-    Some((
-        PART.to_string(),
-        format!("{}{entries}{}", &source[..at], &source[at..]),
-    ))
+    Some((PART.to_string(), splice(source, edits)))
 }
 
 /// Where an attribute lives inside an element's start tag.
@@ -1267,6 +1884,12 @@ fn reemit<W: Write + Seek>(package: &[u8], rebuild: &Rebuild, writer: W) -> Resu
         if entry.is_dir() {
             // A directory member carries no content and no relationship; the
             // reader dropped it too.
+            continue;
+        }
+        // A slide the model no longer holds takes its part, its relationships
+        // and its notes page out of the archive with it. Leaving them behind
+        // would leave the deleted slide's text in a file that says it is gone.
+        if rebuild.removals.contains(entry.name()) {
             continue;
         }
         match rebuild.replacements.get(entry.name()) {
@@ -1731,10 +2354,12 @@ mod tests {
 
     /// A target no relationship can state as it stands is still refused.
     ///
-    /// An internal link points at a *part*, and deciding which part a model's
-    /// target names is the deck-level bookkeeping of 15-E. The wrong answer is
-    /// an `r:id` pointing at nothing, which is precisely the dangling
-    /// relationship spike P3 measured LibreOffice accepting in silence.
+    /// An internal link points at a *part*, through a `slide`-typed
+    /// relationship and an `action` attribute the IR does not record. 15-E
+    /// knows which part every slide is and still refuses it, because the
+    /// missing half is in the model. The wrong answer is an `r:id` pointing at
+    /// nothing, which is precisely the dangling relationship spike P3 measured
+    /// LibreOffice accepting in silence.
     #[test]
     fn a_link_with_no_relationship_to_make_is_still_refused() {
         let path = deck("basic-slides.pptx");
@@ -1917,15 +2542,486 @@ mod tests {
         }
     }
 
-    /// A slide added or removed moves the deck's own parts, which is 15-E. The
-    /// package is copied whole rather than rewritten shape by shape into the
-    /// wrong slides.
+    /// A [`DeckParts`] built from a presentation part written by hand.
+    ///
+    /// No corpus deck carries `p14:sectionLst` — PowerPoint writes it and the
+    /// generated corpus does not — and the restatement is a pure function of
+    /// the presentation part, so it is tested as one, exactly as the reader
+    /// tests `read_sections`.
+    fn deck_parts_from(xml: &str) -> DeckParts {
+        let root = Element::parse("ppt/presentation.xml", xml.as_bytes()).expect("parses");
+        let entries = root
+            .child("sldIdLst")
+            .into_iter()
+            .flat_map(|list| list.children_named("sldId"))
+            .enumerate()
+            .map(|(i, entry)| SlideEntry {
+                id: entry.attr_i64("id").unwrap_or_default(),
+                rel: super::super::rel_id(entry).unwrap_or_default().to_string(),
+                part: format!("ppt/slides/slide{}.xml", i + 1),
+                span: entry.span.clone(),
+                parsed: None,
+            })
+            .collect();
+        DeckParts {
+            main: "ppt/presentation.xml".into(),
+            source: xml.to_string(),
+            root,
+            entries,
+            unresolved: 0,
+        }
+    }
+
+    fn slide_in(section: Option<&str>) -> Slide {
+        Slide {
+            section: section.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    const SECTIONED: &str = r#"<p:presentation xmlns:p="urn:p" xmlns:p14="urn:p14" xmlns:r="urn:r"><p:sldIdLst><p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId3"/><p:sldId id="258" r:id="rId4"/></p:sldIdLst><p:extLst><p:ext uri="{521415D9}"><p14:sectionLst><p14:section name="Intro" id="{1}"><p14:sldIdLst><p14:sldId id="256"/></p14:sldIdLst></p14:section><p14:section name="Cifras" id="{2}"><p14:sldIdLst><p14:sldId id="257"/><p14:sldId id="258"/></p14:sldIdLst></p14:section></p14:sectionLst></p:ext></p:extLst></p:presentation>"#;
+
+    /// A deck whose sections still say what the model says is not edited at
+    /// all — the property that keeps `ppt/presentation.xml` byte for byte.
     #[test]
-    fn removing_a_slide_copies_the_package_and_names_the_increment() {
+    fn sections_that_did_not_move_are_not_rewritten() {
+        let parts = deck_parts_from(SECTIONED);
+        let deck = Presentation {
+            slides: vec![
+                slide_in(Some("Intro")),
+                slide_in(Some("Cifras")),
+                slide_in(Some("Cifras")),
+            ],
+            ..Default::default()
+        };
+        let mut kept = Vec::new();
+        let edits = section_edits(&parts, &deck, &[0, 1, 2], &mut kept);
+        assert!(
+            edits.is_empty(),
+            "an unmoved section was rewritten: {edits:?}"
+        );
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+
+    /// A slide that changed section, and one that was removed: each section
+    /// lists the slides the model puts in it, by the deck ids they already had.
+    #[test]
+    fn sections_follow_the_slides_that_moved() {
+        let parts = deck_parts_from(SECTIONED);
+        // Slide 258 moves to «Intro», 257 is gone, and the two that are left
+        // are written in the model's order.
+        let deck = Presentation {
+            slides: vec![slide_in(Some("Intro")), slide_in(Some("Intro"))],
+            ..Default::default()
+        };
+        let mut kept = Vec::new();
+        let edits = section_edits(&parts, &deck, &[0, 2], &mut kept);
+        assert!(kept.is_empty(), "{kept:?}");
+        let restated = splice(&parts.source, edits);
+        assert!(
+            restated.contains(
+                r#"<p14:section name="Intro" id="{1}"><p14:sldIdLst><p14:sldId id="256"/><p14:sldId id="258"/></p14:sldIdLst>"#
+            ),
+            "the section that gained a slide: {restated}"
+        );
+        assert!(
+            restated.contains(r#"<p14:section name="Cifras" id="{2}"><p14:sldIdLst/>"#),
+            "the section that lost every slide: {restated}"
+        );
+        // The section keeps its name and its GUID: nothing here invents one.
+        assert!(restated.contains(r#"id="{2}""#));
+    }
+
+    /// A section the deck does not have is not created: the `p14:section` needs
+    /// a GUID nothing recorded, and inventing identity is not this writer's.
+    ///
+    /// The slide stays where the package puts it, and so does the slide the
+    /// model states no section for at all — a model that does not state
+    /// something is not a model asking for it to be removed, which is the rule
+    /// the rest of this writer follows and the reason an unedited deck with
+    /// sections produces no edit and no warning.
+    #[test]
+    fn a_section_the_deck_does_not_have_is_named_rather_than_created() {
+        let parts = deck_parts_from(SECTIONED);
+        let deck = Presentation {
+            slides: vec![
+                slide_in(Some("Intro")),
+                slide_in(Some("Anexos")),
+                slide_in(None),
+            ],
+            ..Default::default()
+        };
+        let mut kept = Vec::new();
+        let edits = section_edits(&parts, &deck, &[0, 1, 2], &mut kept);
+        let said = kept.join(" ");
+        assert!(said.contains("`Anexos`"), "{said}");
+        assert!(
+            !said.contains("slide 3"),
+            "a slide the model says nothing about was reported as a loss: {said}"
+        );
+        assert!(
+            edits.is_empty(),
+            "the slides stayed where the deck puts them, so nothing is rewritten: {edits:?}"
+        );
+    }
+
+    /// A package built by hand, for the two refusals that no corpus deck can
+    /// state: a custom show, and a part pointing at a slide that would go.
+    fn package_with(parts: &[(&str, &str)]) -> Package {
+        let mut package = Package::new();
+        for (name, body) in parts {
+            package.insert(*name, body.as_bytes().to_vec());
+        }
+        package
+    }
+
+    const DECK_RELS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/></Relationships>"#;
+
+    /// A slide another part points at is not removed.
+    ///
+    /// A relationship left pointing at a part that is gone is the dangling
+    /// relationship spike P3 §2.4 measured LibreOffice accepting in silence,
+    /// and it is a repair dialog in PowerPoint — the failure mode this phase
+    /// is measured on. Refusing the removal loses a deleted slide; performing
+    /// it can lose the deck.
+    #[test]
+    fn a_slide_another_part_points_at_is_not_removed() {
+        let link = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slide2.xml"/></Relationships>"#;
+        let package = package_with(&[
+            ("ppt/_rels/presentation.xml.rels", DECK_RELS),
+            ("ppt/slides/slide1.xml", "<p:sld/>"),
+            ("ppt/slides/slide2.xml", "<p:sld/>"),
+            ("ppt/slides/_rels/slide1.xml.rels", link),
+        ]);
+        let parts = deck_parts_from(SECTIONED);
+        let deck = Presentation {
+            slides: vec![slide_in(None)],
+            ..Default::default()
+        };
+        let error = restate_deck(&package, &parts, &deck, &[0]).expect_err("refuses");
+        assert!(error.contains("ppt/slides/slide2.xml"), "{error}");
+        assert!(error.contains("slide1.xml"), "{error}");
+    }
+
+    /// A deck with custom shows keeps every slide it has.
+    #[test]
+    fn a_deck_with_custom_shows_does_not_lose_a_slide_behind_their_back() {
+        let package = package_with(&[
+            ("ppt/_rels/presentation.xml.rels", DECK_RELS),
+            ("ppt/slides/slide1.xml", "<p:sld/>"),
+            ("ppt/slides/slide2.xml", "<p:sld/>"),
+        ]);
+        let xml = SECTIONED.replace("<p:extLst>", "<p:custShowLst/><p:extLst>");
+        let parts = deck_parts_from(&xml);
+        let deck = Presentation {
+            slides: vec![slide_in(None)],
+            ..Default::default()
+        };
+        let error = restate_deck(&package, &parts, &deck, &[0]).expect_err("refuses");
+        assert!(error.contains("custom shows"), "{error}");
+    }
+
+    /// Every `ppt/notesSlides/*.xml` of a package, with its bytes.
+    fn notes_parts_of(package: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let mut zip = zip::ZipArchive::new(Cursor::new(package)).expect("a readable package");
+        let names: Vec<String> = (0..zip.len())
+            .filter_map(|i| {
+                let entry = zip.by_index_raw(i).ok()?;
+                let name = entry.name().to_string();
+                (name.starts_with("ppt/notesSlides/") && name.ends_with(".xml")).then_some(name)
+            })
+            .collect();
+        names
+            .into_iter()
+            .map(|name| {
+                let bytes = part_of(package, &name).expect("a readable part");
+                (name, bytes)
+            })
+            .collect()
+    }
+
+    fn note_text(slide: &Slide) -> String {
+        slide
+            .notes
+            .iter()
+            .flatten()
+            .map(|block| match block {
+                docsai_model::text::Block::Paragraph(p) => p.plain_text(),
+                _ => String::new(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn set_notes(slide: &mut Slide, text: &str) {
+        slide.notes = Some(vec![docsai_model::text::Block::Paragraph(
+            docsai_model::text::Paragraph {
+                content: vec![docsai_model::text::Inline::Text(text.into())],
+                ..Default::default()
+            },
+        )]);
+    }
+
+    /// 15-E, and the same claim 15-B made for a slide: rewriting a notes page
+    /// from the model produces the bytes that were already in the part.
+    ///
+    /// It is the notes counterpart of
+    /// `an_unedited_slide_is_rewritten_into_the_same_bytes`, and the reason the
+    /// corpus check above still passes now that a second kind of part is
+    /// regenerated.
+    #[test]
+    fn an_unedited_notes_page_is_rewritten_into_the_same_bytes() {
+        let mut seen = 0;
+        for path in corpus() {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let original = std::fs::read(&path).expect("reads the deck");
+            let (document, assets) = read_deck(&path);
+            let written = write_deck(&document, &assets);
+            for (part, bytes) in notes_parts_of(&original) {
+                seen += 1;
+                assert!(
+                    part_of(&written, &part) == Some(bytes),
+                    "{name}: `{part}` came out different from an untouched model"
+                );
+            }
+        }
+        assert!(seen >= 2, "the corpus lost its decks with speaker notes");
+    }
+
+    /// The claim of 15-E: an edited note is in the file.
+    #[test]
+    fn an_edited_note_reaches_the_written_deck() {
+        let path = deck("notes-speaker.pptx");
+        let (mut document, assets) = read_deck(&path);
+        let before = presentation(&document).clone();
+        assert!(
+            before.slides.iter().any(|slide| slide.notes.is_some()),
+            "the fixture stopped carrying speaker notes"
+        );
+        set_notes(
+            &mut presentation_mut(&mut document).slides[0],
+            "Nota reescrita",
+        );
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        let (after, _) = read_bytes(&written);
+
+        assert_eq!(note_text(&after.slides[0]), "Nota reescrita");
+        assert_ne!(note_text(&before.slides[0]), note_text(&after.slides[0]));
+        // The note nobody touched is the note that was read, and so is
+        // everything else on the slide.
+        assert_eq!(
+            note_text(&after.slides[1]),
+            note_text(&before.slides[1]),
+            "a notes page nobody edited changed"
+        );
+        assert_eq!(after.slides[1], before.slides[1]);
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, Warning::Degraded { .. })),
+            "a note this writer wrote was reported as a loss: {:?}",
+            report.warnings
+        );
+    }
+
+    /// The notes page is reached through the slide, not by its number.
+    ///
+    /// `notes-crossed.pptx` exists for the reader's sake: its first slide's
+    /// note is in `notesSlide2.xml`. A writer that trusted the numbering would
+    /// put the edit under the other slide — a silent, plausible-looking
+    /// corruption, and the reason both sides go through `notes::part`.
+    #[test]
+    fn an_edited_note_lands_in_the_page_the_slide_points_at() {
+        let path = deck("notes-crossed.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let first = String::from_utf8(
+            part_of(&original, "ppt/notesSlides/notesSlide1.xml").expect("the first page"),
+        )
+        .expect("utf-8");
+        assert!(
+            first.contains("segunda"),
+            "the fixture stopped crossing its notes pages"
+        );
+
+        let (mut document, assets) = read_deck(&path);
+        set_notes(
+            &mut presentation_mut(&mut document).slides[0],
+            "Nota cruzada",
+        );
+        let written = write_deck(&document, &assets);
+
+        let landed = String::from_utf8(
+            part_of(&written, "ppt/notesSlides/notesSlide2.xml").expect("the second page"),
+        )
+        .expect("utf-8");
+        assert!(
+            landed.contains("Nota cruzada"),
+            "the edit did not land in the page the slide points at: {landed}"
+        );
+        assert_eq!(
+            part_of(&written, "ppt/notesSlides/notesSlide1.xml"),
+            Some(first.into_bytes()),
+            "the page the numbering would have chosen was rewritten"
+        );
+    }
+
+    /// A note typed onto a slide the deck has no notes page for.
+    ///
+    /// The page is a part of its own, and it hangs from a notes master: writing
+    /// one is the same work as writing a deck that has no skeleton at all, so
+    /// it is refused by the name of the increment that does it — and loudly,
+    /// because the note is text a caller typed and it is not in the file.
+    #[test]
+    fn a_note_the_deck_has_no_page_for_is_kept_and_named() {
+        let path = deck("basic-slides.pptx");
+        let (mut document, assets) = read_deck(&path);
+        assert!(
+            presentation(&document)
+                .slides
+                .iter()
+                .all(|slide| slide.notes.is_none()),
+            "the fixture grew speaker notes"
+        );
+        set_notes(&mut presentation_mut(&mut document).slides[0], "Una nota");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            notes_parts_of(&written).is_empty(),
+            "a notes page was invented"
+        );
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("speaker notes") && why.contains("15-G"))
+            }),
+            "the note was dropped without a word: {:?}",
+            report.warnings
+        );
+    }
+
+    /// Notes the model no longer holds are still in the file, and said so.
+    ///
+    /// Deleting a notes page is the deck's own bookkeeping again — the part,
+    /// its content type and the slide's relationship to it — and this
+    /// increment removes those only for a slide that went with them. A caller
+    /// who deleted the notes and got them back has to learn it from the report.
+    #[test]
+    fn dropping_the_notes_of_a_slide_is_kept_and_named() {
+        let path = deck("notes-speaker.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        presentation_mut(&mut document).slides[0].notes = None;
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        for (part, bytes) in notes_parts_of(&original) {
+            assert_eq!(
+                part_of(&written, &part),
+                Some(bytes),
+                "`{part}` was rewritten anyway"
+            );
+        }
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("speaker notes"))
+            }),
+            "the deleted notes page was copied in silence: {:?}",
+            report.warnings
+        );
+    }
+
+    /// 15-E: a slide the model dropped leaves the deck, and takes its own
+    /// parts with it.
+    ///
+    /// Leaving the part behind and only unlisting it would be the smaller
+    /// edit, and it would leave the deleted slide's text in a file that says
+    /// the slide is gone. So the part, its relationships, its notes page and
+    /// its content type all go, and the two parts that name it — the deck's
+    /// `p:sldIdLst` and its `_rels` — are spliced rather than regenerated.
+    #[test]
+    fn removing_a_slide_takes_its_parts_out_of_the_deck() {
         let path = deck("basic-slides.pptx");
         let original = std::fs::read(&path).expect("reads the deck");
         let (mut document, assets) = read_deck(&path);
-        presentation_mut(&mut document).slides.pop();
+        let gone = presentation_mut(&mut document)
+            .slides
+            .pop()
+            .expect("a slide to remove");
+        let kept = presentation(&document).slides[0].clone();
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            part_of(&written, "ppt/slides/slide2.xml").is_none(),
+            "the removed slide's part is still in the package"
+        );
+        assert!(
+            part_of(&written, "ppt/slides/_rels/slide2.xml.rels").is_none(),
+            "the removed slide's relationships are still in the package"
+        );
+        // The slide that stays is byte for byte the part that was read.
+        assert_eq!(
+            part_of(&written, "ppt/slides/slide1.xml"),
+            part_of(&original, "ppt/slides/slide1.xml"),
+            "the slide nobody touched was rewritten"
+        );
+        let types = String::from_utf8(part_of(&written, "[Content_Types].xml").expect("types"))
+            .expect("utf-8");
+        assert!(
+            !types.contains("/ppt/slides/slide2.xml"),
+            "the content types still declare a part that is gone: {types}"
+        );
+        let rels = String::from_utf8(
+            part_of(&written, "ppt/_rels/presentation.xml.rels").expect("the deck's rels"),
+        )
+        .expect("utf-8");
+        assert!(
+            !rels.contains("slides/slide2.xml"),
+            "the deck still relates the slide that is gone: {rels}"
+        );
+
+        let (after, _) = read_bytes(&written);
+        assert_eq!(
+            after.slides.len(),
+            1,
+            "the written deck still has two slides"
+        );
+        assert_eq!(after.slides[0].title(), kept.title());
+        assert_ne!(kept.title(), gone.title(), "the fixture titles its slides");
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, Warning::Degraded { .. })),
+            "a removal this writer performed was reported as a loss: {:?}",
+            report.warnings
+        );
+    }
+
+    /// A slide that moved takes its part with it, and the part does not move.
+    ///
+    /// The claim that makes a reorder a reorder: only `p:sldIdLst` changes, and
+    /// every slide part comes out byte for byte the one that was read. The
+    /// alternative — rewriting slide 1 with slide 2's text — would keep the
+    /// deck's *text* right and lose everything on the slides the IR does not
+    /// model, silently.
+    #[test]
+    fn reordering_the_slides_moves_the_list_and_not_the_parts() {
+        let path = deck("basic-slides.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        let before = presentation(&document).clone();
+        presentation_mut(&mut document).slides.swap(0, 1);
 
         let mut out = Cursor::new(Vec::new());
         let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
@@ -1935,14 +3031,53 @@ mod tests {
             assert_eq!(
                 part_of(&written, &part),
                 Some(bytes),
-                "`{part}` was rewritten anyway"
+                "`{part}` was rewritten instead of moved"
             );
         }
+        assert_ne!(
+            part_of(&written, "ppt/presentation.xml"),
+            part_of(&original, "ppt/presentation.xml"),
+            "the slide list did not move"
+        );
+        let (after, _) = read_bytes(&written);
+        assert_eq!(after.slides[0].title(), before.slides[1].title());
+        assert_eq!(after.slides[1].title(), before.slides[0].title());
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, Warning::Degraded { .. })),
+            "a reorder this writer performed was reported as a loss: {:?}",
+            report.warnings
+        );
+    }
+
+    /// A slide the model *added* has no part to be spliced into, and inventing
+    /// one is 15-G. The package is copied whole rather than written with the
+    /// edits of slide 3 under slide 4's number.
+    #[test]
+    fn adding_a_slide_is_refused_by_name() {
+        let path = deck("basic-slides.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        let extra = presentation(&document).slides[0].clone();
+        presentation_mut(&mut document).slides.push(extra);
+        set_first_text(&mut document, "Un título que no debe llegar");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert_eq!(
+            members(&written),
+            members(&original),
+            "the package was rewritten anyway"
+        );
         assert!(
             report.warnings.iter().any(|warning| {
-                matches!(warning, Warning::Degraded { why, .. } if why.contains("15-E"))
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("15-G"))
             }),
-            "the report does not name the increment: {:?}",
+            "the report does not name the increment that lifts it: {:?}",
             report.warnings
         );
     }

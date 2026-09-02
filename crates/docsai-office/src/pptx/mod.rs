@@ -341,7 +341,7 @@ fn slide_entries(root: &Element) -> Vec<SlideEntry> {
 /// It has to be matched on the **qualified** name: `p:sldId` carries both
 /// `r:id` (the relationship) and `id` (a numeric slide id), so a lookup by
 /// local name returns the wrong one — silently, and with a number that parses.
-fn rel_id(element: &Element) -> Option<&str> {
+pub(super) fn rel_id(element: &Element) -> Option<&str> {
     element
         .attrs
         .iter()
@@ -988,7 +988,7 @@ fn read_geometry(xfrm: Option<&Element>) -> ShapeGeometry {
 }
 
 /// `p:cSld@name`, when the part names itself.
-fn csld_name(root: &Element) -> Option<String> {
+pub(super) fn csld_name(root: &Element) -> Option<String> {
     root.child("cSld")
         .and_then(|c| c.attr("name"))
         .filter(|name| !name.is_empty())

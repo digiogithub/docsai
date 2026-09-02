@@ -18,6 +18,23 @@
 //!
 //! It is content-hashed like every other asset, so a deck read twice is stored
 //! once, and the id survives serialisation while the bytes stay out of the IR.
+//!
+//! **What the list is not.** `ppt/presentation.xml` is deliberately absent from
+//! it, and stays absent after 15-E gave the writer two edits to make inside it.
+//! The IR does not hold that part's content — only two facts stated in it, the
+//! order of the slides and the section each one is in — so the writer *edits*
+//! those two places and copies every other byte. Listing the part would license
+//! regenerating `p:sldSz`, the master and notes-master lists, the presentation
+//! text styles and the custom shows from an IR that does not model them, which
+//! is precisely the loss spike P3 measured.
+//!
+//! **And what a writer can rely on.** The list does not survive a round trip
+//! through DocMark: a deck parsed back from Markdown resolves its `skeleton:`
+//! reference and carries an empty `rebuilt_parts`. So the writer does not read
+//! the list; it goes through the *same doors* the reader went through — the
+//! slides `p:sldIdLst` names, and the notes page a slide's own relationships
+//! name — which is what makes the two sides agree about which parts the IR
+//! holds without a list to compare.
 
 use docsai_model::assets::AssetStore;
 use docsai_model::presentation::SkeletonRef;

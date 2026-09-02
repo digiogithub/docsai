@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Speaker notes, and the deck's own slide list** (plan v2 Phase 15, fifth increment): a slide's
+  **notes page** is rewritten from the model like any other text body — reached through the slide's
+  own relationships and never by number, so a deck whose notes were attached out of order does not
+  get every note put under the wrong slide — while the printed page around it (the slide's
+  thumbnail, the header, the footer, the date, the page number) stays the bytes that were read.
+  A note typed onto a slide the deck has **no** notes page for is refused by name (writing the part
+  is 15-G), never dropped in silence.
+
+  And the deck's own part is edited, in two places and nowhere else: when the model's slides are
+  not the package's, `p:sldIdLst` is restated in the model's order and `p14:sectionLst` keeps every
+  section's name and GUID while listing the slides the model puts in it. A **removed** slide takes
+  its part, its relationships, its notes page and its content type out of the archive with it,
+  because unlisting a slide while leaving its text in the file is not deleting it. A **reordered**
+  deck moves the list and not the parts: every slide part comes out byte for byte the one that was
+  read. Which package slide a model slide *is* has to be recovered from the content — nothing in
+  the chain carries an identity for a slide — and a slide the model **added** has no part to be
+  spliced into, so it is refused by the name of the increment that writes one (15-G).
+  `ppt/presentation.xml` is otherwise copied, and an unedited deck does not touch it at all.
+
 - **Nothing the writer does not model is lost on the way out** (plan v2 Phase 15, fourth
   increment): a **preserved object** — SmartArt, an OLE object, a group, a custom geometry, an
   animation timeline, anything the IR keeps only as a stub over a raw fragment — goes back into the

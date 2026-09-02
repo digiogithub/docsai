@@ -266,8 +266,18 @@ payload the document carries that differs from the package's bytes is written ba
 it belongs to, a slide-level fragment (`p:transition`, `p:timing`) at the level it came from. A
 fragment in another dialect is dropped with `Warning::RawBlockDropped` rather than emitted as
 nonsense, and one whose markup belongs to a part outside `rebuilt_parts` — a chart's XML — is
-copied and named. Next is **15-E**: notes pages, `p:sldIdLst` and `p14:sectionLst` — the only edits
-to `ppt/presentation.xml`, which is otherwise copied.
+copied and named. The fifth is done: **notes pages and the deck's own slide list** — a slide's
+notes page is rewritten from the model like any other text body, reached through the slide's own
+relationships and never by number, while the printed page around it stays the bytes that were read;
+and when the model's slides are not the package's, `p:sldIdLst` and `p14:sectionLst` are restated
+in the model's order, a removed slide takes its part, its `_rels`, its notes page and its content
+type out of the archive with it, and a reordered deck moves the list without touching a single
+slide part. `ppt/presentation.xml` is otherwise copied, and it deliberately stays outside
+`rebuilt_parts`: the IR holds two facts stated in it, not its content. Which package slide a model
+slide *is* has to be recovered from the content, because nothing in this chain carries an identity
+for a slide, and a slide the model **added** is refused by name — there is no part to splice it
+into. Next is **15-F**: `Warning::AutofitStale` on the way out, when a shape's text changed under a
+scale PowerPoint computed for text that is no longer there.
 
 ## 2. Documents you must read before implementing
 
