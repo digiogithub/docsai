@@ -38,6 +38,7 @@
 //! reversibly, because every shape keeps its source index.
 
 mod cascade;
+mod chart;
 mod graphics;
 mod notes;
 mod order;
@@ -53,8 +54,8 @@ use std::io::{Read, Seek};
 
 use docsai_model::assets::AssetStore;
 use docsai_model::presentation::{
-    ChartRef, Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, Master, MasterId, PhType,
-    Placeholder, Presentation, RawShapeKind, Shape, ShapeGeometry, ShapeKind, ShapeProps, Slide,
+    Layout, LayoutCatalog, LayoutId, LayoutPlaceholder, Master, MasterId, PhType, Placeholder,
+    Presentation, RawShapeKind, Shape, ShapeGeometry, ShapeKind, ShapeProps, Slide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::units::{Length, Point, Size};
@@ -580,7 +581,9 @@ fn read_shapes(
                 }
             }
             "graphicFrame" => {
-                shapes.push(read_graphic_frame(child, z_index, ctx, sink, report));
+                shapes.push(read_graphic_frame(
+                    child, z_index, ctx, assets, sink, report,
+                ));
             }
             name => {
                 let kind = STUBBED_SHAPES
@@ -614,6 +617,7 @@ fn read_graphic_frame(
     frame: &Element,
     z_index: u32,
     ctx: &SlideCtx<'_>,
+    assets: &mut dyn AssetStore,
     sink: &mut raw::Sink,
     report: &mut ConversionReport,
 ) -> Shape {
@@ -652,7 +656,7 @@ fn read_graphic_frame(
     }
 
     if held == "chart" {
-        if let Some(chart) = read_chart(data, ctx, sink, report) {
+        if let Some(chart) = chart::read(data, ctx, assets, sink, report) {
             return Shape {
                 id: None,
                 name,
@@ -674,47 +678,6 @@ fn read_graphic_frame(
     shape.name = name;
     shape.geometry = geometry;
     shape
-}
-
-/// The chart a frame holds: what kind it is, and its markup.
-///
-/// Phase 13 records that a chart is there and preserves it; the series are
-/// Phase 16's, and the workbook they come from is in the skeleton either way.
-/// The part is reached through the frame's `r:id`, like every other reference
-/// in the format.
-fn read_chart(
-    data: Option<&Element>,
-    ctx: &SlideCtx<'_>,
-    sink: &mut raw::Sink,
-    report: &mut ConversionReport,
-) -> Option<ChartRef> {
-    let rel_id = data?.child("chart")?.attr_qualified("r:id")?;
-    let rel = ctx.rels.get(rel_id).filter(|rel| !rel.external)?;
-    let part = rel.target.clone();
-    let (root, source) = match (parse(ctx.package, &part), ctx.package.text(&part)) {
-        (Ok(root), Ok(source)) => (root, source),
-        _ => {
-            report.warn(Warning::Degraded {
-                what: format!("chart `{part}`"),
-                why: "the chart part could not be read; the frame is kept as a stub".into(),
-            });
-            return None;
-        }
-    };
-    // `c:barChart`, `c:lineChart`… the first plot in the plot area names the
-    // chart, and a combo chart is named by its first plot rather than by a
-    // guess at which one matters.
-    let kind = root.path(&["chart", "plotArea"]).and_then(|area| {
-        area.children()
-            .find(|child| child.name.ends_with("Chart"))
-            .map(|child| child.name.clone())
-    });
-    Some(ChartRef {
-        kind,
-        title: None,
-        workbook: None,
-        raw: Some(sink.capture(&root, &part, source, report)),
-    })
 }
 
 /// One `p:sp`: a placeholder when it fills a slot the layout declares, a free
@@ -1429,8 +1392,9 @@ mod tests {
     #[test]
     fn a_chart_is_recorded_and_its_markup_preserved() {
         // A chart arrives in the same `p:graphicFrame` a table does, and only
-        // the `a:graphicData@uri` tells them apart. Phase 13 records that one is
-        // there and keeps its XML; the series are Phase 16's.
+        // the `a:graphicData@uri` tells them apart. Phase 13 recorded that one
+        // was there and kept its XML; Phase 16 fills in the series and the
+        // markup still travels whole beside them.
         let (deck, report) = read_fixture("charts-embedded");
         let chart = deck.slides[0]
             .shapes
@@ -1455,6 +1419,117 @@ mod tests {
             "the values are in the fragment, not summarised out of it"
         );
         assert_eq!(report.raw_blocks_emitted, 1);
+    }
+
+    /// The chart of a fixture, by name.
+    fn chart_of(deck: &Presentation) -> &docsai_model::presentation::ChartRef {
+        deck.slides[0]
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.kind {
+                ShapeKind::Chart(chart) => Some(chart),
+                _ => None,
+            })
+            .expect("the frame held a chart")
+    }
+
+    #[test]
+    fn a_chart_reads_the_series_its_caches_hold() {
+        let (deck, report) = read_fixture("charts-embedded");
+        let chart = chart_of(&deck);
+        assert_eq!(chart.categories, ["Norte", "Sur", "Este"]);
+        assert_eq!(chart.series.len(), 1);
+        assert_eq!(chart.series[0].name.as_deref(), Some("Ventas"));
+        assert_eq!(
+            chart.series[0].values,
+            [Some(1200.0), Some(980.0), Some(1440.0)]
+        );
+        assert_eq!(chart.series[0].number_format.as_deref(), Some("General"));
+        assert!(
+            chart.workbook.is_some(),
+            "the workbook is reached through the chart part's own `_rels`, not the slide's"
+        );
+        // Rule 3's other half: the two copies of the data agree here, and a
+        // reader that warned about them would be crying wolf. The one warning
+        // left is the raw-block the markup travels in.
+        assert_eq!(
+            report
+                .warnings
+                .iter()
+                .filter(|w| !matches!(w, Warning::UnsupportedElement { .. }))
+                .count(),
+            0,
+            "a chart whose workbook agrees with its cache warns about nothing: {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn a_chart_workbook_that_no_longer_matches_its_cache_is_reported() {
+        // The sheet says 999 where the chart displays 980: someone edited the
+        // data and the chart was never redrawn. The cache is what the slide
+        // shows, so the cache is the IR — and the divergence is named.
+        let (deck, report) = read_fixture("charts-stale-workbook");
+        let chart = chart_of(&deck);
+        assert_eq!(
+            chart.series[0].values,
+            [Some(1200.0), Some(980.0), Some(1440.0)],
+            "the cache wins; the workbook is provenance"
+        );
+        let divergence = report
+            .warnings
+            .iter()
+            .find(|w| match w {
+                Warning::Degraded { why, .. } => why.contains("disagree"),
+                _ => false,
+            })
+            .expect("the disagreement is warned about");
+        let message = divergence.message();
+        assert!(message.contains("ppt/charts/chart1.xml"), "{message}");
+        assert!(message.contains("999"), "{message}");
+        assert!(message.contains("980"), "{message}");
+    }
+
+    #[test]
+    fn a_combo_chart_reads_every_plot_and_says_what_it_could_not_hold() {
+        let (deck, report) = read_fixture("charts-multi-series");
+        let chart = chart_of(&deck);
+
+        assert_eq!(chart.title.as_deref(), Some("Ventas por trimestre"));
+        assert_eq!(
+            chart.kind.as_deref(),
+            Some("lineChart"),
+            "a combo chart is named by its first plot"
+        );
+        assert_eq!(chart.categories, ["Q1", "Q2", "Q3"]);
+        assert_eq!(
+            chart.series.len(),
+            3,
+            "two plots, three series, numbered across both"
+        );
+        assert_eq!(chart.series[0].name.as_deref(), Some("Norte"));
+        assert_eq!(chart.series[0].number_format.as_deref(), Some("#,##0"));
+        assert_eq!(
+            chart.series[1].values,
+            [Some(800.0), None, Some(910.0)],
+            "`c:ptCount` is the length of the column: the gap stays where the \
+             indices put it"
+        );
+        assert_eq!(chart.series[2].name.as_deref(), Some("Total"));
+
+        let messages: Vec<String> = report.warnings.iter().map(Warning::message).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("multi-level")),
+            "a category tree is a documented loss, not a guess: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("embeds no workbook")),
+            "a chart with no workbook says so: {messages:?}"
+        );
+        assert!(
+            chart.workbook.is_none(),
+            "and points at nothing rather than at something else"
+        );
     }
 
     #[test]
@@ -1873,15 +1948,20 @@ mod tests {
             );
             // Unsupported-element warnings are the shape kinds later increments
             // read. A *degraded* warning is the package layer failing, and
-            // there must be none.
-            assert!(
-                !report
-                    .warnings
-                    .iter()
-                    .any(|w| matches!(w, Warning::Degraded { .. })),
-                "{name} degrades at the package layer: {:?}",
-                report.warnings
-            );
+            // there must be none — except where a fixture exists **to be** a
+            // content-level loss: two chart fixtures carry a stale workbook and
+            // a multi-level category axis on purpose (Phase 16-A), and those
+            // warnings are the feature. They still have to be about the chart
+            // and nothing else.
+            for warning in &report.warnings {
+                let Warning::Degraded { what, .. } = warning else {
+                    continue;
+                };
+                assert!(
+                    what.starts_with("chart `"),
+                    "{name} degrades at the package layer: {warning:?}"
+                );
+            }
         }
     }
 

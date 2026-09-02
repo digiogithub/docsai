@@ -432,6 +432,14 @@ fn round_trips_a_presentation_using_every_shape_kind() {
                     kind: Some("barChart".into()),
                     title: Some("Ingresos".into()),
                     workbook: Some(AssetId::new("deadbeefcafe0004")),
+                    categories: vec!["Norte".into(), "Sur".into(), "Este".into()],
+                    series: vec![ChartSeries {
+                        name: Some("Ventas".into()),
+                        // The gap is the point: a sparse `c:pt` list must
+                        // survive JSON as a hole, not as a zero.
+                        values: vec![Some(1200.0), None, Some(1440.0)],
+                        number_format: Some("General".into()),
+                    }],
                     raw: Some(RawId::new("raw-0007")),
                 }),
             ),

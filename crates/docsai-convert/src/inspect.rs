@@ -429,6 +429,14 @@ fn count_shape_images(
     for shape in shapes {
         match &shape.kind {
             ShapeKind::Picture(image) => bump_image(image, counts),
+            // A chart's embedded workbook is an asset like any other, and the
+            // chart is what references it: a manifest entry that reported no
+            // references would say the deck holds a file nothing points at.
+            ShapeKind::Chart(chart) => {
+                if let Some(workbook) = &chart.workbook {
+                    *counts.entry(workbook.as_str().to_string()).or_default() += 1;
+                }
+            }
             ShapeKind::Group(children) => count_shape_images(children, counts),
             _ => {}
         }

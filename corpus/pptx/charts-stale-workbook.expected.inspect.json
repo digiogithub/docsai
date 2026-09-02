@@ -1,0 +1,67 @@
+{
+  "source-format": "pptx",
+  "kind": "presentation",
+  "meta": {
+    "title": "Gráfico desincronizado",
+    "author": "docsai corpus",
+    "last-modified-by": "docsai corpus",
+    "created": "2026-01-01T00:00:00Z",
+    "modified": "2026-01-02T00:00:00Z",
+    "language": "es-ES",
+    "application": "docsai-corpus"
+  },
+  "styles": [],
+  "slides": [
+    {
+      "index": 0,
+      "title": "Ventas por zona",
+      "layout": "ppt/slideLayouts/slideLayout1.xml",
+      "layout-name": "Titulo y objetos",
+      "shapes": 3,
+      "placeholders": 2,
+      "pictures": 0,
+      "tables": 0,
+      "charts": 1,
+      "raw-shapes": 0,
+      "has-notes": false,
+      "has-smart-art": false,
+      "has-ole": false,
+      "hidden": false
+    }
+  ],
+  "media": [
+    {
+      "id": "d8a11a3de3ef7095",
+      "file-name": "asset-d8a11a3d.xlsx",
+      "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byte-len": 2044,
+      "references": 1
+    }
+  ],
+  "stats": {
+    "paragraphs": 5,
+    "headings": 0,
+    "lists": 1,
+    "tables": 0,
+    "images": 0,
+    "footnotes": 0,
+    "slides": 1,
+    "sheets": 0,
+    "cells": 0,
+    "formulas": 0,
+    "styles": 0
+  },
+  "warnings": [
+    {
+      "warning": "degraded",
+      "what": "chart `ppt/charts/chart1.xml`",
+      "why": "its embedded workbook and the data cached in the chart disagree (series 1 values point 1 is 999 in the workbook (`B3`) and 980 in the cache); the cache is what the slide shows and what the model holds"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "c:chartSpace",
+      "location": "ppt/charts/chart1.xml:56",
+      "action": "raw-block"
+    }
+  ]
+}

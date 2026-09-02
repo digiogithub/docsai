@@ -29,7 +29,15 @@
       "hidden": false
     }
   ],
-  "media": [],
+  "media": [
+    {
+      "id": "48b5498416bb6cc4",
+      "file-name": "asset-48b54984.xlsx",
+      "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byte-len": 2043,
+      "references": 1
+    }
+  ],
   "stats": {
     "paragraphs": 1,
     "headings": 0,

@@ -88,6 +88,8 @@ Practical difference between the two folders:
 | [72 — Phase 15 K](72-phase-15-close.md) | The P2 gate prepared and unrun, and Phase 15 closed with one box open |
 | [73 — Phase 15 carried](73-phase-15-carried.md) | The shape added to a preserved slide, and `<a:p/>` surviving a round trip |
 | [74 — The docx bookmark id](74-docx-bookmark-node-ids.md) | Why `docx_roundtrip_is_idempotent` was red on `footnotes.docx`, and the node ids that are not document content |
+| [75 — Phase 16 plan](75-phase-16-plan.md) | Charts as data, objects confirmed end to end, comments, thumbnails and the cache |
+| [76 — Phase 16 A](76-phase-16-chart-data.md) | The chart's series in the IR, its workbook as an asset, and the two copies of the truth compared |
 
 ## Status in one line
 

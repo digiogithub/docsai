@@ -135,6 +135,7 @@ fn chart_shape(workbook: Option<docsai_model::assets::AssetId>) -> Shape {
             title: Some("Revenue by region".into()),
             workbook,
             raw: Some(RawId::new("r5")),
+            ..ChartRef::default()
         }),
     }
 }

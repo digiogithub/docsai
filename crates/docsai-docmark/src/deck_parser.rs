@@ -377,6 +377,10 @@ fn parse_shape(
                 None => None,
             },
             raw: attrs.get("raw").map(RawId::new),
+            // The series are the chart's data table, and 16-B is what writes
+            // and reads it. Until then a parsed chart plots nothing, which is
+            // what the DocMark it came from says.
+            ..ChartRef::default()
         }),
         "connector" | "smartart" | "ole" | "media" | "object" => ShapeKind::Raw(RawShape {
             kind: raw_kind(class),

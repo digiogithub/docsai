@@ -3118,15 +3118,15 @@ DGM_DRAWING_REL = (
 )
 
 
-def embedded_workbook() -> bytes:
+def embedded_workbook(values: tuple[str, str, str] = ("1200", "980", "1440")) -> bytes:
     """The workbook a chart carries its own data in. Minimal on purpose: it is
     not here to be read, it is here to be *preserved*. Spike P3 uses it as the
     one part of a deck that is itself a package."""
     rows = (
         f'<row r="1">{c("A1", "0", t="s")}{c("B1", "1", t="s")}</row>'
-        f'<row r="2">{c("A2", "2", t="s")}{c("B2", "1200")}</row>'
-        f'<row r="3">{c("A3", "3", t="s")}{c("B3", "980")}</row>'
-        f'<row r="4">{c("A4", "4", t="s")}{c("B4", "1440")}</row>'
+        f'<row r="2">{c("A2", "2", t="s")}{c("B2", values[0])}</row>'
+        f'<row r="3">{c("A3", "3", t="s")}{c("B3", values[1])}</row>'
+        f'<row r="4">{c("A4", "4", t="s")}{c("B4", values[2])}</row>'
     )
     strings = ["Región", "Ventas", "Norte", "Sur", "Este"]
     items = "".join(f"<si><t>{s}</t></si>" for s in strings)
@@ -3161,33 +3161,90 @@ def embedded_workbook() -> bytes:
     return package_bytes(parts)
 
 
-def pptx_charts_embedded() -> None:
-    """`c:chart` and the workbook it keeps its numbers in. Two things no reader
-    of slide XML can reach: a part in a foreign schema, and a part that is a
-    whole package. Both have to come back out of a round trip untouched."""
-    def str_ref(formula: str, values: list[str]) -> str:
-        points = "".join(
-            f'<c:pt idx="{i}"><c:v>{v}</c:v></c:pt>' for i, v in enumerate(values)
-        )
-        return (
-            f"<c:strRef><c:f>{formula}</c:f><c:strCache>"
-            f'<c:ptCount val="{len(values)}"/>{points}</c:strCache></c:strRef>'
-        )
+def _chart_str_ref(formula: str, values: list[str]) -> str:
+    """`c:strRef`: a formula, and the cache of what it evaluated to."""
+    points = "".join(
+        f'<c:pt idx="{i}"><c:v>{v}</c:v></c:pt>' for i, v in enumerate(values)
+    )
+    return (
+        f"<c:strRef><c:f>{formula}</c:f><c:strCache>"
+        f'<c:ptCount val="{len(values)}"/>{points}</c:strCache></c:strRef>'
+    )
 
+
+def _chart_num_ref(formula: str, values: list[str | None],
+                   format_code: str = "General") -> str:
+    """`c:numRef`. A `None` is a **gap**: no `c:pt` at that index, and
+    `c:ptCount` still counting it. That is how PowerPoint writes a series with
+    a hole in it, and a reader that appends the points it finds puts every
+    later value on the wrong category."""
+    points = "".join(
+        f'<c:pt idx="{i}"><c:v>{v}</c:v></c:pt>'
+        for i, v in enumerate(values) if v is not None
+    )
+    return (
+        f"<c:numRef><c:f>{formula}</c:f><c:numCache>"
+        f"<c:formatCode>{format_code}</c:formatCode>"
+        f'<c:ptCount val="{len(values)}"/>{points}</c:numCache></c:numRef>'
+    )
+
+
+CHART_NS = (
+    'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+)
+
+
+def _chart_axes() -> str:
+    return (
+        '<c:catAx><c:axId val="111111111"/>'
+        '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="b"/><c:crossAx val="222222222"/></c:catAx>'
+        '<c:valAx><c:axId val="222222222"/>'
+        '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="l"/><c:crossAx val="111111111"/></c:valAx>'
+    )
+
+
+def _chart_frame(rel_id: str = "rIdChart") -> str:
+    return (
+        "<p:graphicFrame>"
+        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Gráfico 1"/>'
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        '<p:xfrm><a:off x="838200" y="1825625"/><a:ext cx="7467600" cy="3600000"/></p:xfrm>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+        '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        f'r:id="{rel_id}"/>'
+        "</a:graphicData></a:graphic>"
+        "</p:graphicFrame>"
+    )
+
+
+def _chart_takeaway(*lines: str) -> str:
+    """The body placeholder a chart slide carries beside the picture of its
+    numbers. A deck whose only content is an object is not what a deck looks
+    like, and the residue budget of risk P4 is measured over the corpus as it
+    stands."""
+    return shape(3, "Content Placeholder 2",
+                 "".join(a_p(line) for line in lines), ph=ph("body", 1))
+
+
+def _bar_chart_xml() -> str:
+    """One `c:barChart`, one series, categories and values cached beside the
+    formulas that produced them."""
     numbers = ["1200", "980", "1440"]
     number_points = "".join(
         f'<c:pt idx="{i}"><c:v>{v}</c:v></c:pt>' for i, v in enumerate(numbers)
     )
-    chart = (
+    return (
         XML_DECL
-        + '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
-        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        + f"<c:chartSpace {CHART_NS}>"
         "<c:chart><c:plotArea><c:layout/>"
         '<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>'
         '<c:ser><c:idx val="0"/><c:order val="0"/>'
-        f'<c:tx>{str_ref("Hoja1!$B$1", ["Ventas"])}</c:tx>'
-        f'<c:cat>{str_ref("Hoja1!$A$2:$A$4", ["Norte", "Sur", "Este"])}</c:cat>'
+        f'<c:tx>{_chart_str_ref("Hoja1!$B$1", ["Ventas"])}</c:tx>'
+        f'<c:cat>{_chart_str_ref("Hoja1!$A$2:$A$4", ["Norte", "Sur", "Este"])}</c:cat>'
         "<c:val><c:numRef><c:f>Hoja1!$B$2:$B$4</c:f><c:numCache>"
         "<c:formatCode>General</c:formatCode>"
         f'<c:ptCount val="{len(numbers)}"/>{number_points}'
@@ -3195,32 +3252,27 @@ def pptx_charts_embedded() -> None:
         "</c:ser>"
         '<c:axId val="111111111"/><c:axId val="222222222"/>'
         "</c:barChart>"
-        '<c:catAx><c:axId val="111111111"/>'
-        '<c:scaling><c:orientation val="minMax"/></c:scaling>'
-        '<c:delete val="0"/><c:axPos val="b"/><c:crossAx val="222222222"/></c:catAx>'
-        '<c:valAx><c:axId val="222222222"/>'
-        '<c:scaling><c:orientation val="minMax"/></c:scaling>'
-        '<c:delete val="0"/><c:axPos val="l"/><c:crossAx val="111111111"/></c:valAx>'
-        "</c:plotArea><c:plotVisOnly val=\"1\"/></c:chart>"
+        + _chart_axes()
+        + "</c:plotArea><c:plotVisOnly val=\"1\"/></c:chart>"
         "</c:chartSpace>"
     )
-    frame = (
-        "<p:graphicFrame>"
-        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Gráfico 1"/>'
-        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
-        '<p:xfrm><a:off x="838200" y="1825625"/><a:ext cx="7467600" cy="3600000"/></p:xfrm>'
-        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
-        '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
-        'r:id="rIdChart"/>'
-        "</a:graphicData></a:graphic>"
-        "</p:graphicFrame>"
-    )
+
+
+def pptx_charts_embedded() -> None:
+    """`c:chart` and the workbook it keeps its numbers in. Two things no reader
+    of slide XML can reach: a part in a foreign schema, and a part that is a
+    whole package. Both have to come back out of a round trip untouched.
+
+    Since Phase 16-A it is also the fixture where the two copies of the data
+    **agree**: the cached series and the embedded workbook say the same thing,
+    and reading it must produce no warning at all. A false warning is the same
+    failure as a missing one."""
     build_pptx(
         "charts-embedded.pptx",
-        [slide(shape(2, "Title 1", a_p("Ventas por zona"), ph=ph("title")) + frame)],
+        [slide(shape(2, "Title 1", a_p("Ventas por zona"), ph=ph("title")) + _chart_frame())],
         slide_rels={1: [("rIdChart", "chart", "../charts/chart1.xml")]},
         extra_parts={
-            "ppt/charts/chart1.xml": chart.encode(),
+            "ppt/charts/chart1.xml": _bar_chart_xml().encode(),
             "ppt/charts/_rels/chart1.xml.rels": rels_part([
                 ("rIdWorkbook", "package", "../embeddings/workbook1.xlsx"),
             ]),
@@ -3232,6 +3284,111 @@ def pptx_charts_embedded() -> None:
              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         ],
         title="Gráfico incrustado",
+    )
+
+
+def pptx_charts_stale_workbook() -> None:
+    """The same chart, with a workbook that no longer matches its cache: the
+    sheet says 999 where the chart displays 980.
+
+    This is not a corrupt file — it is what a deck looks like after someone
+    edits the embedded sheet and the chart is never redrawn. The two copies of
+    the truth disagree, the cache is what the slide shows and what the model
+    holds, and the reader says so instead of averaging them."""
+    build_pptx(
+        "charts-stale-workbook.pptx",
+        [slide(shape(2, "Title 1", a_p("Ventas por zona"), ph=ph("title"))
+               + _chart_takeaway(
+                   "El norte encabeza el trimestre con mil doscientas unidades.",
+                   "La hoja incrustada ya no coincide con lo que dibuja el gráfico.",
+                   "Manda lo que la diapositiva muestra, no lo que la hoja guarda.",
+                   "La hoja viaja igualmente como activo, porque dice de dónde salieron.",
+               )
+               + _chart_frame())],
+        slide_rels={1: [("rIdChart", "chart", "../charts/chart1.xml")]},
+        extra_parts={
+            "ppt/charts/chart1.xml": _bar_chart_xml().encode(),
+            "ppt/charts/_rels/chart1.xml.rels": rels_part([
+                ("rIdWorkbook", "package", "../embeddings/workbook1.xlsx"),
+            ]),
+            "ppt/embeddings/workbook1.xlsx": embedded_workbook(("1200", "999", "1440")),
+        },
+        extra_overrides=[
+            ("/ppt/charts/chart1.xml", f"{DML_TYPE}.chart+xml"),
+            ("/ppt/embeddings/workbook1.xlsx",
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ],
+        title="Gráfico desincronizado",
+    )
+
+
+def pptx_charts_multi_series() -> None:
+    """A combo chart with no embedded workbook: two plot elements, three
+    series, a title in rich text, a hole in a series, a number format that is
+    not `General`, and a multi-level category axis.
+
+    Everything a single-series bar chart cannot exercise. The series are
+    numbered across *both* plots, because that is how the legend numbers them;
+    the second series states no `c:cat` and still plots against the chart's
+    categories; the third's categories are a tree the model cannot hold, which
+    is a documented loss with a warning rather than a guess. And there is no
+    `_rels` part at all, so the workbook is absent — the caches are still the
+    data."""
+    multi_lvl_cat = (
+        "<c:multiLvlStrRef><c:f>Hoja1!$A$2:$B$4</c:f><c:multiLvlStrCache>"
+        '<c:ptCount val="3"/>'
+        '<c:lvl><c:pt idx="0"><c:v>Q1</c:v></c:pt>'
+        '<c:pt idx="1"><c:v>Q2</c:v></c:pt>'
+        '<c:pt idx="2"><c:v>Q3</c:v></c:pt></c:lvl>'
+        '<c:lvl><c:pt idx="0"><c:v>2026</c:v></c:pt></c:lvl>'
+        "</c:multiLvlStrCache></c:multiLvlStrRef>"
+    )
+    chart = (
+        XML_DECL
+        + f"<c:chartSpace {CHART_NS}>"
+        "<c:chart>"
+        "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/>"
+        '<a:p><a:r><a:rPr lang="es-ES"/><a:t>Ventas por trimestre</a:t></a:r></a:p>'
+        "</c:rich></c:tx></c:title>"
+        "<c:plotArea><c:layout/>"
+        '<c:lineChart><c:grouping val="standard"/>'
+        '<c:ser><c:idx val="0"/><c:order val="0"/>'
+        f'<c:tx>{_chart_str_ref("Hoja1!$B$1", ["Norte"])}</c:tx>'
+        f'<c:cat>{_chart_str_ref("Hoja1!$A$2:$A$4", ["Q1", "Q2", "Q3"])}</c:cat>'
+        f'<c:val>{_chart_num_ref("Hoja1!$B$2:$B$4", ["1200", "980", "1440"], "#,##0")}</c:val>'
+        "</c:ser>"
+        '<c:ser><c:idx val="1"/><c:order val="1"/>'
+        f'<c:tx>{_chart_str_ref("Hoja1!$C$1", ["Sur"])}</c:tx>'
+        f'<c:val>{_chart_num_ref("Hoja1!$C$2:$C$4", ["800", None, "910"], "#,##0")}</c:val>'
+        "</c:ser>"
+        '<c:axId val="111111111"/><c:axId val="222222222"/>'
+        "</c:lineChart>"
+        '<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>'
+        '<c:ser><c:idx val="2"/><c:order val="2"/>'
+        f'<c:tx>{_chart_str_ref("Hoja1!$D$1", ["Total"])}</c:tx>'
+        f"<c:cat>{multi_lvl_cat}</c:cat>"
+        f'<c:val>{_chart_num_ref("Hoja1!$D$2:$D$4", ["2000", "980", "2350"])}</c:val>'
+        "</c:ser>"
+        '<c:axId val="111111111"/><c:axId val="222222222"/>'
+        "</c:barChart>"
+        + _chart_axes()
+        + "</c:plotArea><c:plotVisOnly val=\"1\"/></c:chart>"
+        "</c:chartSpace>"
+    )
+    build_pptx(
+        "charts-multi-series.pptx",
+        [slide(shape(2, "Title 1", a_p("Ventas por trimestre"), ph=ph("title"))
+               + _chart_takeaway(
+                   "Dos zonas y un total, medidos por trimestre.",
+                   "El sur no reportó el segundo trimestre: el hueco es un hueco.",
+                   "El eje de categorías del total tiene dos niveles y se pierde uno.",
+                   "Sin libro incrustado, la caché es todo lo que hay: y basta para leer.",
+               )
+               + _chart_frame())],
+        slide_rels={1: [("rIdChart", "chart", "../charts/chart1.xml")]},
+        extra_parts={"ppt/charts/chart1.xml": chart.encode()},
+        extra_overrides=[("/ppt/charts/chart1.xml", f"{DML_TYPE}.chart+xml")],
+        title="Gráfico combinado",
     )
 
 
@@ -3660,6 +3817,8 @@ GENERATORS = [
     pptx_shapes_geometry,
     pptx_autofit_stale,
     pptx_charts_embedded,
+    pptx_charts_stale_workbook,
+    pptx_charts_multi_series,
     pptx_smartart_fallback,
     pptx_macro_enabled,
     pptx_forty_slides,

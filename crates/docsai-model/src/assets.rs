@@ -128,11 +128,21 @@ impl AssetStore for MemoryAssetStore {
 
 /// Builds the manifest entry for some bytes: id, deterministic file name,
 /// sniffed content type and native dimensions.
+///
+/// The name is `img-<hash8>.<ext>` for a picture and `asset-<hash8>.<ext>` for
+/// anything else the store holds — a chart's embedded workbook is not an image
+/// and calling it one would be a lie in every manifest, every `assets/`
+/// directory and every DocMark reference.
 pub fn describe(id: &AssetId, bytes: &[u8]) -> AssetInfo {
     let (content_type, ext) = sniff(bytes);
+    let prefix = if content_type.starts_with("image/") {
+        "img"
+    } else {
+        "asset"
+    };
     AssetInfo {
         id: id.clone(),
-        file_name: format!("img-{}.{}", &id.0[..id.0.len().min(8)], ext),
+        file_name: format!("{prefix}-{}.{}", &id.0[..id.0.len().min(8)], ext),
         content_type: content_type.to_string(),
         byte_len: bytes.len(),
         native_size_px: dimensions(bytes),
@@ -174,7 +184,41 @@ pub fn sniff(bytes: &[u8]) -> (&'static str, &'static str) {
         b if is_emf(b) => ("image/x-emf", "emf"),
         [0xd7, 0xcd, 0xc6, 0x9a, ..] => ("image/x-wmf", "wmf"),
         b if b.starts_with(b"<?xml") || b.starts_with(b"<svg") => ("image/svg+xml", "svg"),
+        b if b.starts_with(b"PK\x03\x04") => zip_kind(b),
         _ => ("application/octet-stream", "bin"),
+    }
+}
+
+/// What a ZIP archive is, when it is an OPC package.
+///
+/// The store holds more than pictures — a chart's embedded workbook is a whole
+/// `.xlsx` — and `application/octet-stream` + `.bin` would name it wrongly
+/// everywhere it is written. A ZIP records every entry's name uncompressed in
+/// its local file headers, so the package's main part is findable without
+/// decompressing anything (and `docsai-model` has no unzip and wants none).
+/// The scan is bounded: the main part is one of the first entries in every
+/// package OOXML writes, and an archive that is merely a `.zip` says so.
+fn zip_kind(bytes: &[u8]) -> (&'static str, &'static str) {
+    const SCAN: usize = 64 * 1024;
+    let window = &bytes[..bytes.len().min(SCAN)];
+    let has = |needle: &[u8]| window.windows(needle.len()).any(|w| w == needle);
+    if has(b"xl/workbook.xml") {
+        (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xlsx",
+        )
+    } else if has(b"word/document.xml") {
+        (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        )
+    } else if has(b"ppt/presentation.xml") {
+        (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "pptx",
+        )
+    } else {
+        ("application/zip", "zip")
     }
 }
 

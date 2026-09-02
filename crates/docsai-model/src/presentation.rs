@@ -468,8 +468,14 @@ pub struct Placeholder {
     pub delta: ShapeProps,
 }
 
-/// A chart. Phase 13 records that one is there and where its data lives;
-/// Phase 16 is what fills in the series.
+/// A chart: what it plots, and where those numbers came from.
+///
+/// Phase 13 recorded that a chart was there and preserved its markup; Phase 16
+/// fills in the series. The data is the **cached** data — `c:strCache` and
+/// `c:numCache`, what the slide actually displays — not the embedded workbook:
+/// the cache is present in every valid chart, a linked or missing workbook
+/// still has to read, and the two are compared rather than reconciled
+/// (`kb/76-phase-16-chart-data.md`).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct ChartRef {
@@ -482,9 +488,45 @@ pub struct ChartRef {
     /// already own a reader for it (on-ramp).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workbook: Option<AssetId>,
+    /// The category labels, **shared by every series**: that is what `c:cat`
+    /// is, one axis for the whole plot rather than a column per series. Empty
+    /// for a chart that has none — a scatter, or a bare `c:val` — and then a
+    /// series is read by position alone. A label the cache leaves out comes
+    /// back as an empty string, so a category's *index* is never shifted by a
+    /// gap.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+    /// The plotted series, in the order the chart part declares them — over
+    /// every plot, because a combo chart has more than one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub series: Vec<ChartSeries>,
     /// The chart XML, in the sidecar.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<RawId>,
+}
+
+/// One plotted series: its name and its column of values.
+///
+/// The values are positional against [`ChartRef::categories`]: index *i* is the
+/// value plotted at category *i*. `None` is a **gap** — `c:pt` indices are
+/// sparse and `c:ptCount` is the length of the column, not the number of points
+/// in it — and a gap is not a zero: PowerPoint leaves a hole in the line where
+/// a zero would draw one.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct ChartSeries {
+    /// `c:tx` — the legend entry. `None` when the chart names the series only
+    /// by position ("Series 1"), which is a default the file does not state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<Option<f64>>,
+    /// `c:numCache/c:formatCode`. Kept because it is the difference between
+    /// `0.42` and `42 %`: without it the numbers can be re-rendered but not as
+    /// the slide renders them, and a currency or a date axis reads as a bare
+    /// float.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number_format: Option<String>,
 }
 
 /// A shape the IR does not model, and why.
