@@ -128,7 +128,17 @@ Both are fixed in the writer; the metric's categories for a deck are stated ther
 ### 15-I — CI gate 1: schema validation
 
 Generated packages validated against the ECMA-376 XSDs (analysis §5.5). A package that is not
-schema-valid fails the build; the gate names the part and the element.
+schema-valid fails the build; the gate names the part and the element. Done, in
+[[70-phase-15-xsd]], where the schemas are **vendored** — 1.0 MB, unmodified, from the standard's
+own distribution zips, because an oracle that can change under the gate without a commit is not an
+oracle — and `xmllint` runs them, which is the §7 rule 4 justification: nothing new reaches a
+shipped binary. What the gate validates is not «a round trip's output», which for a preserved deck
+is byte for byte the input: it is every part whose bytes the writer **changed or created**, found
+by diffing the written package against the one it was written on, over an edited deck and over the
+same deck with no skeleton at all. It went red on its first run and the three findings were two
+corpus fixtures that are not legal OOXML — a `p:txBody` with no `a:p`, and a table cell holding a
+`p:txBody` where an `a:txBody` belongs — plus one false positive that turned out to be a missing
+ECMA-376 Part 3 step, not a reason to loosen anything.
 
 ### 15-J — CI gate 2: render diff
 
@@ -149,7 +159,11 @@ status and the acceptance criteria checked here.
       ([[69-phase-15-roundtrip]]). All seventeen decks of `corpus/pptx`, `.pptm` included: the
       second DocMark pass is the first, every category of the per-category metric is 100 %, and
       each written package is byte for byte the package that was read.
-- [ ] Both CI gates green on the corpus.
+- [ ] Both CI gates green on the corpus. **Half true, and only half.** Gate 1, schema validation, is
+      green — 15-I ([[70-phase-15-xsd]]): 34 packages written from the seventeen corpus decks, 322
+      parts validated, 0 invalid, 0 unmeasured, wired into `.github/workflows/test.yml` as its own
+      job and runnable locally with `python3 corpus/schema_gate.py`. Gate 2 is the render diff and
+      is 15-J; this box closes there.
 - [ ] No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).
 - [x] A deck written from *attribute-free* Markdown opens correctly with a sensible layout —
       15-G ([[68-phase-15-template]]). **With one caveat, stated rather than hidden**: the layout is

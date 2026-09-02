@@ -39,6 +39,32 @@ jobs:
       - name: Corpus is up to date
         run: python3 corpus/generate.py --check
 
+  # CI gate 1 of Phase 15 (`docs/technical-analysis-presentations.md` §5.5): the
+  # `.pptx` parts this project writes, validated against the ECMA-376 XSDs
+  # vendored in `schemas/`. Ubuntu only, and once: the gate measures the bytes
+  # the writer produces, which are the same on all three platforms, and running
+  # it three times would only buy three copies of the same answer.
+  schema-gate:
+    name: pptx schema validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # libxml2's validator. Not a workspace dependency and deliberately not one:
+      # it never reaches a shipped binary (`AGENTS.md` §7 rule 4).
+      - name: Install xmllint
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+
+      - name: Build the CLI
+        run: cargo build -p docsai-cli
+
+      - name: Schema gate
+        run: python3 corpus/schema_gate.py
+
   lint:
     name: fmt + clippy
     runs-on: ubuntu-latest

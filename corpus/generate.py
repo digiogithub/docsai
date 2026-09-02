@@ -2491,7 +2491,12 @@ def a_p(text: str, *, lvl: int = 0, bullet: str = "") -> str:
 
 
 def tx_body(paragraphs: str, *, body_pr: str = "<a:bodyPr/>") -> str:
-    return f"<p:txBody>{body_pr}<a:lstStyle/>{paragraphs}</p:txBody>"
+    """A `p:txBody`. A text body with **no** `a:p` at all is not schema-valid —
+    ECMA-376 `CT_TextBody` requires at least one paragraph, and no application
+    writes one — so a caller that passes no paragraph gets the empty paragraph
+    a real placeholder carries, `a:endParaRPr` included. Found by
+    `corpus/schema_gate.py`."""
+    return f"<p:txBody>{body_pr}<a:lstStyle/>{paragraphs or a_p('')}</p:txBody>"
 
 
 def shape(
@@ -2990,7 +2995,11 @@ def pptx_tables_simple() -> None:
     """`p:graphicFrame` -> `a:tbl`: a different XML model from `w:tbl`, but the
     IR `Table` already covers it, so this fixture is about the wrapper."""
     def tc(text: str) -> str:
-        return f"<a:tc>{tx_body(a_p(text))}<a:tcPr/></a:tc>"
+        # A DrawingML table cell holds an `a:txBody`, not the `p:txBody` of a
+        # shape: same content model, different namespace, and the XSD is the
+        # only thing that ever said so out loud (`corpus/schema_gate.py`).
+        return (f"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>{a_p(text)}"
+                f"</a:txBody><a:tcPr/></a:tc>")
 
     rows = (
         f'<a:tr h="370840">{tc("Región")}{tc("Ventas")}</a:tr>'

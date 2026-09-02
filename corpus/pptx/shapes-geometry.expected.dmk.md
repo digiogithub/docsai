@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   "ppt/slideLayouts/slideLayout1.xml": { name: "Titulo y objetos", master: "ppt/slideMasters/slideMaster1.xml", title: 0, body: 1 }
-skeleton: assets/_skeleton/deck-a367c787.pptx
+skeleton: assets/_skeleton/deck-fb219fea.pptx
 ---
 
 ## Formas libres {#n1 .slide layout="ppt/slideLayouts/slideLayout1.xml"}
@@ -21,6 +21,7 @@ Dentro del rectángulo
 :::
 
 ::: {#n3 .shape geom=rightArrow name="Flecha 1" pos="3200000emu,2200000emu" size="1400000emu,500000emu"}
+[]{.empty}
 :::
 
 ::: {#n4 .connector geom=line name="Conector 1" pos="3000000emu,3000000emu" raw=raw-0001 size="1200000emu,0"}

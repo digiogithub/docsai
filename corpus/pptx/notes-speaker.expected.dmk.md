@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   "ppt/slideLayouts/slideLayout1.xml": { name: "Titulo y objetos", master: "ppt/slideMasters/slideMaster1.xml", title: 0, body: 1 }
-skeleton: assets/_skeleton/deck-6bbc4b9f.pptx
+skeleton: assets/_skeleton/deck-1a5f5252.pptx
 ---
 
 ## Resultados {#n1 .slide layout="ppt/slideLayouts/slideLayout1.xml"}

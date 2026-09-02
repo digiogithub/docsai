@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   "ppt/slideLayouts/slideLayout1.xml": { name: "Titulo y objetos", master: "ppt/slideMasters/slideMaster1.xml", title: 0, body: 1 }
-skeleton: assets/_skeleton/deck-5f9fc1ce.pptx
+skeleton: assets/_skeleton/deck-400da65d.pptx
 ---
 
 ## Título con cuerpo vacío {#n1 .slide layout="ppt/slideLayouts/slideLayout1.xml"}

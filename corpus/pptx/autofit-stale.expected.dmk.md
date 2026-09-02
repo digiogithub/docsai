@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   "ppt/slideLayouts/slideLayout1.xml": { name: "Titulo y objetos", master: "ppt/slideMasters/slideMaster1.xml", title: 0, body: 1 }
-skeleton: assets/_skeleton/deck-7eac9a50.pptx
+skeleton: assets/_skeleton/deck-1219ea36.pptx
 ---
 
 ## Texto que no cabe {#n1 .slide layout="ppt/slideLayouts/slideLayout1.xml"}

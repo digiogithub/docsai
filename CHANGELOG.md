@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two corpus decks were not schema-valid, and the packages written from them inherited it.**
+  The new schema gate found both on its first run, in fixtures nine increments of writer tests had
+  round-tripped without complaint. `corpus/generate.py` gave a shape with no text a `p:txBody` with
+  **no `a:p` at all**, which `CT_TextBody` forbids and no application writes; and it built a
+  DrawingML table cell with a `p:txBody` where an `a:txBody` belongs — same content model, different
+  namespace, and the XSD is the only thing that ever said so out loud. Both are fixed in the
+  generator, the corpus is regenerated, and the pptx goldens are updated (the DocMark changes only
+  on the `skeleton:` hash line; `shapes-geometry`'s inspection count goes from two paragraphs to
+  three, which is the empty paragraph that shape always should have had). The writer itself was
+  right in both cases: `write_gen` has always written `a:txBody` into a cell.
+
 - **A written `.pptx` is now the package that was read, byte for byte.** The `zip` writer ORs
   `S_IFREG` into every entry's mode, so a deck's central directory came out with a permission bit it
   did not go in with — fifteen bytes no OPC consumer reads. It renamed the deck: a preserved package
@@ -39,6 +50,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from.
 
 ### Added
+
+- **CI gate 1: the `.pptx` parts we write, validated against the ECMA-376 XSDs** (plan v2 Phase 15,
+  ninth increment; analysis §5.5). `corpus/schema_gate.py` round-trips every deck of `corpus/pptx`
+  twice — once edited on its **preserved package**, once with the `skeleton:` line removed so the
+  whole package is written on the **embedded template** — diffs each result against the package it
+  was written on, and validates every XML part whose bytes are new or changed. A part that is not
+  schema-valid fails the build **naming the part, the line and the element**; a part xmllint reached
+  no verdict on fails too, because a gate that measures nothing is worse than no gate. A part copied
+  byte for byte out of the skeleton is deliberately not validated: it is not ours, and validating it
+  would measure whoever wrote the deck. Markup-compatibility (`mc:AlternateContent`, ECMA-376
+  Part 3) is resolved to its fallback before validating, which is what a consumer does and what the
+  Part 4 schemas assume. Wired into `.github/workflows/test.yml` as its own job; runnable locally
+  with `python3 corpus/schema_gate.py`. The schemas are vendored unmodified in `schemas/` (1.0 MB,
+  ECMA-376 Part 4 Transitional plus the Part 2 OPC schemas), with their provenance, licence and the
+  reason they are vendored rather than fetched in `schemas/README.md`. It is **CI-only**: `xmllint`
+  is not a workspace dependency and reaches no shipped binary (`AGENTS.md` §7 rule 4).
 
 - **`roundtrip` for presentations, with the per-category fidelity metric** (plan v2 Phase 15, eighth
   increment): `docsai roundtrip deck.pptx` runs `pptx → DocMark → pptx → DocMark` and compares both

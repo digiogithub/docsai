@@ -31,6 +31,23 @@ performance and adversarial corpora of Phase 8 will be added separately; the
 50-page performance test synthesises its own document at runtime
 (`crates/docsai-convert/tests/goldens.rs`).
 
+## Checking a package
+
+Two scripts beside the generator check a package rather than build one. Neither is a dependency of
+anything the project ships:
+
+```bash
+python3 corpus/opc_check.py deck.pptx   # structural: content types, r:ids, relationship targets
+python3 corpus/schema_gate.py           # CI gate 1: the .pptx parts we write, against the XSDs
+```
+
+`opc_check.py` asks whether a package hangs together; `schema_gate.py` asks whether the markup this
+project *writes* is legal ECMA-376, validating with `xmllint` against the schemas vendored in
+[`schemas/`](../schemas/). They are complementary, and a package can pass one and fail the other.
+`schema_gate.py` round-trips every deck in `pptx/` twice — edited on its preserved package, and with
+its `skeleton:` removed so the whole package is generated — and validates every part whose bytes the
+writer changed or created. See `kb/70-phase-15-xsd.md`.
+
 ## Golden files
 
 Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`, `pptx/`, and the

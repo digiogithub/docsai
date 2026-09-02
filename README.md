@@ -388,7 +388,12 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 python3 corpus/generate.py --check     # the corpus is generated, not hand-drawn
+python3 corpus/schema_gate.py          # the .pptx parts we write, against the ECMA-376 XSDs
 ```
+
+The schema gate needs `xmllint` (Debian/Ubuntu `libxml2-utils`) and a built CLI. The schemas it
+validates against are vendored, unmodified, in [`schemas/`](schemas/) — see `schemas/README.md` for
+their provenance and licence. It is CI-only: nothing it uses is a dependency of any binary.
 
 Golden files live next to the corpus (`corpus/docx/*.expected.dmk.md`). To update them:
 `DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens`, and **review the diff**.

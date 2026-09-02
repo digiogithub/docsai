@@ -232,5 +232,7 @@ and having all three kinds go through one function is what keeps the CLI's outpu
 
 ## Next
 
-15-I: CI gate 1 — generated packages validated against the ECMA-376 XSDs, the gate naming the part
-and the element when a package is not schema-valid.
+15-I, done in [[70-phase-15-xsd]]: CI gate 1 — the parts the writer produces validated against the
+ECMA-376 XSDs, vendored in `schemas/` and run by `xmllint`, the gate naming the part, the line and
+the element when a package is not schema-valid. It found two corpus fixtures that were not
+schema-valid, in decks this increment had just declared 100 % faithful.

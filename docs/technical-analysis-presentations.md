@@ -174,6 +174,20 @@ ECMA-376 XSDs, or the `ooxmlsdk` `validators` feature) and **headless LibreOffic
 PNG with perceptual diff** over the corpus. The corpus is generated with `python-pptx`, which
 fits `corpus/generate.py` as it exists today.
 
+**Gate 1 is built** (Phase 15 increment 15-I, `kb/70-phase-15-xsd.md`): `corpus/schema_gate.py`,
+validating with `xmllint` against the ECMA-376 Part 4 Transitional and Part 2 OPC schemas vendored
+unmodified in `schemas/`. Three corrections to the paragraph above. First, the `ooxmlsdk`
+`validators` feature was **rejected**: it is a workspace dependency, and it validates against a
+generated Rust model rather than against the published schemas — for a gate whose value is being an
+outside opinion, the oracle must not be our own reading of the standard. `xmllint` keeps the
+validator out of every shipped binary entirely. Second, «generated packages» had to be given a
+meaning, because a preserved deck written back is byte for byte the deck that was read: the gate
+validates every part whose bytes the writer **changed or created**, found by diffing the output
+against the package it was written on. Third, the raw bytes of a part are not what the Part 4
+schemas describe — `mc:AlternateContent` (Part 3) is legal anywhere and unrepresentable there, so
+the gate resolves it to its fallback first, as a consumer does. Its first run found two corpus
+fixtures that were not schema-valid.
+
 ---
 
 ## 6. Context economics: what an agent actually pays

@@ -305,7 +305,23 @@ defects, both now fixed in the writer. The `zip` writer ORs `S_IFREG` into every
 changed the content hash of the preserved package and so renamed it on every write; and the writer
 indexed the shape tree by `Shape::z_index`, a number DocMark does not carry, so a deck whose reading
 order is not its z-order had every shape's text written into another shape.
-Next is **15-I**: CI gate 1, generated packages validated against the ECMA-376 XSDs.
+The ninth is done: **CI gate 1, the schema gate** — the ECMA-376 XSDs are vendored unmodified in
+`schemas/` (1.0 MB, from the standard's own distribution zips, with provenance and the Ecma
+copyright notice beside them) and `corpus/schema_gate.py` validates against them with `xmllint`,
+which is the §7 rule 4 justification: no crate is added and nothing reaches a shipped binary. What
+it validates is not «the output of a round trip» — for a preserved deck that is byte for byte the
+input, and measuring it would measure whoever wrote the deck — but every part whose bytes the writer
+**changed or created**, found by diffing the written package against the one it was written on, over
+an edited deck and over the same deck with its `skeleton:` removed so the whole package is generated
+on the embedded template. A failure names the part, the line and the element, and so does a part the
+validator reached no verdict on. It went red on its first run: two corpus fixtures were not legal
+OOXML — a `p:txBody` with no `a:p` at all, and a DrawingML table cell holding a `p:txBody` where an
+`a:txBody` belongs — both fixed in `corpus/generate.py`, both invisible to nine increments of
+byte-identity tests because the writer reproduced them faithfully. The third finding was an
+`mc:AlternateContent`, which is legal by ECMA-376 Part 3 and unrepresentable in the Part 4 schemas;
+the gate now does the compatibility processing a consumer does instead of loosening anything.
+Next is **15-J**: CI gate 2, headless LibreOffice rendering the corpus to PNG with a perceptual
+diff, and LibreOffice absent a clean skip rather than a green tick.
 
 ## 2. Documents you must read before implementing
 
@@ -369,7 +385,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo run -p docsai-cli -- convert corpus/docx/basic-styles.docx -o /tmp/out.dmk.md
 python3 corpus/generate.py --check     # the corpus is generated; CI checks it is up to date
+python3 corpus/schema_gate.py          # CI gate 1: the .pptx parts we write, against the ECMA-376 XSDs
 ```
+
+The schema gate needs `xmllint` (Debian/Ubuntu `libxml2-utils`) and a built CLI
+(`cargo build -p docsai-cli`). Its schemas are vendored in `schemas/`; see `schemas/README.md`.
 
 Updating a golden is a deliberate act, and its diff is reviewed by hand:
 

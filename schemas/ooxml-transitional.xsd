@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The driver schema for `corpus/schema_gate.py`. This file is **ours**, not
+  Ecma's: the vendored `.xsd` files beside it are byte-for-byte as published and
+  must stay that way (see `schemas/README.md`), so everything the gate needs to
+  add is added here.
+
+  It does two things and nothing else:
+
+  1. It imports every published schema into one schema set, so a validator can
+     match a part's root element against a global declaration whatever namespace
+     that root is in — `p:sld`, `p:notes`, `p:presentation`, the OPC
+     `Relationships` of a `.rels` part and the OPC `Types` of
+     `[Content_Types].xml` are all reachable from this one document.
+
+  2. It supplies the two schemas the published set *uses* but does not ship:
+     the XML namespace schema (`xml:lang`, `xml:space`, referenced by `wml.xsd`
+     and others). W3C publishes it; it is vendored under `w3c/`.
+
+  Deliberately **not** imported: `ecma-376-part2-opc/opc-coreProperties.xsd`.
+  It imports the Dublin Core schemas by URL from `dublincore.org`, which are not
+  part of ECMA-376 and are not vendored, so importing it would either fail to
+  compile or make the gate fetch a third-party URL every time it runs. The
+  consequence is stated rather than hidden: `docProps/core.xml` has no global
+  declaration in this set, so a package part whose root is `cp:coreProperties`
+  is reported by the gate as unvalidatable — a failure, not a pass.
+-->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:import namespace="http://www.w3.org/XML/1998/namespace" schemaLocation="w3c/xml.xsd"/>
+
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/chartDrawing" schemaLocation="ecma-376-part4-transitional/dml-chartDrawing.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/chart" schemaLocation="ecma-376-part4-transitional/dml-chart.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/diagram" schemaLocation="ecma-376-part4-transitional/dml-diagram.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/lockedCanvas" schemaLocation="ecma-376-part4-transitional/dml-lockedCanvas.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/main" schemaLocation="ecma-376-part4-transitional/dml-main.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/picture" schemaLocation="ecma-376-part4-transitional/dml-picture.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" schemaLocation="ecma-376-part4-transitional/dml-spreadsheetDrawing.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" schemaLocation="ecma-376-part4-transitional/dml-wordprocessingDrawing.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/presentationml/2006/main" schemaLocation="ecma-376-part4-transitional/pml.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/characteristics" schemaLocation="ecma-376-part4-transitional/shared-additionalCharacteristics.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/bibliography" schemaLocation="ecma-376-part4-transitional/shared-bibliography.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/sharedTypes" schemaLocation="ecma-376-part4-transitional/shared-commonSimpleTypes.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/customXml" schemaLocation="ecma-376-part4-transitional/shared-customXmlDataProperties.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/schemaLibrary/2006/main" schemaLocation="ecma-376-part4-transitional/shared-customXmlSchemaProperties.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" schemaLocation="ecma-376-part4-transitional/shared-documentPropertiesCustom.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" schemaLocation="ecma-376-part4-transitional/shared-documentPropertiesExtended.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes" schemaLocation="ecma-376-part4-transitional/shared-documentPropertiesVariantTypes.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/math" schemaLocation="ecma-376-part4-transitional/shared-math.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/officeDocument/2006/relationships" schemaLocation="ecma-376-part4-transitional/shared-relationshipReference.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/spreadsheetml/2006/main" schemaLocation="ecma-376-part4-transitional/sml.xsd"/>
+  <xsd:import namespace="urn:schemas-microsoft-com:vml" schemaLocation="ecma-376-part4-transitional/vml-main.xsd"/>
+  <xsd:import namespace="urn:schemas-microsoft-com:office:office" schemaLocation="ecma-376-part4-transitional/vml-officeDrawing.xsd"/>
+  <xsd:import namespace="urn:schemas-microsoft-com:office:powerpoint" schemaLocation="ecma-376-part4-transitional/vml-presentationDrawing.xsd"/>
+  <xsd:import namespace="urn:schemas-microsoft-com:office:excel" schemaLocation="ecma-376-part4-transitional/vml-spreadsheetDrawing.xsd"/>
+  <xsd:import namespace="urn:schemas-microsoft-com:office:word" schemaLocation="ecma-376-part4-transitional/vml-wordprocessingDrawing.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/wordprocessingml/2006/main" schemaLocation="ecma-376-part4-transitional/wml.xsd"/>
+
+  <xsd:import namespace="http://schemas.openxmlformats.org/package/2006/content-types" schemaLocation="ecma-376-part2-opc/opc-contentTypes.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/package/2006/digital-signature" schemaLocation="ecma-376-part2-opc/opc-digSig.xsd"/>
+  <xsd:import namespace="http://schemas.openxmlformats.org/package/2006/relationships" schemaLocation="ecma-376-part2-opc/opc-relationships.xsd"/>
+</xsd:schema>

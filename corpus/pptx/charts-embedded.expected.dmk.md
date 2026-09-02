@@ -11,7 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   "ppt/slideLayouts/slideLayout1.xml": { name: "Titulo y objetos", master: "ppt/slideMasters/slideMaster1.xml", title: 0, body: 1 }
-skeleton: assets/_skeleton/deck-b19c4f35.pptx
+skeleton: assets/_skeleton/deck-16fecad6.pptx
 ---
 
 ## Ventas por zona {#n1 .slide layout="ppt/slideLayouts/slideLayout1.xml"}
