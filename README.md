@@ -37,7 +37,7 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
-| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, and charts, preserved objects, notes and added slides are still copied from it with a warning (v2 P15 continues) |
+| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused (v2 P15 continues) |
 | PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
 | OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
@@ -86,6 +86,10 @@ cargo install --path crates/docsai-cli
 Release binaries and installers (shell / PowerShell) are produced by
 [`cargo-dist`](https://opensource.axo.dev/cargo-dist/) when a version tag is
 pushed. See [`CHANGELOG.md`](CHANGELOG.md) and the GitHub Releases page.
+
+The macOS binaries are signed with the DIGIO Developer ID (hardened runtime)
+and notarized by Apple, so they run without a Gatekeeper prompt; Linux and
+Windows binaries are unsigned. See [`docs/release-signing.md`](docs/release-signing.md).
 
 ## Usage (CLI)
 

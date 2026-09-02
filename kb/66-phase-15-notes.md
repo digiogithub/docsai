@@ -98,8 +98,15 @@ and the two facts `ppt/presentation.xml` states about the deck rather than about
   part from the model rather than into one is the deck-with-no-skeleton work of **15-G**. The
   package is copied whole and the warning names the increment — copying *some* of the edits would
   put the third slide's text under the fourth slide's number.
+  **Delivered by [[68-phase-15-template]]**: a slide the model added now gets a part of its own,
+  written from the model against a chosen layout and spliced into `p:sldIdLst`, into the deck's
+  relationships and into `[Content_Types].xml`. The refusal and its message are gone.
 - **A notes page the deck does not have is not created.** Same reason: a part of its own, hanging
   from a notes master. Named, and pointed at 15-G.
+  **Delivered by [[68-phase-15-template]]**, for a slide the model added *and* for one the package
+  already has — the slide's own `_rels` gains one relationship and keeps every other byte. What is
+  still refused is a notes page in a deck with **no notes master**, which is what the message says
+  now instead of naming an increment.
 - **Deleting a notes page is not performed.** `notes: None` over a page the package still states is
   a `Degraded` warning and the page stands. Only a *removed slide* takes its notes page with it.
 - **A deck that names a slide this writer cannot resolve refuses to restate its list**, rather than

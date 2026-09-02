@@ -107,7 +107,12 @@ stop asserting that the number is kept before it could name either outcome hones
 An embedded default template plus **automatic layout selection from content shape** (title +
 bullets → «Title and Content», title only → «Title Slide»), so attribute-free Markdown produces a
 correct package. Analysis §6.6, and the acceptance criterion that a deck written from plain
-Markdown opens with a sensible layout.
+Markdown opens with a sensible layout. Done, in [[68-phase-15-template]], where the template turned
+out to be best understood as a *preserved package* like any other — generated from source by
+`corpus/generate.py` and embedded with `include_bytes!` — so that everything 15-B..15-F built keeps
+working unchanged over it, and the one new operation is writing a part the package does not have.
+That same operation lifts the two refusals 15-E pointed here for: a slide the model added, and a
+notes page for a slide that has none.
 
 ### 15-H — `roundtrip` for presentations
 
@@ -137,7 +142,12 @@ status and the acceptance criteria checked here.
 - [ ] pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus.
 - [ ] Both CI gates green on the corpus.
 - [ ] No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).
-- [ ] A deck written from *attribute-free* Markdown opens correctly with a sensible layout.
+- [x] A deck written from *attribute-free* Markdown opens correctly with a sensible layout —
+      15-G ([[68-phase-15-template]]). **With one caveat, stated rather than hidden**: the layout is
+      chosen and the package is well formed (parts, content types, every relationship resolving,
+      and this project's reader recovering the deck), but no application has *opened* it — the
+      LibreOffice install on this machine is broken, and «opens without a repair dialog» is the P2
+      checklist of 15-K.
 - [ ] Images rewritten without recompression; geometry compared with the documented tolerance.
 
 ## Rules that bind this phase

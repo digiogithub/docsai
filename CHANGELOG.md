@@ -18,9 +18,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It is now reported with `Warning::Degraded`, naming each slide and the part it was written into.
   A single slide reaching that last pass is a *forced* pairing — there is one free part — and says
   nothing, as does an unedited deck and a reorder with no edit.
+- **The `.pptx` writer no longer names 15-G for what it now does.** The messages that pointed at a
+  future increment for a table whose grid moved and for a notes page the deck does not have say
+  what the writer actually does instead — an `a:tbl` is written from the model only onto a slide
+  the writer generates, and a notes page is refused only when there is no notes master to hang one
+  from.
 
 ### Added
 
+- **The deck with no skeleton** (plan v2 Phase 15, seventh increment): a deck that never had a
+  package — Markdown typed by hand, with no attribute anywhere — is written on a **default template
+  embedded in the binary**, generated from source by `corpus/generate.py` and checked by
+  `corpus/generate.py --check`: a master, four layouts, a notes master, a theme, and no slides at
+  all. Each slide is **written from the model** against a layout chosen from the shape of its
+  content (analysis §6.6): a title with body text is «Title and Content», a title alone is «Title
+  Slide», a layout the document names wins outright, and content matching no rule falls back to the
+  title-and-content layout with a warning saying which layout it went on. Placeholders, text boxes,
+  pictures and tables are generated — an `a:tbl` written from the model, which only a generated
+  slide gets — and a shape whose markup only its own package holds (a chart, a diagram, an embedded
+  object) is a text box carrying its label plus a warning naming it.
+- **A slide, and a notes page, the package does not have.** The same generation lifts two refusals
+  of the fifth increment: a slide the model **added** to a preserved deck gets a part of its own,
+  spliced into `p:sldIdLst`, into the deck's relationships and into `[Content_Types].xml`, and a
+  note typed onto a slide that never had a notes page gets one, hanging from the deck's notes
+  master. Every slide that was already there stays byte for byte the part that was read, and a deck
+  whose model matches its package never reaches any of this.
 - **The stale autofit scale on the way out** (plan v2 Phase 15, sixth increment): the one thing the
   `.pptx` writer deliberately does *not* preserve. `a:normAutofit@fontScale` is a number PowerPoint
   computed for the text that was in the box when a human last edited it, and it does not recompute

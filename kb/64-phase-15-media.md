@@ -68,9 +68,18 @@ band flags — the same loss spike P3 measured on a package, one scale down. So 
 sequences are spliced and the table around them is the bytes that were read.
 
 The cost is stated rather than hidden: a table whose **grid** the model moved — a row added, a
-cell removed, a column width or a style reference changed — is copied whole with a warning naming
-**15-G**, which is where an `a:tbl` written from the model belongs, because a deck with no
-skeleton has nothing to preserve and must generate one anyway.
+cell removed, a column width or a style reference changed — is copied whole with a warning saying
+so.
+
+> **Amended by [[68-phase-15-template]] (15-G).** This entry originally said the warning named
+> **15-G**, «which is where an `a:tbl` written from the model belongs». Half of that came true and
+> the half that did not is worth stating plainly. 15-G *does* write an `a:tbl` from the model —
+> grid, spans, cell bodies and a style reference — but **only onto a slide it generates**, where
+> there is no grid to preserve. A table inside a *preserved* slide is still spliced cell by cell,
+> and a preserved grid the model moved is **still copied and named**, for the reason this section
+> gives: regenerating it would throw away the row heights, the `a:tcPr` and the band flags the IR
+> does not model. No increment owns lifting that; doing it needs those things in `docsai-model`
+> first. The warning no longer names an increment.
 
 Two mirror rules from [[39-phase-13-pictures-tables]] had to be inverted, exactly as the bullet rules
 were in 15-B:

@@ -3397,6 +3397,190 @@ def pptx_forty_slides() -> None:
     )
 
 
+# --------------------------------------------------------------------------
+# The writer's embedded default template (plan v2 Phase 15-G)
+# --------------------------------------------------------------------------
+#
+# Not a corpus fixture: this package is compiled into the binary
+# (`crates/docsai-office/assets/default-template.pptx`, `include_bytes!`) and is
+# what a deck with **no preserved package** is generated on — a deck typed as
+# attribute-free Markdown, which has no skeleton to splice into.
+#
+# It is generated here rather than recorded as an opaque binary for the reason
+# the whole corpus is: a template of unknown provenance cannot be reviewed, and
+# every byte of this one is source in this file, under the repository's own
+# licence. It carries no slides at all — a slide is what the writer generates —
+# and four layouts, which is what automatic layout selection selects among.
+
+TEMPLATE_PATH = (
+    ROOT.parent / "crates" / "docsai-office" / "assets" / "default-template.pptx"
+)
+
+# 16:9 at 13.333 x 7.5 in, which is what every version of PowerPoint since 2013
+# creates by default.
+TEMPLATE_W = 12192000
+TEMPLATE_H = 6858000
+
+TEMPLATE_TITLE_FRAME = xfrm(838200, 365125, 10515600, 1325563)
+TEMPLATE_BODY_FRAME = xfrm(838200, 1825625, 10515600, 4351338)
+TEMPLATE_CTR_TITLE_FRAME = xfrm(1524000, 1122363, 9144000, 2387600)
+TEMPLATE_SUBTITLE_FRAME = xfrm(1524000, 3602038, 9144000, 1655762)
+
+
+def template_layout(name: str, kind: str, shapes: str) -> bytes:
+    return (XML_DECL + (
+        f'<p:sldLayout {P_NS} type="{kind}" preserve="1">'
+        + sp_tree(shapes, name=name)
+        + "</p:sldLayout>"
+    )).encode()
+
+
+def office_default_template() -> None:
+    """The package `docsai-office` embeds and generates a skeleton-less deck on.
+
+    Four layouts, because automatic layout selection needs something to select
+    between and the two rules of analysis §6.6 name two of them:
+
+    * `Title Slide` — a centred title and a subtitle: a slide whose content is
+      a title and nothing else.
+    * `Title and Content` — a title and a body: a title with bullets under it.
+    * `Title Only` and `Blank` — what a deck with free shapes on it needs, and
+      what a layout chooser has to be able to *not* pick.
+    """
+    parts: dict[str, bytes] = {}
+
+    master = (
+        f'<p:sldMaster {P_NS}>'
+        + sp_tree(
+            shape(2, "Title Placeholder 1", a_p(""), ph=ph("title"),
+                  frame=TEMPLATE_TITLE_FRAME)
+            + shape(3, "Text Placeholder 2", a_p(""), ph=ph("body", 1),
+                    frame=TEMPLATE_BODY_FRAME),
+            name="Office Theme",
+        )
+        + '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1"'
+        ' accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5"'
+        ' accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
+        "<p:sldLayoutIdLst>"
+        + "".join(
+            f'<p:sldLayoutId id="{2147483649 + i}" r:id="rIdLayout{i + 1}"/>'
+            for i in range(4)
+        )
+        + "</p:sldLayoutIdLst>"
+        "<p:txStyles>"
+        '<p:titleStyle><a:lvl1pPr algn="l"><a:defRPr sz="4400"><a:solidFill>'
+        '<a:schemeClr val="tx1"/></a:solidFill>'
+        '<a:latin typeface="+mj-lt"/></a:defRPr></a:lvl1pPr></p:titleStyle>'
+        "<p:bodyStyle>"
+        + "".join(
+            f'<a:lvl{i}pPr marL="{342900 * i}" indent="-342900">'
+            f'<a:buChar char="•"/><a:defRPr sz="{2800 - 400 * (i - 1)}">'
+            '<a:solidFill><a:schemeClr val="tx1"/></a:solidFill>'
+            f'<a:latin typeface="+mn-lt"/></a:defRPr></a:lvl{i}pPr>'
+            for i in range(1, 5)
+        )
+        + "</p:bodyStyle>"
+        '<p:otherStyle><a:lvl1pPr><a:defRPr sz="1800"><a:solidFill>'
+        '<a:schemeClr val="tx1"/></a:solidFill>'
+        '<a:latin typeface="+mn-lt"/></a:defRPr></a:lvl1pPr></p:otherStyle>'
+        "</p:txStyles>"
+        "</p:sldMaster>"
+    )
+    parts["ppt/slideMasters/slideMaster1.xml"] = (XML_DECL + master).encode()
+    parts["ppt/slideMasters/_rels/slideMaster1.xml.rels"] = rels_part(
+        [
+            (f"rIdLayout{i + 1}", "slideLayout", f"../slideLayouts/slideLayout{i + 1}.xml")
+            for i in range(4)
+        ]
+        + [("rIdTheme", "theme", "../theme/theme1.xml")]
+    )
+
+    parts["ppt/slideLayouts/slideLayout1.xml"] = template_layout(
+        "Title Slide", "title",
+        shape(2, "Title 1", "", ph=ph("ctrTitle"), frame=TEMPLATE_CTR_TITLE_FRAME)
+        + shape(3, "Subtitle 2", "", ph=ph("subTitle", 1),
+                frame=TEMPLATE_SUBTITLE_FRAME),
+    )
+    parts["ppt/slideLayouts/slideLayout2.xml"] = template_layout(
+        "Title and Content", "obj",
+        shape(2, "Title 1", "", ph=ph("title"), frame=TEMPLATE_TITLE_FRAME)
+        + shape(3, "Content Placeholder 2", "", ph=ph("body", 1),
+                frame=TEMPLATE_BODY_FRAME),
+    )
+    parts["ppt/slideLayouts/slideLayout3.xml"] = template_layout(
+        "Title Only", "titleOnly",
+        shape(2, "Title 1", "", ph=ph("title"), frame=TEMPLATE_TITLE_FRAME),
+    )
+    parts["ppt/slideLayouts/slideLayout4.xml"] = template_layout("Blank", "blank", "")
+    for i in range(4):
+        parts[f"ppt/slideLayouts/_rels/slideLayout{i + 1}.xml.rels"] = rels_part(
+            [("rIdMaster", "slideMaster", "../slideMasters/slideMaster1.xml")]
+        )
+
+    parts["ppt/notesMasters/notesMaster1.xml"] = (XML_DECL + NOTES_MASTER).encode()
+    parts["ppt/notesMasters/_rels/notesMaster1.xml.rels"] = rels_part(
+        [("rIdTheme", "theme", "../theme/theme1.xml")]
+    )
+
+    parts["ppt/theme/theme1.xml"] = (XML_DECL + THEME).encode()
+    # A table generated onto a slide names a style, and a style reference with
+    # no `tableStyles.xml` to resolve it against is a table with no borders.
+    parts["ppt/tableStyles.xml"] = (XML_DECL + (
+        '<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+        ' def="{2D5ABB26-0587-4C30-8999-92F81FD0307C}"/>'
+    )).encode()
+
+    parts["docProps/core.xml"] = core_props("docsai", author="docsai")
+    parts["docProps/app.xml"] = APP_PROPS
+
+    # `p:sldIdLst` is present and **empty**: the template carries no slide, and
+    # the writer splices the entries of the slides it generates into it.
+    parts["ppt/presentation.xml"] = (XML_DECL + (
+        f'<p:presentation {P_NS}>'
+        '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rIdMaster1"/></p:sldMasterIdLst>'
+        '<p:notesMasterIdLst><p:notesMasterId r:id="rIdNotesMaster"/></p:notesMasterIdLst>'
+        "<p:sldIdLst/>"
+        f'<p:sldSz cx="{TEMPLATE_W}" cy="{TEMPLATE_H}"/>'
+        f'<p:notesSz cx="{TEMPLATE_H}" cy="{TEMPLATE_W}"/>'
+        "</p:presentation>"
+    )).encode()
+    parts["ppt/_rels/presentation.xml.rels"] = rels_part([
+        ("rIdMaster1", "slideMaster", "slideMasters/slideMaster1.xml"),
+        ("rIdNotesMaster", "notesMaster", "notesMasters/notesMaster1.xml"),
+        ("rIdTableStyles", "tableStyles", "tableStyles.xml"),
+        ("rIdTheme", "theme", "theme/theme1.xml"),
+    ])
+
+    parts["[Content_Types].xml"] = content_types(
+        {
+            "rels": "application/vnd.openxmlformats-package.relationships+xml",
+            "xml": "application/xml",
+        },
+        [
+            ("/ppt/presentation.xml", f"{PML_TYPE}.presentation.main+xml"),
+            ("/ppt/slideMasters/slideMaster1.xml", f"{PML_TYPE}.slideMaster+xml"),
+            ("/ppt/notesMasters/notesMaster1.xml", f"{PML_TYPE}.notesMaster+xml"),
+            ("/ppt/tableStyles.xml", f"{PML_TYPE}.tableStyles+xml"),
+            ("/ppt/theme/theme1.xml", f"{DML_TYPE}.theme+xml"),
+            ("/docProps/core.xml",
+             "application/vnd.openxmlformats-package.core-properties+xml"),
+            ("/docProps/app.xml",
+             "application/vnd.openxmlformats-officedocument.extended-properties+xml"),
+        ]
+        + [
+            (f"/ppt/slideLayouts/slideLayout{i + 1}.xml", f"{PML_TYPE}.slideLayout+xml")
+            for i in range(4)
+        ],
+    )
+    parts["_rels/.rels"] = rels_part([
+        ("rId1", "officeDocument", "ppt/presentation.xml"),
+        ("rId2", "metadata/core-properties", "docProps/core.xml"),
+        ("rId3", "extended-properties", "docProps/app.xml"),
+    ], root=True)
+
+    write_package(TEMPLATE_PATH, parts)
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -3454,11 +3638,18 @@ GENERATORS = [
     pptx_smartart_fallback,
     pptx_macro_enabled,
     pptx_forty_slides,
+    office_default_template,
 ]
 
 
 def digest_tree() -> dict[str, str]:
     out = {}
+    # Not corpus, but generated here and checked here: the writer's embedded
+    # template is source in this file too, and `--check` is what says so.
+    if TEMPLATE_PATH.exists():
+        out[str(TEMPLATE_PATH.relative_to(ROOT.parent))] = hashlib.sha256(
+            TEMPLATE_PATH.read_bytes()
+        ).hexdigest()
     for sub in ("docx", "xlsx", "odt", "ods", "doc", "pptx"):
         d = ROOT / sub
         if not d.exists():
@@ -3489,7 +3680,7 @@ def main() -> int:
             print(f"  {k}", file=sys.stderr)
         return 1
 
-    print(f"generated {len(after)} corpus files under {ROOT}")
+    print(f"generated {len(after)} generated files under {ROOT.parent}")
     return 0
 
 

@@ -637,3 +637,156 @@ fn an_edited_body_leaves_its_stale_autofit_scale_behind() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The acceptance criterion of 15-G, and the one the whole increment owns: an
+/// agent writes **plain Markdown** — no `{.slide}`, no `layouts:`, no
+/// `skeleton:`, not one attribute in the body — and gets a package a
+/// presentation tool opens, with a layout chosen from the shape of the content.
+///
+/// The front matter still has to say `source-format: pptx`, because that is
+/// what tells the parser a `##` heading is a slide rather than a heading in a
+/// text document. Everything below it is what a person would type.
+#[test]
+fn attribute_free_markdown_becomes_a_deck() {
+    let dir = scratch("plain-markdown");
+    let markdown = dir.join("deck.dmk.md");
+    std::fs::write(
+        &markdown,
+        "---\ndocmark: \"1.2\"\nsource-format: pptx\ntitle: Deck a mano\n---\n\n\
+         ## Resultados del trimestre\n\n- Ingresos al alza\n- Costes estables\n\n\
+         ## Cierre\n",
+    )
+    .expect("writes the Markdown");
+
+    let package = dir.join("deck.pptx");
+    let outcome = convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package");
+    assert_eq!(outcome.target_format, Format::Pptx);
+
+    // The parts of an OPC package that has to hold together: the two slides,
+    // their relationships, the design they were written on, and the three
+    // places that have to agree that a slide exists at all.
+    let names = part_names(&package);
+    for part in [
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "docProps/core.xml",
+        "ppt/presentation.xml",
+        "ppt/_rels/presentation.xml.rels",
+        "ppt/slideMasters/slideMaster1.xml",
+        "ppt/slideLayouts/slideLayout1.xml",
+        "ppt/slideLayouts/slideLayout2.xml",
+        "ppt/theme/theme1.xml",
+        "ppt/slides/slide1.xml",
+        "ppt/slides/slide2.xml",
+        "ppt/slides/_rels/slide1.xml.rels",
+        "ppt/slides/_rels/slide2.xml.rels",
+    ] {
+        assert!(
+            names.contains(&part.to_string()),
+            "`{part}` is not in {names:?}"
+        );
+    }
+
+    let types = part_of(&package, "[Content_Types].xml");
+    for part in ["/ppt/slides/slide1.xml", "/ppt/slides/slide2.xml"] {
+        assert!(
+            types.contains(&format!(
+                "<Override PartName=\"{part}\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>"
+            )),
+            "`{part}` has no content type: {types}"
+        );
+    }
+
+    let deck_rels = part_of(&package, "ppt/_rels/presentation.xml.rels");
+    for target in ["slides/slide1.xml", "slides/slide2.xml"] {
+        assert!(
+            deck_rels.contains(&format!("Target=\"{target}\"")),
+            "the deck does not relate `{target}`: {deck_rels}"
+        );
+    }
+    let presentation = part_of(&package, "ppt/presentation.xml");
+    assert_eq!(
+        presentation.matches("<p:sldId ").count(),
+        2,
+        "the slide list does not hold both slides: {presentation}"
+    );
+
+    // Rule 1: a title with bullets is «Title and Content». Rule 2: a title on
+    // its own is «Title Slide», and its title placeholder is the centred one
+    // that layout declares.
+    assert!(
+        part_of(&package, "ppt/slides/_rels/slide1.xml.rels").contains("slideLayout2.xml"),
+        "the first slide is not on «Title and Content»"
+    );
+    assert!(part_of(&package, "ppt/slideLayouts/slideLayout2.xml")
+        .contains("name=\"Title and Content\""));
+    assert!(
+        part_of(&package, "ppt/slides/_rels/slide2.xml.rels").contains("slideLayout1.xml"),
+        "the second slide is not on «Title Slide»"
+    );
+    assert!(part_of(&package, "ppt/slides/slide2.xml").contains("<p:ph type=\"ctrTitle\"/>"));
+
+    // Every relationship of every part points at a part the package carries: a
+    // dangling one is what P3 measured LibreOffice accepting in silence.
+    for rels in names.iter().filter(|name| name.ends_with(".rels")) {
+        let dir = rels.rsplit_once("_rels/").expect("a `_rels` part").0;
+        for target in part_of(&package, rels).split("Target=\"").skip(1) {
+            let target = target.split('"').next().unwrap_or_default();
+            if target.contains("://") {
+                continue;
+            }
+            let mut resolved: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+            for step in target.split('/') {
+                match step {
+                    ".." => {
+                        resolved.pop();
+                    }
+                    "." => {}
+                    name => resolved.push(name),
+                }
+            }
+            let resolved = resolved.join("/");
+            assert!(
+                names.contains(&resolved),
+                "`{rels}` points at `{resolved}`, which the package does not carry"
+            );
+        }
+    }
+
+    // And the writer says what it did rather than leaving the caller to find
+    // out that the design is not the deck's own.
+    assert!(
+        outcome.report.warnings.iter().any(|warning| matches!(
+            warning,
+            docsai_model::report::Warning::Degraded { what, why }
+                if what.contains("design") && why.contains("embedded default template")
+        )),
+        "the report does not say the deck was written on the template: {:?}",
+        outcome.report.warnings
+    );
+
+    // The package reads back as the deck that was typed.
+    let mut assets = MemoryAssetStore::new();
+    let file = std::fs::File::open(&package).expect("the package was written");
+    let (document, ..) = docsai_convert::read_document(file, Some("deck.pptx"), &mut assets)
+        .expect("reads the written package");
+    let Document::Presentation(deck) = document else {
+        panic!("what was written is not a deck");
+    };
+    assert_eq!(deck.slides.len(), 2);
+    assert_eq!(
+        deck.slides[0].title().as_deref(),
+        Some("Resultados del trimestre")
+    );
+    assert_eq!(deck.slides[1].title().as_deref(), Some("Cierre"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every member of a written package, by name.
+fn part_names(package: &Path) -> Vec<String> {
+    let file = std::fs::File::open(package).expect("the package was written");
+    let zip = zip::ZipArchive::new(file).expect("the written package is a zip");
+    zip.file_names().map(str::to_string).collect()
+}

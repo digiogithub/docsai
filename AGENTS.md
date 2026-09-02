@@ -283,8 +283,19 @@ the scale and its `lnSpcReduction` are dropped and `Warning::AutofitStale` names
 number (analysis §5.4). «Changed» is the writer's own notion of change and not a second one — the
 body's new bytes differ from the bytes the part already said — so a shape nobody edited keeps its
 scale and is **not** reported, and an unedited deck is still byte for byte the deck that was read.
-Next is **15-G**: the deck with no skeleton — an embedded template, automatic layout selection, and
-the parts a slide the model *added* needs.
+The seventh is done: **the deck with no skeleton** — a deck that never had a package (Markdown typed
+by hand, with no attribute anywhere) is written on a **template embedded in the binary**, generated
+from source by `corpus/generate.py`: a master, four layouts, a notes master, a theme and no slides at
+all. Each slide is written from the model against a layout chosen from the shape of its content — a
+title with bullets is «Title and Content», a title alone is «Title Slide», a layout the model names
+wins outright, and anything else falls back with a warning saying which layout it went on. The same
+generation writes the parts 15-E refused by name: a slide the model **added** to a preserved deck now
+gets a part of its own, spliced into the deck's slide list, its relationships and its content types
+while every slide that was already there stays byte for byte the part that was read, and a note typed
+onto a slide with no notes page gets one. A preserved deck is untouched by any of it: seeding runs
+only when the model holds something the package does not.
+Next is **15-H**: `roundtrip` for presentations, with the per-category fidelity metric and
+idempotence over the corpus.
 
 ## 2. Documents you must read before implementing
 

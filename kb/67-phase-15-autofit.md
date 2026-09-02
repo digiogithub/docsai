@@ -147,6 +147,7 @@ number, let the application recompute it, and name the shape in a warning.
 
 ## Next
 
-15-G: the deck with **no** skeleton — an embedded default template, automatic layout selection from
-the shape of the content (title + bullets → «Title and Content»), and with it the part a slide the
-model *added* needs, which is the refusal 15-E wrote down.
+15-G, done in [[68-phase-15-template]]: the deck with **no** skeleton — a template embedded in the
+binary and generated from source, automatic layout selection from the shape of the content (title +
+bullets → «Title and Content», title alone → «Title Slide»), and with it the parts a slide the model
+*added* and a note with no page need, which are the refusals 15-E wrote down.

@@ -449,7 +449,7 @@ fn hex(colour: &str) -> String {
         .to_ascii_uppercase()
 }
 
-fn esc_text(s: &str) -> String {
+pub(super) fn esc_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
