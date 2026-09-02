@@ -97,6 +97,10 @@ its content.
 Analysis §5.4: a `fontScale`/`lnSpcReduction` PowerPoint computed for text that is no longer there
 is a lie no reader can detect. When the shape's text changed, the stale scale is dropped and the
 warning is emitted. The variant already exists in `docsai-model`; this is the write side of it.
+Done, in [[67-phase-15-autofit]], where «the shape's text changed» turned out to be a fact the
+writer already had — 15-B's rule that nothing is written unless it differs from what the part
+already says — rather than a second notion of change to be invented, and the one variant had to
+stop asserting that the number is kept before it could name either outcome honestly.
 
 ### 15-G — the deck with no skeleton
 

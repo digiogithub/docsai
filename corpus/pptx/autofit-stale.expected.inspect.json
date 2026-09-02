@@ -46,7 +46,7 @@
   "warnings": [
     {
       "warning": "autofit-stale",
-      "what": "`Content Placeholder 2` on `ppt/slides/slide1.xml`",
+      "what": "`Content Placeholder 2` on `ppt/slides/slide1.xml` carries",
       "scale": 62500
     }
   ]

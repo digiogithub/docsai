@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The stale autofit scale on the way out** (plan v2 Phase 15, sixth increment): the one thing the
+  `.pptx` writer deliberately does *not* preserve. `a:normAutofit@fontScale` is a number PowerPoint
+  computed for the text that was in the box when a human last edited it, and it does not recompute
+  it when a file changes underneath; left over text that is no longer there it shrinks the box for
+  content that was never measured, and no reader can detect it. So when a text body's text actually
+  changed, the scale and its `lnSpcReduction` are dropped from `a:bodyPr` and
+  `Warning::AutofitStale` names the shape and the number that was in the file (analysis §5.4).
+  «Changed» is the writer's own notion of change and not a second one: the body's new bytes differ
+  from the bytes the part already said. A shape whose text did not change keeps its scale and is
+  **not** reported — a warning about a loss that did not happen is the same failure as a missing
+  one — and a body that carries no scale produces no edit at all, so an unedited deck still comes
+  out byte for byte the deck that went in. The same rule reaches a slide's notes page. A
+  `lnSpcReduction` stated with no `fontScale` is left standing: the shape claims no scale, so there
+  is nothing to call stale.
+
 - **Speaker notes, and the deck's own slide list** (plan v2 Phase 15, fifth increment): a slide's
   **notes page** is rewritten from the model like any other text body — reached through the slide's
   own relationships and never by number, so a deck whose notes were attached out of order does not

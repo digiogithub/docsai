@@ -787,7 +787,7 @@ fn read_shape(
     {
         report.warn(Warning::AutofitStale {
             what: format!(
-                "`{}` on `{}`",
+                "`{}` on `{}` carries",
                 name.as_deref().unwrap_or("an unnamed shape"),
                 ctx.part
             ),

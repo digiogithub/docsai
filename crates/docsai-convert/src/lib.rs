@@ -138,7 +138,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Pptx,
         read: true,
         write: true,
-        note: "Phase 15 in progress: writing rebuilds a slide's text, its pictures, its tables, its links and its speaker notes into the preserved package, a preserved object goes back as the markup it came in as, and a slide removed or reordered restates the deck's own slide list; a chart's data and an added slide are copied with a warning",
+        note: "Phase 15 in progress: writing rebuilds a slide's text, its pictures, its tables, its links and its speaker notes into the preserved package, a preserved object goes back as the markup it came in as, and a slide removed or reordered restates the deck's own slide list; the autofit scale of a text body whose text changed is dropped and reported, because it was computed for text that is no longer there; a chart's data and an added slide are copied with a warning",
     },
     FormatSupport {
         format: Format::DocMark,

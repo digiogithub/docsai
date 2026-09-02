@@ -157,4 +157,4 @@ and the two facts `ppt/presentation.xml` states about the deck rather than about
 
 15-F: `Warning::AutofitStale` on the way out — a `fontScale` PowerPoint computed for text that is
 no longer there is a lie no reader can detect, so when the shape's text changed the stale scale is
-dropped and the warning fires.
+dropped and the warning fires. Done, in [[67-phase-15-autofit]].

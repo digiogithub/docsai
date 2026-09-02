@@ -46,10 +46,17 @@ pub enum Warning {
     /// A raw-block could not be re-injected because the target dialect differs.
     RawBlockDropped { id: String, format: String },
     /// A shape carries an autofit scale PowerPoint computed for text that may
-    /// no longer be there (analysis §5.4). The number is kept, because only the
-    /// application can recompute it — but an agent that adds a line has just
-    /// made it a lie, and nothing in the file says so.
+    /// no longer be there (analysis §5.4). It fires on both sides of a
+    /// conversion, and the two sides do different things with the number:
+    /// **reading** keeps it, because only the application can recompute it, and
+    /// says so, since an agent that adds a line has just made it a lie and
+    /// nothing in the file says so; **writing** drops it from the shapes whose
+    /// text actually changed, because a scale computed for text that is no
+    /// longer there is a lie no reader can detect.
     AutofitStale {
+        /// The shape, and what became of its scale — a clause the message
+        /// completes, so that one variant can name either outcome without
+        /// claiming the other: `… carries`, `… changed, so the writer dropped`.
         what: String,
         /// `a:normAutofit@fontScale` in the unit the file states it in:
         /// thousandths of a percent, so 62 500 is 62.5 %.
@@ -103,8 +110,8 @@ impl Warning {
                 format!("raw-block {id} dropped: source dialect is {format}")
             }
             Warning::AutofitStale { what, scale } => format!(
-                "{what} scales its text to {:.1} %, a number PowerPoint computed \
-                 for the text that was there when it was last edited by hand",
+                "{what} an autofit scale of {:.1} %, a number PowerPoint computed \
+                 for the text that was in the box when it was last edited by hand",
                 *scale as f32 / 1000.0
             ),
             Warning::PartialDocument { nodes } => format!(

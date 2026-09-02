@@ -276,8 +276,15 @@ slide part. `ppt/presentation.xml` is otherwise copied, and it deliberately stay
 `rebuilt_parts`: the IR holds two facts stated in it, not its content. Which package slide a model
 slide *is* has to be recovered from the content, because nothing in this chain carries an identity
 for a slide, and a slide the model **added** is refused by name — there is no part to splice it
-into. Next is **15-F**: `Warning::AutofitStale` on the way out, when a shape's text changed under a
-scale PowerPoint computed for text that is no longer there.
+into. The sixth is done: **the stale autofit scale on the way out** — the one thing this writer
+deliberately does not preserve. `a:normAutofit@fontScale` is a number PowerPoint computed for the
+text that was in the box when a human last edited it, so when a text body's text actually changed
+the scale and its `lnSpcReduction` are dropped and `Warning::AutofitStale` names the shape and the
+number (analysis §5.4). «Changed» is the writer's own notion of change and not a second one — the
+body's new bytes differ from the bytes the part already said — so a shape nobody edited keeps its
+scale and is **not** reported, and an unedited deck is still byte for byte the deck that was read.
+Next is **15-G**: the deck with no skeleton — an embedded template, automatic layout selection, and
+the parts a slide the model *added* needs.
 
 ## 2. Documents you must read before implementing
 

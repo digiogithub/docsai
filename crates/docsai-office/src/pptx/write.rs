@@ -1,4 +1,4 @@
-//! The `.pptx` writer (Phase 15, increments 15-A to 15-E).
+//! The `.pptx` writer (Phase 15, increments 15-A to 15-F).
 //!
 //! The reader's counterpart, and the place where spike P3's rule is enforced
 //! rather than restated:
@@ -56,6 +56,15 @@
 //! leave the archive with it, and `ppt/presentation.xml` is otherwise copied.
 //! Which package slide a model slide *is* has to be recovered from the content
 //! (see [`align`]): nothing in this chain carries an identity for a slide.
+//!
+//! Since 15-F the one thing this writer deliberately does **not** preserve is
+//! the autofit scale of a text body whose text changed. `a:normAutofit@fontScale`
+//! is a number PowerPoint computed for the text that was in the box when a
+//! human last edited it; left over text that is no longer there it is a lie no
+//! reader can detect, so it is dropped and `Warning::AutofitStale` names the
+//! shape (analysis §5.4). «Changed» is the writer's own notion of change and
+//! not a second one: the body's new bytes differ from the bytes the part
+//! already said. A shape nobody edited keeps its scale and is not reported.
 //!
 //! What the writer cannot yet put back it **keeps and reports**: a chart's
 //! data (Phase 16), a field (whose GUID the IR does not record), a table whose
@@ -251,14 +260,19 @@ fn rebuild_slides(
         let source = source.as_str();
         // The notes page is a part of its own, reached through the slide's own
         // relationships — the same door the reader went through.
-        if let Err(reason) = rewrite_notes(&package, part, slide, &mut rebuild) {
-            report.warn(Warning::Degraded {
+        match rewrite_notes(&package, part, slide, &mut rebuild) {
+            Ok(stale) => {
+                for (what, scale) in stale {
+                    report.warn(Warning::AutofitStale { what, scale });
+                }
+            }
+            Err(reason) => report.warn(Warning::Degraded {
                 what: format!("slide {number}"),
                 why: format!(
                     "{reason}: it was copied from the preserved package, so an edit \
                      to it in the model is not in the file"
                 ),
-            });
+            }),
         }
         let mut rels = PartRels::new(&package, part);
         let mut outside = Outside {
@@ -269,9 +283,17 @@ fn rebuild_slides(
             fragments: &fragments,
         };
         match rewrite_slide(root, source, slide, &mut outside) {
-            Ok(Rewritten { xml, kept, dropped }) => {
+            Ok(Rewritten {
+                xml,
+                kept,
+                dropped,
+                stale,
+            }) => {
                 for (id, format) in dropped {
                     report.warn(Warning::RawBlockDropped { id, format });
+                }
+                for (what, scale) in stale {
+                    report.warn(Warning::AutofitStale { what, scale });
                 }
                 for reason in kept {
                     report.warn(Warning::Degraded {
@@ -805,6 +827,9 @@ struct Rewritten {
     /// Fragments the model carried in a dialect this package cannot hold:
     /// their id and the format they were written in.
     dropped: Vec<(String, String)>,
+    /// Autofit scales dropped because the text under them changed (15-F):
+    /// the clause naming the shape, and the scale that was in the file.
+    stale: Vec<(String, u32)>,
 }
 
 /// Rewrites the text bodies of one slide, leaving every other byte alone.
@@ -846,9 +871,11 @@ fn rewrite_slide(
     }
 
     let lang = editing_language(tree);
+    let part = outside.part;
     let mut edits: Vec<(Range<usize>, String)> = Vec::new();
     let mut kept: Vec<String> = Vec::new();
     let mut dropped: Vec<(String, String)> = Vec::new();
+    let mut stale: Vec<(String, u32)> = Vec::new();
     // What is not a shape: `p:transition`, `p:timing` and anything else the
     // reader took off `p:sld` itself, put back at the level it came from.
     for id in &slide.raw {
@@ -944,13 +971,44 @@ fn rewrite_slide(
         match write_text::write_body(body, bulleted, lang.as_deref(), outside.rels) {
             Ok(paragraphs) => {
                 let range = paragraph_range(tx_body);
-                if paragraphs.is_empty() && !source[range.clone()].trim().is_empty() {
+                let written = if paragraphs.is_empty() && !source[range.clone()].trim().is_empty() {
                     // `CT_TextBody` needs a paragraph; emptying the box means
                     // writing the empty one rather than none at all.
-                    edits.push((range, "<a:p/>".to_string()));
+                    "<a:p/>".to_string()
                 } else {
-                    edits.push((range, paragraphs));
+                    paragraphs
+                };
+                // 15-F: *this* is what «the shape's text changed» means, and
+                // the writer already knew it — 15-B's rule is that nothing is
+                // written unless it differs from what the part already says, so
+                // a body whose new bytes are the old bytes did not change and
+                // its scale is not stale.
+                if source[range.clone()] != written {
+                    if let Some(scale) = drop_stale_autofit(tx_body, source, &mut edits) {
+                        // Named the way the *part* names it when the model has
+                        // no name of its own: a deck that came back through
+                        // DocMark carries none, and «shape 1» is not something
+                        // a caller can go and look at.
+                        let named = shape
+                            .name
+                            .clone()
+                            .or_else(|| {
+                                element
+                                    .path(&["nvSpPr", "cNvPr"])
+                                    .and_then(|nv| nv.attr("name"))
+                                    .filter(|name| !name.is_empty())
+                                    .map(str::to_string)
+                            })
+                            .unwrap_or_else(|| shape_name(shape));
+                        stale.push((
+                            format!(
+                                "the text of `{named}` on `{part}` changed, so the writer dropped"
+                            ),
+                            scale,
+                        ));
+                    }
                 }
+                edits.push((range, written));
             }
             Err(reason) => kept.push(format!("{reason} in `{}`", shape_name(shape))),
         }
@@ -960,7 +1018,43 @@ fn rewrite_slide(
         xml: splice(source, edits),
         kept,
         dropped,
+        stale,
     })
+}
+
+/// Drops the autofit scale of a text body whose text has just changed, and
+/// says which scale it was.
+///
+/// Analysis §5.4: `a:normAutofit@fontScale` is a number PowerPoint computed for
+/// the text that was in the box the last time a human edited it, and it does
+/// not recompute it when a file changes underneath. A scale left over text that
+/// is no longer there is therefore **a lie no reader can detect** — the box
+/// renders at 62.5 % for content sized for 100 %, and nothing in the package
+/// says why. Measuring the text to compute the right scale needs font metrics
+/// this binary does not carry (post-2.0 backlog), so the honest answer is to
+/// drop the number and let PowerPoint recompute it, saying so in a warning.
+///
+/// `lnSpcReduction` goes with it: it is the same computation's other half, and
+/// keeping it would leave the paragraphs squeezed for text that has gone. A
+/// `lnSpcReduction` with **no** `fontScale` is left standing — the shape states
+/// no scale, so there is nothing this increment is licensed to call stale, and
+/// leaving something is not a loss.
+///
+/// The edit is on `a:bodyPr`, which precedes the `a:p` children the caller is
+/// replacing, so the two never overlap — which matters, because [`splice`]
+/// drops an overlapping edit without a word.
+fn drop_stale_autofit(
+    tx_body: &Element,
+    source: &str,
+    edits: &mut Vec<(Range<usize>, String)>,
+) -> Option<u32> {
+    let fit = tx_body.path(&["bodyPr", "normAutofit"])?;
+    let scale = fit
+        .attr_i64("fontScale")
+        .and_then(|scale| u32::try_from(scale).ok())?;
+    set_attr(source, fit, "fontScale", None, edits);
+    set_attr(source, fit, "lnSpcReduction", None, edits);
+    Some(scale)
 }
 
 /// Puts a slide's speaker notes back into the notes page that holds them.
@@ -983,11 +1077,11 @@ fn rewrite_notes(
     slide_part: &str,
     slide: &Slide,
     rebuild: &mut Rebuild,
-) -> Result<(), String> {
+) -> Result<Vec<(String, u32)>, String> {
     let slide_rels = package.relationships(slide_part);
     let notes_part = super::notes::part(&slide_rels).map(str::to_string);
     let (blocks, notes_part) = match (&slide.notes, notes_part) {
-        (None, None) => return Ok(()),
+        (None, None) => return Ok(Vec::new()),
         (None, Some(part)) => {
             return Err(format!(
                 "its speaker notes, which the model does not hold and `{part}` still \
@@ -1029,7 +1123,7 @@ fn rewrite_notes(
     if bodies.is_empty() && blocks.is_empty() {
         // A notes page with nothing to write the notes into, and no notes to
         // write. Nothing was lost, so nothing is reported.
-        return Ok(());
+        return Ok(Vec::new());
     }
     // The reader concatenates the text of every note-like shape on the page,
     // so a page with two of them cannot be written back: the model no longer
@@ -1048,14 +1142,27 @@ fn rewrite_notes(
         write_text::write_body(blocks, false, editing_language(tree).as_deref(), &mut rels)
             .map_err(|reason| format!("its speaker notes, which hold {reason}"))?;
     let range = paragraph_range(tx_body);
-    let edit = if paragraphs.is_empty() && !source[range.clone()].trim().is_empty() {
+    let written = if paragraphs.is_empty() && !source[range.clone()].trim().is_empty() {
         // `CT_TextBody` needs a paragraph; emptying the page means writing the
         // empty one rather than none at all.
-        (range, "<a:p/>".to_string())
+        "<a:p/>".to_string()
     } else {
-        (range, paragraphs)
+        paragraphs
     };
-    let xml = splice(source, vec![edit]);
+    // A notes page is a text body like any other, and a scale computed for a
+    // note that has been retyped is as stale as one on a slide (15-F).
+    let mut edits = Vec::new();
+    let mut stale = Vec::new();
+    if source[range.clone()] != written {
+        if let Some(scale) = drop_stale_autofit(tx_body, source, &mut edits) {
+            stale.push((
+                format!("the note in `{notes_part}` changed, so the writer dropped"),
+                scale,
+            ));
+        }
+    }
+    edits.push((range, written));
+    let xml = splice(source, edits);
     if xml != source {
         rebuild
             .replacements
@@ -1066,7 +1173,7 @@ fn rewrite_notes(
     if let Some((name, xml)) = rels.rewritten() {
         rebuild.put(package, name, xml.into_bytes());
     }
-    Ok(())
+    Ok(stale)
 }
 
 /// What became of one raw fragment on the way out.
@@ -2540,6 +2647,184 @@ mod tests {
                 "`{part}` was rewritten around the table anyway"
             );
         }
+    }
+
+    /// Retypes the first paragraph of one shape of the first slide, by index in
+    /// the reader's order — the title is 0 and the body 1 in `autofit-stale`.
+    fn retype(document: &mut Document, shape: usize, text: &str) {
+        let deck = presentation_mut(document);
+        let body = match &mut deck.slides[0].shapes[shape].kind {
+            ShapeKind::Placeholder(ph) => &mut ph.body,
+            ShapeKind::TextBox { body } => body,
+            other => panic!("shape {shape} is a {}", shape_noun(other)),
+        };
+        let paragraph = body
+            .iter_mut()
+            .find_map(|block| match block {
+                docsai_model::text::Block::Paragraph(paragraph) => Some(paragraph),
+                docsai_model::text::Block::List(list) => list.items.first_mut().and_then(|item| {
+                    item.blocks.iter_mut().find_map(|block| match block {
+                        docsai_model::text::Block::Paragraph(paragraph) => Some(paragraph),
+                        _ => None,
+                    })
+                }),
+                _ => None,
+            })
+            .expect("a paragraph to retype");
+        paragraph.content = vec![docsai_model::text::Inline::Text(text.into())];
+    }
+
+    fn stale_warnings(report: &ConversionReport) -> Vec<(String, u32)> {
+        report
+            .warnings
+            .iter()
+            .filter_map(|warning| match warning {
+                Warning::AutofitStale { what, scale } => Some((what.clone(), *scale)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The claim of 15-F: a scale computed for text that is no longer there is
+    /// a lie no reader can detect, so the text that changed takes it with it.
+    #[test]
+    fn a_changed_body_drops_the_scale_that_was_computed_for_its_old_text() {
+        let path = deck("autofit-stale.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        retype(&mut document, 1, "Una línea que nadie midió");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert_eq!(
+            stale_warnings(&report),
+            vec![(
+                "the text of `Content Placeholder 2` on `ppt/slides/slide1.xml` \
+                 changed, so the writer dropped"
+                    .to_string(),
+                62_500
+            )],
+            "{:?}",
+            report.warnings
+        );
+        let part =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            part.contains("<a:normAutofit/>"),
+            "the scale and its line-space reduction are still in the part: {part}"
+        );
+        assert!(!part.contains("fontScale") && !part.contains("lnSpcReduction"));
+        assert!(part.contains("Una línea que nadie midió"), "{part}");
+        // Nothing else moved: the title's shape is the bytes that were read,
+        // `a:bodyPr` and all, and so is everything up to the body's own text.
+        let before = String::from_utf8(
+            part_of(&original, "ppt/slides/slide1.xml").expect("the slide it was read from"),
+        )
+        .expect("utf-8");
+        let title = before
+            .split_once("<p:sp><p:nvSpPr><p:cNvPr id=\"2\"")
+            .expect("the title shape")
+            .1;
+        let title = &title[..title.find("</p:sp>").expect("its end")];
+        assert!(part.contains(title), "the title shape was rewritten too");
+        // And the model that comes back no longer states a scale at all.
+        let (after, _) = read_bytes(&written);
+        assert_eq!(
+            after.slides[0].shapes[1]
+                .placeholder()
+                .expect("the body")
+                .delta
+                .font_scale,
+            None
+        );
+    }
+
+    /// The interaction that decides the increment: the attribute sits on
+    /// `a:bodyPr`, inside the very `p:txBody` whose paragraphs are being
+    /// replaced, and [`splice`] drops an overlapping edit **without a word**.
+    /// So the two edits have to be disjoint, and the proof is that both of them
+    /// are in the file rather than one of them.
+    #[test]
+    fn dropping_the_scale_does_not_overlap_the_paragraphs_it_was_computed_for() {
+        let path = deck("autofit-stale.pptx");
+        let (mut document, assets) = read_deck(&path);
+        retype(&mut document, 1, "Sólo una línea");
+
+        let written = write_deck(&document, &assets);
+        let (after, report) = read_bytes(&written);
+        let body = after.slides[0].shapes[1].placeholder().expect("the body");
+
+        assert_eq!(body.delta.font_scale, None, "the scale survived the splice");
+        assert!(
+            format!("{:?}", body.body).contains("Sólo una línea"),
+            "the paragraph edit was swallowed by the attribute edit: {:?}",
+            body.body
+        );
+        // Reading the written deck back must not report a scale either: there
+        // is none left to be stale.
+        assert!(stale_warnings(&report).is_empty(), "{:?}", report.warnings);
+    }
+
+    /// A shape whose text changed and that carries no scale: no edit to drop,
+    /// and nothing to report. The corpus is almost entirely this case.
+    #[test]
+    fn a_changed_body_with_no_scale_produces_no_edit_and_no_warning() {
+        let path = deck("basic-slides.pptx");
+        let (mut document, assets) = read_deck(&path);
+        set_first_text(&mut document, "Título reescrito");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(stale_warnings(&report).is_empty(), "{:?}", report.warnings);
+        let part =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            !part.contains("normAutofit"),
+            "the writer invented an autofit element: {part}"
+        );
+    }
+
+    /// The false-warning trap, and the one §7 rule 3 calls the same failure as
+    /// a missing warning: the *other* shape's text changed, so this one's scale
+    /// is exactly as valid as it was. It stays, and nothing is reported about
+    /// it — the writing side, that is; reading the file back still says the
+    /// scale is a number a human computed, which it is.
+    #[test]
+    fn a_scale_whose_own_text_did_not_change_is_left_alone() {
+        let path = deck("autofit-stale.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        retype(&mut document, 0, "Otro título");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(stale_warnings(&report).is_empty(), "{:?}", report.warnings);
+        let part =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            part.contains(r#"<a:normAutofit fontScale="62500" lnSpcReduction="20000"/>"#),
+            "a scale nobody invalidated was dropped: {part}"
+        );
+        // The whole body shape is still the bytes that were read.
+        let before = String::from_utf8(
+            part_of(&original, "ppt/slides/slide1.xml").expect("the slide it was read from"),
+        )
+        .expect("utf-8");
+        let body = before
+            .split_once("<p:sp><p:nvSpPr><p:cNvPr id=\"3\"")
+            .expect("the body shape")
+            .1;
+        let body = &body[..body.find("</p:sp>").expect("its end")];
+        assert!(part.contains(body), "the body shape was rewritten anyway");
     }
 
     /// A [`DeckParts`] built from a presentation part written by hand.

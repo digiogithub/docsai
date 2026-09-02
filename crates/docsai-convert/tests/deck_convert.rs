@@ -587,3 +587,53 @@ fn part_of(package: &Path, part: &str) -> String {
     .expect("the part is text");
     xml
 }
+
+/// 15-F through the pipeline: the one thing the writer deliberately does not
+/// preserve. The body of `autofit-stale.pptx` carries a `fontScale` PowerPoint
+/// computed for eight lines; an agent that retypes one of them has made that
+/// number a lie no reader can detect, so it leaves with the text it was
+/// computed for, and the report names the shape.
+#[test]
+fn an_edited_body_leaves_its_stale_autofit_scale_behind() {
+    let dir = scratch("write-back-autofit");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("autofit-stale.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let edited = source.replace(
+        "Línea 3 de un cuerpo deliberadamente largo",
+        "Línea 3, mucho más corta",
+    );
+    assert_ne!(edited, source, "the fixture no longer holds the body");
+    std::fs::write(&markdown, &edited).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    let outcome = convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+
+    let slide = part_of(&package, "ppt/slides/slide1.xml");
+    assert!(
+        slide.contains("<a:normAutofit/>"),
+        "the stale scale is still in the package: {slide}"
+    );
+    assert!(
+        slide.contains("Línea 3, mucho más corta"),
+        "the edit is not in the package: {slide}"
+    );
+    assert!(
+        outcome.report.warnings.iter().any(|warning| matches!(
+            warning,
+            docsai_model::report::Warning::AutofitStale { what, scale }
+                if *scale == 62_500 && what.contains("Content Placeholder 2")
+        )),
+        "the report does not name the shape whose scale was dropped: {:?}",
+        outcome.report.warnings
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
