@@ -27,6 +27,13 @@ not» below.
 The gate is `corpus/render_gate.py`, its CI job is `render-gate` in `.github/workflows/test.yml`,
 and it runs locally as `python3 corpus/render_gate.py` (or `--self-test` for the comparator alone).
 
+> **Amended after the fact.** The «cannot render» of the title turned out to be a *dynamic loader*
+> fault in this machine's LibreOffice install, not a missing or corrupt package, and it has since
+> been diagnosed and worked around. The gate has now been run for real here, with a renderer, and it
+> exits 0. What that run proves — and the considerably smaller thing it does **not** — is written
+> out in «The loader fault, and the gate's first real run» below. Nothing in the five decisions, the
+> threshold or the negative controls changed; what changed is the account of what has been executed.
+
 ## The five decisions
 
 ### 1. What produces the images: PDF, then `pdftoppm`
@@ -217,7 +224,8 @@ Split honestly, because half of this gate has never touched a real render.
   **17 decks, 34 packages, 322 parts, 0 invalid, 0 not measured**. This increment adds no Rust and
   changes no corpus byte; those runs are the proof that it did not.
 
-**Not verified here, and it must be said plainly:**
+**Not verified when this increment closed, and it had to be said plainly** — the first and the third
+of these have since changed, and the next section says exactly how far:
 
 - **No corpus slide has ever been rendered by LibreOffice for this gate.** Not once. The
   `soffice --convert-to pdf` invocation, its `-env:UserInstallation` profile isolation, its
@@ -233,6 +241,115 @@ Split honestly, because half of this gate has never touched a real render.
 - **`--require-renderer` has never returned 0**, because that requires a working renderer.
 - **The CI job has not run.** Its apt package list, in particular, is reasoned rather than observed:
   `libreoffice-impress` (not the full suite) plus `poppler-utils` and `fonts-liberation`.
+
+## The loader fault, and the gate's first real run
+
+Written after 15-J closed, and after 15-K closed the phase. Both of them recorded «LibreOffice is
+broken on this machine» as a fact about the installation. It was a fact about the *dynamic loader*,
+which is a smaller thing, and once it is named the fix is one environment variable.
+
+### The diagnosis
+
+LibreOffice **24.2.7.2 420(Build:2)** is installed and complete. Plain `soffice --version` exits
+**127**:
+
+```
+/usr/lib/libreoffice/program/soffice.bin: error while loading shared libraries: libreglo.so:
+cannot open shared object file: No such file or directory
+```
+
+and the file it cannot open **is there**: `/usr/lib/libreoffice/program/libreglo.so`, 89144 bytes,
+owned by the `uno-libs-private` package, one of 146 `.so` files in that directory. Reinstalling
+changed nothing, which is the point at which «the package is broken» stops being a hypothesis.
+
+What is actually wrong is that nothing tells the loader to look in that directory. Two mechanisms
+should, and on this machine neither does:
+
+- `soffice.bin` carries `RUNPATH $ORIGIN` — objdump confirms it — and it is **not being honoured**:
+  `ldd /usr/lib/libreoffice/program/soffice.bin` reports `libreglo.so => not found` and
+  `libunoidllo.so => not found` for two files sitting in the very directory the binary lives in.
+- The `/usr/lib/libreoffice/program/soffice` wrapper would paper over that, except that its
+  `case $(uname -s)` block exports `LD_LIBRARY_PATH="$sd_prog…"` only under **OpenBSD** and under
+  **NetBSD|DragonFly**. Linux falls through the `esac` with the variable untouched — the two
+  branches are commented «a temporary hack until we can live with the default search paths», and
+  this machine is a machine where we cannot.
+
+It fails identically outside any sandbox, so it is not an artefact of how an agent runs commands.
+
+**The workaround, verified:** name the directory explicitly.
+
+```bash
+LD_LIBRARY_PATH=/usr/lib/libreoffice/program soffice --headless --convert-to pdf …
+```
+
+With that set, `soffice --version` prints `LibreOffice 24.2.7.2 420(Build:2)` and exits 0. The
+permanent local fix is `/etc/ld.so.conf.d/libreoffice.conf` containing
+`/usr/lib/libreoffice/program`, followed by `ldconfig` — an owner action, root, and outside this
+repository.
+
+### The first real run, and what it proves
+
+```
+LD_LIBRARY_PATH=/usr/lib/libreoffice/program python3 corpus/render_gate.py --require-renderer
+17 deck(s): 17 round trip(s) identical by bytes, 0 rendered, 61 page(s) compared,
+0 failure(s), 0 not measured
+```
+
+exit **0**. That is the first time `--require-renderer` has returned 0, and the first time this
+gate has driven a real LibreOffice over the corpus. It is also more subtle than «the gate is
+green», and the subtlety is the whole value of writing it down.
+
+**`0 rendered` is the round trips.** All seventeen took the byte-identity short circuit of §4: the
+written package is the package that was read, so there is nothing for a render to disagree about,
+and the gate says so per deck («identical package, byte for byte (a render can only agree)») rather
+than claiming a render. Byte identity is strictly stronger than any diff score, so this is not a
+gap — but it does mean the round-trip half of the gate still did not touch the renderer, on a
+machine where the renderer now works.
+
+**The 61 pages are the generated packages** — the skeleton-less path, every deck rewritten onto the
+embedded default template. Every one of those pages reports `diff n/a (geometry)`: the template's
+canvas is not the corpus deck's, the rasters therefore have different dimensions, and the
+comparator refuses to score pages it cannot pair pixel for pixel. What ran on them is the ink check
+alone, e.g.
+
+```
+ok  tables-simple.pptx [generated] page 1: ink 0.9882%, diff n/a (geometry) (reported, not a verdict)
+ok  autofit-stale.pptx [generated] page 1: ink 5.6244%, diff n/a (geometry) (reported, not a verdict)
+```
+
+So, precisely: **LibreOffice opened and rendered every generated package without failing, the page
+counts matched, and no page that should have carried ink came out blank.** That is a real result —
+it is the first evidence that the packages this project authors end to end are loadable by a real
+consumer at all, and it exercises the conversion invocation, the `-env:UserInstallation` profile
+isolation, the `.pptm` path, the timeout, the page order, the PGM reader and the ink measure against
+the actual renderer instead of a stand-in.
+
+**What it does not do** is exercise the perceptual diff on real renders. Not one page in this run
+produced a score. The threshold of **2.5 remains chosen from `--self-test` proxies and unvalidated
+against real LibreOffice noise**, exactly as 15-J left it; nothing here has measured renderer drift,
+font substitution or anti-aliasing on output this renderer produced. The first genuinely scored
+pages will come the day the writer emits bytes that differ from its input — an edit, Phase 16,
+`apply_edits` — or from a CI run on a runner whose LibreOffice or fonts differ. **The threshold may
+still have to move**, and this run is not evidence that it will not.
+
+### The skip path still probes honestly
+
+Re-run **without** the variable, on the same machine, to be sure the fix did not quietly become a
+requirement:
+
+```
+python3 corpus/render_gate.py
+========================================================================
+RENDER GATE SKIPPED — NOTHING WAS MEASURED
+  reason:  soffice is installed but does not run: … libreglo.so: cannot open shared
+           object file: No such file or directory
+…
+```
+
+exit **3**. The gate still detects «installed and broken» as unavailable, still refuses to call it a
+pass, and still quotes the loader error verbatim — which is what would let the next person diagnose
+this in minutes rather than in an afternoon. The design decision of §5 survives contact with a
+machine where the fault is real.
 
 ## The negative controls
 
@@ -301,10 +418,13 @@ Stated here so the next increment does not inherit an overclaim.
 ## Next
 
 15-K: the P2 gate and the phase close — [[72-phase-15-close]]. The checklist could not be *run*
-here (no PowerPoint, no working LibreOffice), so what it delivers is everything around the human
+here (no PowerPoint, and at the time no working LibreOffice either — with the `LD_LIBRARY_PATH`
+above, the LibreOffice half of that form is now doable locally, the PowerPoint half is not), so what
+it delivers is everything around the human
 step: three decks and a negative control, the fill-in form `docs/spikes/P2-powerpoint-gate.md`, risk
 P2 left **open** with the state of the evidence written out in
 `docs/technical-analysis-presentations.md` §7.1 and the closing wording prepared there, and the
 phase's acceptance criteria settled — two true, three waiting on an application opening a file. This
-gate's own missing half, «no corpus slide has ever been rendered», is carried forward there as item
-2 of what Phase 15 leaves open.
+gate's own missing half is carried forward there as item 2 of what Phase 15 leaves open — rewritten,
+since the run above, from «no corpus slide has ever been rendered» to what is still true: the
+threshold has never been scored against a real render.

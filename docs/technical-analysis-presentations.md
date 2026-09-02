@@ -353,10 +353,20 @@ out so that nobody reads the two green gates as an answer to a question they do 
 - Every written package **hangs together** as OPC — every relationship resolves, every part has a
   content type (`corpus/opc_check.py`). This is the check that covers what the schema gate cannot,
   and it is what caught the negative control of the P2 gate form.
-- Nothing about how a corpus deck *looks*. CI gate 2 (`corpus/render_gate.py`) is built, wired and
-  its comparator measured on fourteen pairs, but LibreOffice is broken on the development machine
-  and the gate has **never rendered a corpus slide anywhere**. Its first real numbers come from
-  the first CI run.
+- That every package the writer authors end to end **loads and renders in a real consumer**. CI
+  gate 2 (`corpus/render_gate.py`) has now been run with a working renderer over the whole corpus —
+  *17 decks, 17 round trips identical by bytes, 0 rendered, 61 pages compared, 0 failures, 0 not
+  measured*, exit 0 — and headless LibreOffice opened and rasterised all 61 pages of the generated
+  packages without failing, with no page that should have carried ink coming out blank. This is
+  the first evidence in the project that an application of any kind accepts these bytes.
+- Nothing about how a corpus deck *looks*, still. That same run produced **no perceptual-diff
+  score at all**: the seventeen round trips are byte-identical packages and take the gate's short
+  circuit rather than a render, and every generated page reports `diff n/a (geometry)` because the
+  embedded template's canvas is not the corpus deck's, so the pages cannot be paired pixel for
+  pixel. The threshold of 2.5 is the one the comparator's fourteen self-test pairs chose and
+  remains **unvalidated against real renderer noise**; the first genuinely scored pages will come
+  from a run where the writer's bytes differ from its input, or from CI — where the `render-gate`
+  job has still never executed.
 
 **What none of that reaches:**
 
@@ -366,8 +376,9 @@ out so that nobody reads the two green gates as an answer to a question they do 
 - Whether a preserved object survives as *itself* — a chart still a chart with its workbook behind
   it, a SmartArt still a diagram and not its `mc:Fallback` text box. LibreOffice resolves
   `mc:Fallback`; only PowerPoint resolves `mc:Choice`, so this is a question no tool here can ask.
-- The package docsai authors end to end, on the embedded template, from attribute-free Markdown.
-  **No application has ever opened one.**
+- Whether **PowerPoint** opens the package docsai authors end to end, on the embedded template,
+  from attribute-free Markdown. LibreOffice now does, silently and completely (above) — and
+  LibreOffice accepting a package is precisely the evidence this section warns is not enough.
 
 **What would close it**: the checklist of [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md),
 run by a human on the three decks that document builds — a spliced preserved deck, a raw

@@ -18,8 +18,9 @@ criteria checked here.*
 
 ## The one thing this increment could not do
 
-**The checklist has not been run.** PowerPoint is not on this machine, LibreOffice on it is broken
-(`soffice.bin: libreglo.so`), and no agent is a human sitting in front of an application. Closing
+**The checklist has not been run.** PowerPoint is not on this machine, LibreOffice on it would not
+start (`soffice.bin: libreglo.so` — since diagnosed as a loader fault and worked around, item 3
+below), and no agent is a human sitting in front of an application. Closing
 risk P2 on the strength of two green CI gates would be exactly the failure `AGENTS.md` §7 rule 3 is
 written against — one level worse than a false warning, because a risk marked closed stops being
 looked at.
@@ -147,13 +148,29 @@ Collected here so the next phase finds them in one place instead of in eleven in
 
 1. **The human P2 gate itself.** `docs/spikes/P2-powerpoint-gate.md`, unrun. Owner action, not a
    code action. Closes the phase's third acceptance criterion and risk P2.
-2. **Gate 2 has never rendered.** `corpus/render_gate.py` is green on its comparator and on a
-   stand-in renderer only. The first real numbers come from the first CI run, and **the threshold of
-   2.5 may have to move when they do** ([[71-phase-15-render]]).
-3. **LibreOffice is broken on the development machine.** `libreoffice-core` owns
-   `/usr/lib/libreoffice/program/soffice.bin`, `libreglo.so` is missing and only ~120 `.so` files are
-   in that directory; a reinstall of `libreoffice-core` would most likely fix it. It blocks gate 2
-   locally and the LibreOffice half of the P2 checklist. Environment action for the owner.
+2. **Gate 2's threshold has never been scored against a real render.** Superseding the original
+   «gate 2 has never rendered»: with the loader fault of item 3 worked around,
+   `LD_LIBRARY_PATH=/usr/lib/libreoffice/program python3 corpus/render_gate.py --require-renderer`
+   now exits **0** — *17 decks, 17 round trips identical by bytes, 0 rendered, 61 pages compared, 0
+   failures, 0 not measured* ([[71-phase-15-render]]). Read that carefully: the round trips took the
+   byte-identity short circuit, so nothing was rendered for them, and the 61 pages that *were*
+   rendered are the generated packages, every one reporting `diff n/a (geometry)` because the
+   template's canvas is not the corpus deck's. What the run establishes is that LibreOffice opens and
+   renders every generated package without failing and that no page came out blank. What it does not
+   establish is any perceptual-diff score at all, so **the threshold of 2.5 is still unvalidated
+   against real renderer noise and may have to move** when the first genuinely scored pages appear —
+   from an edit, from Phase 16, or from a CI runner with a different LibreOffice or different fonts.
+3. **The LibreOffice on the development machine needs `LD_LIBRARY_PATH` set.** Diagnosed after the
+   phase closed and no longer a blocker: LibreOffice **24.2.7.2 420(Build:2)** is installed and
+   complete — `libreglo.so` is present, 89144 bytes, owned by `uno-libs-private`, one of 146 `.so`
+   files in `/usr/lib/libreoffice/program` — but the dynamic loader is never told to look there.
+   `soffice.bin`'s `RUNPATH $ORIGIN` is not honoured (`ldd` reports `libreglo.so` and
+   `libunoidllo.so` not found in the binary's own directory), and the `soffice` wrapper exports
+   `LD_LIBRARY_PATH` only on its OpenBSD and NetBSD branches, never on Linux. Prefixing commands with
+   `LD_LIBRARY_PATH=/usr/lib/libreoffice/program` works. The permanent fix is
+   `/etc/ld.so.conf.d/libreoffice.conf` containing that directory plus `ldconfig` — root, and an
+   environment action still open for the owner. The LibreOffice half of the P2 checklist is now
+   runnable locally; the PowerPoint half is not.
 4. **`<a:p/>` does not survive a round trip** ([[70-phase-15-xsd]]). The writer normalises it to
    `<a:p><a:endParaRPr/></a:p>`: schema-valid, visually identical, **not byte-identical**, which
    quietly dents 15-A's byte-identity claim for any deck in the wild that spells it short. No corpus
@@ -202,4 +219,6 @@ sand.
 ## Next
 
 Phase 16 (`docs/development-plan-v2.md`) — charts, embedded objects, thumbnails. **First, though**:
-`docs/spikes/P2-powerpoint-gate.md`, and a working LibreOffice.
+`docs/spikes/P2-powerpoint-gate.md`. LibreOffice here works once
+`LD_LIBRARY_PATH=/usr/lib/libreoffice/program` is set, so its half of that form no longer waits on
+anything; PowerPoint and a person still do.

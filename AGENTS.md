@@ -333,9 +333,16 @@ so and spends no renderer time on it, and the path that does produce new bytes �
 written on the embedded template — is checked for the two things a render can honestly say about it,
 the same page count and no page that came out blank. A missing **or broken** renderer is a skip with
 a banner and exit 3, and in CI, which installs LibreOffice deliberately, `--require-renderer` makes
-it a failure. LibreOffice on this machine is broken (`libreglo.so`), so the gate has never rendered a
-real slide here: the skip path and the comparator were exercised, the render path only against a
-stand-in renderer.
+it a failure. The gate **has now been run for real**: this machine's `libreglo.so` failure was a
+dynamic-loader fault, not a broken install, and with `LD_LIBRARY_PATH=/usr/lib/libreoffice/program`
+set, `python3 corpus/render_gate.py --require-renderer` exits 0 — *17 decks, 17 round trips
+identical by bytes, 0 rendered, 61 pages compared, 0 failures, 0 not measured*. Read that precisely:
+the round trips are byte-identical and take the short circuit, and the 61 rendered pages are the
+generated packages, every one `diff n/a (geometry)` because the template's canvas is not the corpus
+deck's. So LibreOffice opens and renders every generated package without failing and nothing came
+out blank — and **no perceptual diff has ever been scored on real output**, which leaves the
+threshold of 2.5 unvalidated against renderer noise. Without the variable the gate still skips with
+its banner and exit 3, as it should.
 The eleventh is done and **Phase 15 is closed — with one item outstanding, named rather than
 buried**: the P2 gate is **prepared and unrun**. `docs/spikes/P2-powerpoint-gate.md` builds in one
 paste the three decks that cover this phase's three paths to bytes — a preserved package spliced
@@ -346,12 +353,14 @@ their relationships left dangling, which `corpus/opc_check.py` refuses and which
 measured LibreOffice accepting in silence. Seven items, the repair dialog first. Running it needs
 PowerPoint and a person, and this machine has neither, so **risk P2 stays open**:
 `docs/technical-analysis-presentations.md` §7.1 states what the two gates do and do not prove and
-carries the row that closes the risk when the form is signed. Of the phase's five acceptance
+carries the row that closes the risk when the form is signed — the LibreOffice half of that form is
+now runnable here, the PowerPoint half is not, and LibreOffice was never the oracle anyway. Of the phase's five acceptance
 criteria two are true (corpus idempotence; images without recompression, with the geometry tolerance
 Phase 11-E fixed at zero), and three wait on an application opening a file — including «a deck
 written from attribute-free Markdown opens correctly», **un-ticked here** because its verb is
 «opens». What the phase carries forward is listed in `kb/72-phase-15-close.md`: the unrun gate, a
-render gate that has never rendered, the broken LibreOffice, `<a:p/>` not surviving a round trip, a
+render gate whose threshold no real render has yet scored, the LibreOffice loader path, `<a:p/>` not
+surviving a round trip, a
 preserved table whose grid moved, a shape *added* to a preserved slide discarding that slide's other
 edits, unvalidated preserved parts, `align`'s content-based pairing, the refused internal hyperlink,
 the inherited `agent` ≤ 15 % criterion, and the still-red `docx_roundtrip_is_idempotent` on
@@ -430,6 +439,18 @@ The schema gate needs `xmllint` (Debian/Ubuntu `libxml2-utils`) and a built CLI
 The render gate needs `soffice` and `pdftoppm` (`libreoffice-impress poppler-utils`) and the same
 CLI; without a working renderer it **skips** with a banner and exit 3 — never a green tick — and in
 CI it is run with `--require-renderer`, where a missing renderer is a failure.
+
+On this machine `soffice` fails with `error while loading shared libraries: libreglo.so` unless the
+library directory is named: the Linux branch of the `/usr/lib/libreoffice/program/soffice` wrapper
+never exports `LD_LIBRARY_PATH` and `soffice.bin`'s `RUNPATH $ORIGIN` is not honoured here. Nothing
+is missing — prefix the command and it works:
+
+```bash
+LD_LIBRARY_PATH=/usr/lib/libreoffice/program python3 corpus/render_gate.py --require-renderer
+```
+
+(Fixing it permanently is an owner action needing root: `/etc/ld.so.conf.d/libreoffice.conf`
+containing `/usr/lib/libreoffice/program`, then `ldconfig`.)
 
 Updating a golden is a deliberate act, and its diff is reviewed by hand:
 

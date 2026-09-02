@@ -190,11 +190,34 @@ actually opening a file — and none of them is softened to make the phase look 
       measured. Gate 2 is **built and wired** — 15-J ([[71-phase-15-render]]): `corpus/render_gate.py`,
       its own `render-gate` job in `.github/workflows/test.yml`, its comparator measured on fourteen
       pairs and its threshold chosen from those numbers, four negative controls red and named.
-      What is missing is the only thing that would make this box true: **no corpus slide has ever
-      been rendered by LibreOffice on any machine** — re-run in 15-K, `corpus/render_gate.py` exits
-      3 with the skip banner (`soffice.bin: libreglo.so`) and `--self-test` exits 0. The first real
-      numbers come from the first CI run, and the threshold may have to move when they do. The box
-      closes when that run is seen, and no earlier.
+      What was missing in 15-K was the only thing that would make this box true: **no corpus slide
+      had ever been rendered by LibreOffice on any machine** — re-run then, `corpus/render_gate.py`
+      exited 3 with the skip banner (`soffice.bin: libreglo.so`) and `--self-test` exited 0.
+
+      **Amended, and still un-ticked.** The `libreglo.so` failure has since been diagnosed as a
+      dynamic-loader fault rather than a broken install, and with
+      `LD_LIBRARY_PATH=/usr/lib/libreoffice/program` the gate has now been run for real on this
+      machine: `python3 corpus/render_gate.py --require-renderer` → *17 decks, 17 round trips
+      identical by bytes, 0 rendered, 61 pages compared, 0 failures, 0 not measured*, exit **0**
+      ([[71-phase-15-render]]). That is a real advance — LibreOffice opens and renders every
+      generated package without failing, and no page came out blank — and it is still not this
+      criterion, for two reasons, both about the words in it.
+
+      *«Green on the corpus.»* Nothing in that run was scored. The seventeen round trips took the
+      byte-identity short circuit and were never rendered at all; the 61 pages that were rendered
+      are the generated packages, and every one reports `diff n/a (geometry)` because the embedded
+      template's canvas is not the corpus deck's, so only the ink check ran. A gate that rendered
+      the corpus and produced no perceptual-diff score has not measured how the corpus looks; the
+      threshold of 2.5 remains chosen from `--self-test` proxies and unvalidated against real
+      renderer output.
+
+      *«CI gates.»* The `render-gate` job of `.github/workflows/test.yml` has still never executed:
+      the newest run on the remote is `0aac4eb` (2026-08-21), and that commit's workflow does not
+      contain the job. A green local run on one developer's machine is evidence, not a CI result.
+
+      So the box stays open, with the gap now much smaller and precisely named: **not «it has never
+      rendered», but «no render has ever been scored, and CI has never run it».** It closes on a
+      green `render-gate` job that produced at least one real diff number, and no earlier.
 
 - [ ] **No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).**
       The checklist is now written and the decks it needs are reproducible in one paste:

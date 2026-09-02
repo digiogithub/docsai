@@ -15,6 +15,16 @@ five dangling relationships without a murmur.
 
 **How long it takes**: about twenty minutes once the decks are built.
 
+**The LibreOffice half can be done here.** The criterion names PowerPoint *or* LibreOffice, and the
+development machine's LibreOffice — long recorded as broken — turned out to need only a library
+path: `LD_LIBRARY_PATH=/usr/lib/libreoffice/program soffice …` starts LibreOffice 24.2.7.2 normally
+(permanently: an `/etc/ld.so.conf.d/libreoffice.conf` naming that directory, then `ldconfig`).
+Opening the five decks below in LibreOffice locally is therefore now possible and worth doing first
+— it is cheap, and it would catch a gross breakage before anyone carries files to a Windows
+machine. It does not answer this form. Deck **B** is the case where LibreOffice provably cannot
+stand in (§2), and P3 §2.4 measured LibreOffice accepting a package with five dangling
+relationships in silence, so a clean LibreOffice run is a smoke test, never a tick.
+
 **Status**: *not yet run.* When it is run, fill in §3 in this file, record the outcome in
 `P3-preserved-skeleton.md` §6.2 as that section asks, and — only if every deck passes — close P2
 with the wording prepared in `../technical-analysis-presentations.md` §7.1.

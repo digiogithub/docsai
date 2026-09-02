@@ -37,7 +37,7 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
-| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused. `docsai roundtrip deck.pptx` closes the cycle and reports the per-category fidelity metric; the whole deck corpus round-trips idempotent, and a deck nobody edited comes back as the package that was read, byte for byte. **Phase 15 is closed with one item outstanding**: no *application* has yet opened a written deck — the PowerPoint checklist that would say so is prepared and unrun in [`docs/spikes/P2-powerpoint-gate.md`](docs/spikes/P2-powerpoint-gate.md), and risk P2 stays open until it is signed |
+| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused. `docsai roundtrip deck.pptx` closes the cycle and reports the per-category fidelity metric; the whole deck corpus round-trips idempotent, and a deck nobody edited comes back as the package that was read, byte for byte. **Phase 15 is closed with one item outstanding**: headless LibreOffice now opens and renders every one of the seventeen generated packages without failing and with no page coming out blank (the render gate, run for real), but **PowerPoint** has still never opened a written deck, and PowerPoint is the loader that decides — the checklist that would say so is prepared and unrun in [`docs/spikes/P2-powerpoint-gate.md`](docs/spikes/P2-powerpoint-gate.md), and risk P2 stays open until it is signed |
 | PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
 | OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
@@ -404,6 +404,22 @@ green tick — while CI runs it with `--require-renderer`, where a missing rende
 comparator can be measured on its own, with no renderer at all, by
 `python3 corpus/render_gate.py --self-test`. It is CI-only too, and adds no image dependency
 anywhere.
+
+What the render gate reports today, run over the whole corpus with a real renderer: *17 decks, 17
+round trips identical by bytes, 0 rendered, 61 pages compared, 0 failures, 0 not measured*. The
+round trips are byte-identical packages, which the gate treats as strictly stronger than a render
+and does not spend renderer time on; the 61 rendered pages are the packages written on the embedded
+template, and they are reported rather than scored — the template's canvas differs from the corpus
+deck's, so the pages cannot be paired pixel for pixel and only the «did anything come out blank»
+check applies. So the gate has shown that every generated package loads and renders, and it has
+**not yet produced a single perceptual-diff score on real output**: the threshold is still the one
+chosen from the comparator's self-test, not one validated against renderer noise.
+
+If `soffice` is installed and still fails with `error while loading shared libraries: libreglo.so`,
+that is a dynamic-loader path problem, not a broken package — the Linux branch of the `soffice`
+wrapper does not export `LD_LIBRARY_PATH`. Prefix the command with
+`LD_LIBRARY_PATH=/usr/lib/libreoffice/program`, or fix it once with an
+`/etc/ld.so.conf.d/libreoffice.conf` naming that directory followed by `ldconfig`.
 
 Neither gate is the oracle for a `.pptx`, and neither pretends to be: schema-valid markup that
 hangs together as a package can still be repaired by PowerPoint, and LibreOffice has been measured
