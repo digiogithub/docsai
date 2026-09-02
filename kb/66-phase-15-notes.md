@@ -25,6 +25,9 @@ and the two facts `ppt/presentation.xml` states about the deck rather than about
 - `pptx/skeleton.rs`: what `rebuilt_parts` is **not**, written into the doc comment — see
   decision 2.
 - `docsai-convert`: the `SUPPORT` note, and two pipeline tests.
+- Later, in the same file: `align` returns an `Alignment` (the map plus the slots its third pass
+  order-filled when there was more than one), `slide_label` puts a slide in words, and
+  `rebuild_slides` warns when the pairing was a guess — see the last of the known losses below.
 
 ## Non-obvious decisions
 
@@ -105,6 +108,40 @@ and the two facts `ppt/presentation.xml` states about the deck rather than about
 - **The alignment is content-based** (decision 1). Two slides with the same name, the same title
   and the same shape count are interchangeable to it, and a swap of the two is invisible: the text
   lands right and the unmodelled markup of each part stays where it was.
+- **Two or more slides edited *and* reordered are paired by order, and that pairing is a guess.**
+  Written down after the fact, because the first account of this blind spot recorded only the
+  interchangeable-signature case above and this one is not the same. Package `[A, B]` against model
+  `[B', A']`: a retyped title is a different signature by definition, so pass 1 matches nothing;
+  neither slide is stated verbatim anywhere in the package any more, so pass 2 matches nothing
+  either; and pass 3 splices `B'` into `A`'s part. No text is lost and `p:sldIdLst` still comes out
+  in the model's order — but each slide inherits the other's layout, its `_rels` and its notes page.
+
+  Pass 3 is only a guess when **two or more** slots reach it. With exactly one the pairing is
+  forced: an edited slide has a different signature by definition (that is why it fell through) and
+  there is one free part. So `align` now returns an `Alignment` — the map, plus the slots the
+  order-fill decided when there was more than one — and `rebuild_slides` names them.
+
+  Three decisions, in the order they were taken:
+
+  1. **A warning, not a refusal.** The deck is written, correctly ordered, and every slide's text
+     lands where the edit meant it to; what is at risk is the unmodelled furniture around it.
+     Refusing would turn an ordinary two-slide edit into no file at all, which is a worse answer
+     than naming the risk — and unlike the added-slide refusal there is no corruption to prevent,
+     only an uncertainty to declare. Rule 3 asks that the loss be *reported*, not that it be
+     avoided at any cost.
+  2. **`Warning::Degraded`, no new variant.** It is exactly what that variant says — something was
+     mapped, imperfectly — and it is what the whole of this writer already uses to say it. Its
+     `Minor` severity fits: nothing is lost yet, and whether anything is depends on a fact only the
+     person who made the edit knows. Inventing an `AlignmentGuessed` would buy a severity nobody
+     needs and split a report that reads as one list today.
+  3. **The message names slides, not indices.** ``slide 1 ("Segunda, retitulada") into
+     `ppt/slides/slide2.xml` ``: the number the caller sees, the title they typed, and the part it
+     went into, which together are enough to open the file and check. A warning saying «two slots
+     were order-filled» would be true and useless.
+
+  What is *not* claimed: the writer does not know the pairing is wrong. Rejecting it on a signature
+  match was considered and is wrong — that would refuse every edited slide, which is the case pass 3
+  exists to serve.
 - **The whitespace between `p:sldId` entries is not preserved** when the list is restated: the
   entries themselves are the bytes that were read, joined without the indentation a
   pretty-printed deck had between them. Only in a list that actually changed, and it is
@@ -152,6 +189,14 @@ and the two facts `ppt/presentation.xml` states about the deck rather than about
 - `cargo test --workspace --no-fail-fast`: only the pre-existing `docx_roundtrip_is_idempotent`
   fails (`corpus/docx/footnotes.docx`, from `88ff8e11`, untouched by this increment).
   `clippy --workspace --all-targets -- -D warnings` clean, `fmt --all` applied.
+- The guessed-pairing warning added afterwards brought four more tests in `pptx::write` (159 in the
+  crate, 649 in the workspace): `two_slides_edited_and_reordered_name_the_pairing_as_a_guess`
+  asserts the warning names both slides and both parts;
+  `one_edited_slide_is_a_forced_pairing_and_says_nothing`,
+  `an_unedited_deck_reports_no_alignment_guess` — which also re-states the byte identity of every
+  slide part — and `a_pure_reorder_reports_no_alignment_guess` are the three shapes that must stay
+  silent, which is what says the warning is not a false one. The corpus-wide byte-identity tests
+  are unchanged and green.
 
 ## Next
 

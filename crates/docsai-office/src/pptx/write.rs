@@ -202,8 +202,8 @@ fn rebuild_slides(
     // Which package slide each model slide *is*. Neither the deck nor DocMark
     // carries an identity for a slide, so it is recovered from the content —
     // see [`align`], which is also where a slide the model added is refused.
-    let map = match align(&parts.entries, &deck.slides) {
-        Ok(map) => map,
+    let Alignment { map, guessed } = match align(&parts.entries, &deck.slides) {
+        Ok(alignment) => alignment,
         Err(reason) => {
             report.warn(Warning::Degraded {
                 what: "every slide of the written deck".into(),
@@ -212,6 +212,36 @@ fn rebuild_slides(
             return rebuild;
         }
     };
+    // Two or more slides that were edited *and* moved leave `align` nothing to
+    // match on, and the parts they get are the ones left over in order. The
+    // deck is still written, and written in the model's order — refusing an
+    // ordinary two-slide edit would cost more than the risk — but the pairing
+    // is a guess and the person who made the edit is the only one who can tell
+    // whether it is the right one, so it is named rather than assumed.
+    if !guessed.is_empty() {
+        let paired: Vec<String> = guessed
+            .iter()
+            .map(|&i| {
+                format!(
+                    "{} into `{}`",
+                    slide_label(i, &deck.slides[i]),
+                    parts.entries[map[i]].part
+                )
+            })
+            .collect();
+        report.warn(Warning::Degraded {
+            what: format!("the part alignment of {} slides", guessed.len()),
+            why: format!(
+                "each of them was edited and none of them is where the package still \
+                 says it is, so which package part a slide *is* could not be recovered \
+                 from what it says; they were paired with the parts left over, in order \
+                 — {} — and wherever that order is not the one the edit meant, the text \
+                 still lands but the slide takes over another one's layout, its \
+                 relationships and its notes page",
+                paired.join(", ")
+            ),
+        });
+    }
 
     // The deck's own part comes first: a slide list that cannot be restated is
     // a deck whose slides must not be rewritten either, because writing the
@@ -518,11 +548,21 @@ fn collapse(text: &str) -> String {
 ///    that are left. A deck where the same edit removed one slide and retyped
 ///    another still lands right, because the untouched slides anchor it.
 ///
+/// Pass 3 is forced when **one** slot reaches it — an edited slide has a
+/// different signature by definition, which is why it fell through, and with a
+/// single free part the pairing is the only one there is. With two or more it
+/// is a guess: `[A, B]` in the package against `[B', A']` in the model, both
+/// slides edited *and* reordered, matches nothing in passes 1 and 2 and pairs
+/// `B'` with `A`'s part. No text is lost and the deck comes out in the model's
+/// order, but each slide inherits the other's layout, its `_rels` and its notes
+/// page — so those slots come back in [`Alignment::guessed`] and the caller
+/// names them (rule 3: never degrade fidelity silently).
+///
 /// A part no model slide claims was **removed**. A model slide with no part
 /// left to claim is a slide that was *added*, and there is nothing to splice
 /// it into: writing a slide part from the model rather than into one is the
 /// deck-with-no-skeleton work of 15-G, so it is refused by name.
-fn align(entries: &[SlideEntry], slides: &[Slide]) -> Result<Vec<usize>, String> {
+fn align(entries: &[SlideEntry], slides: &[Slide]) -> Result<Alignment, String> {
     if slides.len() > entries.len() {
         return Err(format!(
             "the model holds {} slide(s) and the preserved package {}; a slide part \
@@ -561,13 +601,48 @@ fn align(entries: &[SlideEntry], slides: &[Slide]) -> Result<Vec<usize>, String>
             taken[j] = true;
         }
     }
+    // The order-fill, and the slots it filled: with more than one of them the
+    // pairing below is the writer's guess and not a match it can point at.
+    let pending: Vec<usize> = (0..slides.len()).filter(|&i| map[i].is_none()).collect();
     let mut free = (0..entries.len()).filter(|&j| !taken[j]);
-    for slot in map.iter_mut().filter(|slot| slot.is_none()) {
-        *slot = free.next();
+    for &i in &pending {
+        map[i] = free.next();
     }
-    map.into_iter()
+    let map = map
+        .into_iter()
         .collect::<Option<Vec<usize>>>()
-        .ok_or_else(|| "the model's slides cannot be matched to the package's".to_string())
+        .ok_or_else(|| "the model's slides cannot be matched to the package's".to_string())?;
+    let guessed = if pending.len() > 1 {
+        pending
+    } else {
+        Vec::new()
+    };
+    Ok(Alignment { map, guessed })
+}
+
+/// Which package slide part each model slide is written into, and how sure the
+/// writer is of it.
+struct Alignment {
+    /// One entry index into [`DeckParts::entries`] per model slide.
+    map: Vec<usize>,
+    /// The model slides whose part was decided by [`align`]'s third pass with
+    /// more than one slot still to fill — an order-fill, not a match. Empty for
+    /// every deck the first two passes settle, which is every deck the corpus
+    /// has, and empty too when a single slot reaches the third pass, where the
+    /// pairing is forced.
+    guessed: Vec<usize>,
+}
+
+/// A model slide in words a reader of a warning can act on: its number in the
+/// written deck and what it says, which is what the person editing it typed.
+fn slide_label(index: usize, slide: &Slide) -> String {
+    let said = slide
+        .title()
+        .map(|title| collapse(&title))
+        .filter(|title| !title.is_empty())
+        .or_else(|| slide.name.clone())
+        .unwrap_or_else(|| "untitled".to_string());
+    format!("slide {} (\"{said}\")", index + 1)
 }
 
 /// What restating the deck's own parts produced.
@@ -3333,6 +3408,135 @@ mod tests {
                 .iter()
                 .any(|warning| matches!(warning, Warning::Degraded { .. })),
             "a reorder this writer performed was reported as a loss: {:?}",
+            report.warnings
+        );
+    }
+
+    /// Retypes the first paragraph of one slide, which for these fixtures is
+    /// its title — the part of the signature `align` matches on.
+    fn retype_slide(document: &mut Document, index: usize, text: &str) {
+        let deck = presentation_mut(document);
+        let paragraph = first_paragraph(&mut deck.slides[index]).expect("a paragraph to retype");
+        paragraph.content = vec![docsai_model::text::Inline::Text(text.into())];
+    }
+
+    /// The warnings `align`'s third pass raises when it had to guess.
+    fn alignment_warnings(report: &ConversionReport) -> Vec<&str> {
+        report
+            .warnings
+            .iter()
+            .filter_map(|warning| match warning {
+                Warning::Degraded { what, why } if what.contains("part alignment") => {
+                    Some(why.as_str())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Two slides edited *and* moved: the pairing is an order-fill, and it says
+    /// so, naming both slides and the part each was written into.
+    ///
+    /// `[A, B]` in the package against `[B', A']` in the model matches nothing
+    /// in the first two passes — a retyped title is a different signature by
+    /// definition, and neither slide is where the package still says it is — so
+    /// the third pass pairs `B'` with `A`'s part. The deck is still written, and
+    /// in the model's order; what the caller cannot see without being told is
+    /// that each slide may have taken over the other's layout, `_rels` and
+    /// notes page.
+    #[test]
+    fn two_slides_edited_and_reordered_name_the_pairing_as_a_guess() {
+        let path = deck("basic-slides.pptx");
+        let (mut document, assets) = read_deck(&path);
+        presentation_mut(&mut document).slides.swap(0, 1);
+        retype_slide(&mut document, 0, "Segunda, retitulada");
+        retype_slide(&mut document, 1, "Primera, retitulada");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+
+        let guessed = alignment_warnings(&report);
+        assert_eq!(guessed.len(), 1, "{:?}", report.warnings);
+        let why = guessed[0];
+        for named in [
+            "slide 1 (\"Segunda, retitulada\")",
+            "slide 2 (\"Primera, retitulada\")",
+            "ppt/slides/slide1.xml",
+            "ppt/slides/slide2.xml",
+        ] {
+            assert!(
+                why.contains(named),
+                "the warning does not name {named}: {why}"
+            );
+        }
+    }
+
+    /// One slide edited and nothing moved: the third pass has a single free
+    /// part, the pairing is forced, and there is nothing to warn about.
+    #[test]
+    fn one_edited_slide_is_a_forced_pairing_and_says_nothing() {
+        let path = deck("basic-slides.pptx");
+        let (mut document, assets) = read_deck(&path);
+        retype_slide(&mut document, 0, "Sólo esta cambia");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            alignment_warnings(&report).is_empty(),
+            "a forced pairing was reported as a guess: {:?}",
+            report.warnings
+        );
+        let (after, _) = read_bytes(&written);
+        assert_eq!(
+            after.slides[0].title().as_deref(),
+            Some("Sólo esta cambia"),
+            "the edit did not land on the slide it was made on"
+        );
+    }
+
+    /// A deck nobody touched is still the deck that was read, and says nothing.
+    #[test]
+    fn an_unedited_deck_reports_no_alignment_guess() {
+        let path = deck("basic-slides.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (document, assets) = read_deck(&path);
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert_eq!(
+            members(&written),
+            members(&original),
+            "the package is not the one that was read"
+        );
+        for (part, bytes) in slide_parts_of(&original) {
+            assert_eq!(part_of(&written, &part), Some(bytes), "`{part}` moved");
+        }
+        assert!(
+            alignment_warnings(&report).is_empty(),
+            "an untouched deck was reported as a guess: {:?}",
+            report.warnings
+        );
+    }
+
+    /// A reorder with no edit is matched by the second pass — every slide is
+    /// still stated verbatim somewhere in the package — so the third pass never
+    /// runs and nothing is guessed.
+    #[test]
+    fn a_pure_reorder_reports_no_alignment_guess() {
+        let path = deck("basic-slides.pptx");
+        let (mut document, assets) = read_deck(&path);
+        presentation_mut(&mut document).slides.swap(0, 1);
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+
+        assert!(
+            alignment_warnings(&report).is_empty(),
+            "a reorder the second pass matched was reported as a guess: {:?}",
             report.warnings
         );
     }

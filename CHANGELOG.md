@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `.pptx` writer names the slides whose part alignment was a guess.** Which package part a
+  model slide *is* has to be recovered from what the slide says, because nothing in the chain
+  carries an identity for a slide. When two or more slides were both **edited and reordered**,
+  nothing is left to match on and the writer pairs them with the parts left over, in order. That
+  pairing is a guess: the text still lands and the deck comes out in the model's order, but where
+  the order is wrong a slide takes over another one's layout, its relationships and its notes page.
+  It is now reported with `Warning::Degraded`, naming each slide and the part it was written into.
+  A single slide reaching that last pass is a *forced* pairing — there is one free part — and says
+  nothing, as does an unedited deck and a reorder with no edit.
+
 ### Added
 
 - **The stale autofit scale on the way out** (plan v2 Phase 15, sixth increment): the one thing the
