@@ -11,11 +11,20 @@
 //! field puts the slide back exactly as it was written. A reordering that could
 //! not be undone would permute a deck on every round trip.
 //!
+//! That field survives inside this crate and does not survive DocMark, which
+//! writes a slide's shapes in reading order and says nothing about z-order. So
+//! the inverse the writer uses is [`of_tree`]: the same policy applied to the
+//! package's own shape tree, which still knows. Both directions are here on
+//! purpose — the day the ranking changes, it changes for the reader and for the
+//! writer in one edit.
+//!
 //! The order is also **total and deterministic**: every comparison ends in
 //! `z_index`, which is unique on a slide, so no two shapes ever compare equal
 //! and the result does not depend on the sort algorithm.
 
-use docsai_model::presentation::{Shape, ShapeKind};
+use docsai_model::presentation::{PhType, Placeholder, Shape, ShapeKind};
+
+use crate::xml::Element;
 
 /// Two shapes whose tops differ by less than this are on the same row, and are
 /// read left to right. An eighth of an inch: hand-placed boxes meant to line up
@@ -26,6 +35,49 @@ const ROW_BAND_EMU: i64 = 114_300;
 /// Sorts a slide's shapes into reading order, in place.
 pub(super) fn sort(shapes: &mut [Shape]) {
     shapes.sort_by_key(key);
+}
+
+/// The same order, computed over the **shape tree itself** rather than over the
+/// shapes read from it: for each reading position, the index of the `p:spTree`
+/// child that belongs in it.
+///
+/// This is the inverse the writer needs. A model that came straight from
+/// [`super::read_shapes`] carries the answer in `Shape::z_index`, but one that
+/// travelled through DocMark does not: DocMark-P writes a slide's shapes in
+/// reading order and says nothing about z-order, so the parser numbers them by
+/// position — correctly, because that is all the text says. The package still
+/// knows, and this reads it back, so a shape's text goes into the element it
+/// came out of even for a deck whose z-order and reading order disagree.
+///
+/// Only the fields [`key`] looks at are recovered, because only those decide
+/// the order: whether the element fills a placeholder slot, which one, and
+/// where it sits.
+pub(super) fn of_tree(children: &[&Element]) -> Vec<usize> {
+    let mut stubs: Vec<Shape> = children
+        .iter()
+        .enumerate()
+        .map(|(index, element)| stub(index as u32, element))
+        .collect();
+    sort(&mut stubs);
+    stubs.iter().map(|shape| shape.z_index as usize).collect()
+}
+
+/// A shape tree child as much of a [`Shape`] as [`key`] reads.
+fn stub(z_index: u32, element: &Element) -> Shape {
+    let ph = element.path(&["nvSpPr", "nvPr", "ph"]);
+    let kind = match ph {
+        Some(ph) => ShapeKind::Placeholder(Placeholder {
+            ph_type: PhType::parse(ph.attr("type").unwrap_or_default()),
+            idx: ph.attr_i64("idx").and_then(|idx| u32::try_from(idx).ok()),
+            ..Default::default()
+        }),
+        // Not a placeholder, and which of the other kinds it is does not
+        // matter: they all rank by position.
+        None => ShapeKind::TextBox { body: Vec::new() },
+    };
+    let mut shape = Shape::new(z_index, kind);
+    shape.geometry = super::raw::geometry_of(element);
+    shape
 }
 
 /// The sort key, as `(rank, placeholder index, row band, x, z-order)`.
@@ -137,6 +189,22 @@ mod tests {
     fn a_shape_with_no_position_keeps_source_order_at_the_end() {
         let shapes = vec![unplaced(0), box_at(1, 100, 100), unplaced(2)];
         assert_eq!(order(&shapes), vec![1, 0, 2]);
+    }
+
+    /// The same policy over the XML, which is what the writer inverts with.
+    #[test]
+    fn a_shape_tree_is_ordered_the_way_its_shapes_are() {
+        let xml = r#"<p:spTree xmlns:p="p" xmlns:a="a">
+            <p:sp><p:spPr><a:xfrm><a:off x="5000000" y="2000000"/></a:xfrm></p:spPr></p:sp>
+            <p:sp><p:nvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr></p:sp>
+            <p:sp><p:spPr><a:xfrm><a:off x="838200" y="2000000"/></a:xfrm></p:spPr></p:sp>
+            <p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr></p:sp>
+        </p:spTree>"#;
+        let tree = Element::parse("spTree", xml.as_bytes()).expect("the tree parses");
+        let children: Vec<&Element> = tree.children().collect();
+        // Title, body, then the two free boxes left to right — and the answer
+        // is stated as tree indices, so index 3 is the title element.
+        assert_eq!(of_tree(&children), vec![3, 1, 2, 0]);
     }
 
     #[test]

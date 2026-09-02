@@ -324,6 +324,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
                 let payload = serde_json::json!({
                     "source_format": outcome.source_format.as_str(),
                     "identical": outcome.identical,
+                    "fidelity": outcome.fidelity,
                     "report": outcome.report,
                 });
                 println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -342,6 +343,20 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
                         "  first: {} bytes, second: {} bytes",
                         outcome.first_markdown.len(),
                         outcome.second_markdown.len()
+                    );
+                }
+                // The per-category metric of architecture §4: what came back,
+                // over what went in, one line per kind of node. Both counts,
+                // not just the percentage: «tables 0/1» is the sentence a
+                // reader can act on, «0 %» is not.
+                for entry in &outcome.fidelity {
+                    eprintln!(
+                        "  {:<12} {:>4}/{:<4} {:>5.1} %{}",
+                        entry.category,
+                        entry.after,
+                        entry.before,
+                        entry.preserved(),
+                        if entry.intact() { "" } else { "  <-- lost" }
                     );
                 }
                 if !outcome.report.warnings.is_empty() {

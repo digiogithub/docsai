@@ -248,4 +248,7 @@ Three things about them are deliberate:
 
 15-H: `roundtrip` for presentations — the existing command extended to decks, with the
 per-category fidelity metric and **idempotence**: a second pass equal to the first over the whole
-pptx corpus.
+pptx corpus. Done, in [[69-phase-15-roundtrip]], where asking the question found two defects no
+test of this phase could see: a permission bit in the ZIP central directory that renamed the
+preserved package on every write, and a deck whose reading order is not its z-order having its text
+written into the wrong shapes.

@@ -7,6 +7,7 @@
 
 pub mod assets;
 pub mod batch;
+pub mod fidelity;
 pub mod inspect;
 pub mod loffice;
 pub mod outline;
@@ -20,6 +21,7 @@ pub mod tokens;
 pub use assets::DirAssetStore;
 pub use batch::{convert_batch, BatchOutcome, BatchReport};
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
+pub use fidelity::CategoryFidelity;
 pub use inspect::{inspect_path, InspectReport};
 pub use loffice::UseLoffice;
 pub use outline::{outline, outline_input, outline_path, Outline, OutlineNode};
@@ -138,7 +140,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Pptx,
         read: true,
         write: true,
-        note: "Phase 15 in progress: writing rebuilds a slide's text, its pictures, its tables, its links and its speaker notes into the preserved package, a preserved object goes back as the markup it came in as, and a slide removed or reordered restates the deck's own slide list; the autofit scale of a text body whose text changed is dropped and reported, because it was computed for text that is no longer there; a deck with no preserved package is written on an embedded template, with a layout chosen from the shape of each slide's content, and a slide or a notes page the package does not have is written rather than refused; a chart's data is still copied with a warning",
+        note: "Phase 15 in progress: writing rebuilds a slide's text, its pictures, its tables, its links and its speaker notes into the preserved package, a preserved object goes back as the markup it came in as, and a slide removed or reordered restates the deck's own slide list; the autofit scale of a text body whose text changed is dropped and reported, because it was computed for text that is no longer there; a deck with no preserved package is written on an embedded template, with a layout chosen from the shape of each slide's content, and a slide or a notes page the package does not have is written rather than refused; `docsai roundtrip` covers decks, and a deck nobody edited comes back as the package that was read, byte for byte; a chart's data is still copied with a warning",
     },
     FormatSupport {
         format: Format::DocMark,

@@ -294,8 +294,18 @@ gets a part of its own, spliced into the deck's slide list, its relationships an
 while every slide that was already there stays byte for byte the part that was read, and a note typed
 onto a slide with no notes page gets one. A preserved deck is untouched by any of it: seeding runs
 only when the model holds something the package does not.
-Next is **15-H**: `roundtrip` for presentations, with the per-category fidelity metric and
-idempotence over the corpus.
+The eighth is done: **`roundtrip` for decks, and the per-category fidelity metric** — `docsai
+roundtrip deck.pptx` runs the full cycle, and the metric `docs/architecture.md` §4 has described
+since Phase 0 is finally computed, for every format: a deck is counted as slides, shapes,
+paragraphs, pictures, tables, notes and objects, each with both counts beside it rather than one
+average. The whole pptx corpus is **idempotent** — seventeen decks, `.pptm` included, second pass
+equal to the first, every category at 100 %, every written package byte for byte the package that
+was read — and it was not when the question was first asked: the measurement found two silent
+defects, both now fixed in the writer. The `zip` writer ORs `S_IFREG` into every entry's mode, which
+changed the content hash of the preserved package and so renamed it on every write; and the writer
+indexed the shape tree by `Shape::z_index`, a number DocMark does not carry, so a deck whose reading
+order is not its z-order had every shape's text written into another shape.
+Next is **15-I**: CI gate 1, generated packages validated against the ECMA-376 XSDs.
 
 ## 2. Documents you must read before implementing
 

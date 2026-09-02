@@ -112,7 +112,7 @@ fn name_of(element: &Element) -> Option<String> {
 /// Where the stub sits. A group states its transform on `p:grpSpPr` and a
 /// graphic frame on `p:xfrm`, one level up from where a shape does; a stub with
 /// no position at all would be read last on every slide (see `order`).
-fn geometry_of(element: &Element) -> ShapeGeometry {
+pub(super) fn geometry_of(element: &Element) -> ShapeGeometry {
     let xfrm = element
         .path(&["spPr", "xfrm"])
         .or_else(|| element.path(&["grpSpPr", "xfrm"]))

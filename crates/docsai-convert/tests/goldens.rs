@@ -415,6 +415,65 @@ fn docx_roundtrip_is_idempotent() {
     }
 }
 
+/// pptx → DocMark → pptx → DocMark idempotence over the **whole** deck corpus,
+/// `.pptm` included, and the per-category metric beside it (15-H).
+///
+/// The two assertions answer different questions and both are the point. The
+/// metric says what survived — a deck that lost its only table is a deck with
+/// no table, whatever the diff looks like — and the identity says the second
+/// pass is the first, which is what makes an agent's edit a diff of the lines
+/// it touched instead of a rewrite of the file.
+///
+/// A deck round trip runs entirely in memory here: `roundtrip_file` with no
+/// output path writes no package and no assets, so the corpus directory is not
+/// touched by a test that reads every file in it.
+#[test]
+fn pptx_roundtrip_is_idempotent() {
+    let mut decks = documents("pptx", "pptx");
+    decks.extend(documents("pptx", "pptm"));
+    assert!(!decks.is_empty(), "the pptx corpus is empty");
+    for deck in decks {
+        let outcome =
+            docsai_convert::roundtrip_file(&deck, None, &docsai_convert::ConvertOptions::default())
+                .unwrap_or_else(|e| panic!("{}: {e}", deck.display()));
+        assert!(
+            docsai_convert::fidelity::intact(&outcome.fidelity),
+            "{}: the deck that came back is not the one that went in: {}",
+            deck.display(),
+            docsai_convert::fidelity::summary(&outcome.fidelity)
+        );
+        assert!(
+            outcome.identical,
+            "{}: the second DocMark pass differs from the first:\n--- first ---\n{}\n--- second ---\n{}",
+            deck.display(),
+            outcome.first_markdown,
+            outcome.second_markdown
+        );
+    }
+}
+
+/// The metric is not a formality: every corpus deck reports the categories it
+/// actually has, and none of the ones it has not.
+#[test]
+fn the_deck_metric_counts_what_a_deck_is_made_of() {
+    let deck = corpus_root().join("pptx").join("tables-simple.pptx");
+    let outcome =
+        docsai_convert::roundtrip_file(&deck, None, &docsai_convert::ConvertOptions::default())
+            .expect("the deck round-trips");
+    let named: Vec<&str> = outcome
+        .fidelity
+        .iter()
+        .map(|entry| entry.category)
+        .collect();
+    assert!(named.contains(&"slides"), "{named:?}");
+    assert!(named.contains(&"shapes"), "{named:?}");
+    assert!(named.contains(&"tables"), "{named:?}");
+    // This deck has no picture and no preserved object, and a category nothing
+    // has is a line that says nothing.
+    assert!(!named.contains(&"pictures"), "{named:?}");
+    assert!(!named.contains(&"objects"), "{named:?}");
+}
+
 /// `serialize(parse(md)) == md` over a corpus' goldens.
 ///
 /// Image goldens reference `assets/img-*.png` that only exist inside the

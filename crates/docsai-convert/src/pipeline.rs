@@ -10,6 +10,7 @@ use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
 
 use crate::assets::DirAssetStore;
+use crate::fidelity::CategoryFidelity;
 use crate::ConvertError;
 
 /// Settings for one conversion.
@@ -85,6 +86,9 @@ pub struct RoundtripOutcome {
     pub first_markdown: String,
     pub second_markdown: String,
     pub identical: bool,
+    /// What survived, counted by category (architecture §4): the document that
+    /// went in against the document that came back.
+    pub fidelity: Vec<CategoryFidelity>,
     pub report: ConversionReport,
     pub output_path: Option<PathBuf>,
 }
@@ -546,7 +550,7 @@ pub fn roundtrip_file(
     let (document1, source_format, mut report) =
         read_path_with_options(input, &mut store1, options)?;
     let office_format = match source_format {
-        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods => source_format,
+        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods | Format::Pptx => source_format,
         // Legacy .doc round-trips through docx (write path for .doc is out of scope).
         Format::Doc => Format::Docx,
         Format::DocMark => match &document1 {
@@ -630,7 +634,17 @@ pub fn roundtrip_file(
     let mut written = Vec::new();
     if output.is_some() {
         let dir = assets_dir;
+        // A deck's preserved package is an asset the document names and nothing
+        // displays: writing it out here would drop a second copy of the whole
+        // package beside the package, under a name nothing points at.
+        let skeleton = match &document3 {
+            Document::Presentation(deck) => deck.skeleton.as_ref().map(|s| s.asset.clone()),
+            _ => None,
+        };
         for id in store3.ids() {
+            if Some(&id) == skeleton.as_ref() {
+                continue;
+            }
             if let (Some(bytes), Some(info)) = (store3.get(&id), store3.info(&id)) {
                 let _ = std::fs::create_dir_all(&dir);
                 let path = dir.join(&info.file_name);
@@ -648,11 +662,25 @@ pub fn roundtrip_file(
             why: "second DocMark pass differs from the first".into(),
         });
     }
+    // Counted between the document that was read and the document that came
+    // back, not between the two DocMark texts: a category is a fact about the
+    // document, and the text is one rendering of it.
+    let fidelity = crate::fidelity::compare(&document1, &document3);
+    if !crate::fidelity::intact(&fidelity) {
+        report.warn(docsai_model::Warning::Degraded {
+            what: "the round trip".into(),
+            why: format!(
+                "the document that came back is not the one that went in: {}",
+                crate::fidelity::summary(&crate::fidelity::changed(&fidelity))
+            ),
+        });
+    }
     Ok(RoundtripOutcome {
         source_format,
         first_markdown: md1,
         second_markdown: md2,
         identical,
+        fidelity,
         report,
         output_path: output.map(Path::to_path_buf),
     })
@@ -884,6 +912,56 @@ mod tests {
         assert!(out.exists());
         let bytes = std::fs::read(&out).unwrap();
         assert!(bytes.starts_with(b"PK"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 15-H: a deck round trip writes the package and its media, and **not** a
+    /// second copy of the package.
+    ///
+    /// The preserved skeleton is an asset like any other as far as the store is
+    /// concerned, so dumping the store beside the output would leave the whole
+    /// original next to the file it was written into, under a name nothing
+    /// refers to.
+    #[test]
+    fn a_deck_roundtrip_writes_the_package_and_not_a_copy_of_it() {
+        let dir = temp_dir("deck-roundtrip");
+        let deck = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus/pptx")
+            .join("images-anchored.pptx");
+        let out = dir.join("out.pptx");
+        let outcome =
+            roundtrip_file(&deck, Some(&out), &ConvertOptions::default()).expect("deck roundtrip");
+        assert!(outcome.identical, "the deck should round-trip cleanly");
+        assert!(out.exists(), "the package was not written");
+        // The one asset this deck has that a viewer shows.
+        let assets: Vec<String> = std::fs::read_dir(dir.join("assets"))
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(assets.len(), 1, "{assets:?}");
+        assert!(assets[0].ends_with(".png"), "{assets:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The written package is the package that was read: a deck nobody edited
+    /// comes back byte for byte, external file attributes included.
+    #[test]
+    fn a_deck_roundtrip_writes_back_the_bytes_it_read() {
+        let dir = temp_dir("deck-bytes");
+        let deck = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus/pptx")
+            .join("basic-slides.pptx");
+        let out = dir.join("out.pptx");
+        roundtrip_file(&deck, Some(&out), &ConvertOptions::default()).expect("deck roundtrip");
+        assert_eq!(
+            std::fs::read(&out).unwrap(),
+            std::fs::read(&deck).unwrap(),
+            "the package that came out is not the package that went in"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -373,7 +373,7 @@ impl ShapeTally {
     }
 }
 
-fn stats_from_text(text: &TextDocument, style_count: usize) -> ConversionStats {
+pub(crate) fn stats_from_text(text: &TextDocument, style_count: usize) -> ConversionStats {
     let mut stats = ConversionStats {
         styles: style_count as u32,
         ..Default::default()
@@ -387,7 +387,7 @@ fn stats_from_text(text: &TextDocument, style_count: usize) -> ConversionStats {
     stats
 }
 
-fn stats_from_presentation(
+pub(crate) fn stats_from_presentation(
     deck: &docsai_model::Presentation,
     style_count: usize,
 ) -> ConversionStats {
@@ -435,7 +435,10 @@ fn count_shape_images(
     }
 }
 
-fn stats_from_workbook(book: &docsai_model::Workbook, style_count: usize) -> ConversionStats {
+pub(crate) fn stats_from_workbook(
+    book: &docsai_model::Workbook,
+    style_count: usize,
+) -> ConversionStats {
     let mut stats = ConversionStats {
         styles: style_count as u32,
         sheets: book.sheets.len() as u32,

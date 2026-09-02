@@ -1418,11 +1418,16 @@ fn rewrite_slide(
             Reinjected::Kept(reason) => kept.push(reason),
         }
     }
-    for shape in &slide.shapes {
-        let Some(element) = children.get(shape.z_index as usize) else {
+    // Which tree child each model shape is. The model's shapes are in reading
+    // order — that is what the reader produced and what DocMark writes — so the
+    // package's own reading order is the map, and `Shape::z_index` is not
+    // consulted: a deck that travelled through DocMark carries the position it
+    // was written at there, not the z-order the tree has (`order::of_tree`).
+    let reading = super::order::of_tree(&children);
+    for (position, shape) in slide.shapes.iter().enumerate() {
+        let Some(element) = reading.get(position).and_then(|at| children.get(*at)) else {
             return Err(format!(
-                "shape z-index {} is outside the slide's shape tree",
-                shape.z_index
+                "shape {position} is outside the slide's shape tree"
             ));
         };
         let (body, bulleted) = match &shape.kind {
@@ -2525,17 +2530,23 @@ pub(super) fn esc_attr(value: &str) -> String {
 /// inflated on the way through, so no entry can come out re-deflated by a
 /// different encoder into different bytes.
 ///
-/// One field does change, and it is worth naming so nobody spends an afternoon
-/// on it: the **external file attributes** of each central-directory entry.
-/// `zip` builds them from the source entry's Unix mode but ORs `S_IFREG` in
-/// (`ZipFile::options`), so a corpus deck written by Python's `zipfile` with
-/// mode `0o600` comes back as `0o100600`. The archive is therefore the same
-/// length and the same content with a different permission bit — nothing an
-/// OPC consumer reads, and the reason the test for this asserts equality
-/// member by member rather than over the whole file.
-fn reemit<W: Write + Seek>(package: &[u8], rebuild: &Rebuild, writer: W) -> Result<(), WriteError> {
+/// One field the `zip` writer will not leave alone is the **external file
+/// attributes** of each central-directory entry: it builds them from the source
+/// entry's Unix mode but ORs `S_IFREG` in (`FileOptions::normalize`), so a deck
+/// written by Python's `zipfile` with mode `0o600` would come back as
+/// `0o100600`. Nothing in OPC reads that field, but the deck's *identity* does:
+/// a preserved package is addressed by the content hash of its bytes
+/// (`skeleton: assets/_skeleton/deck-<hash>.pptx`), so a permission bit that
+/// moves renames the file and makes the round trip look like an edit. The
+/// attributes are therefore put back as they were, entry by entry, once the
+/// archive is built — see [`restore_external_attributes`].
+fn reemit<W: Write + Seek>(
+    package: &[u8],
+    rebuild: &Rebuild,
+    mut writer: W,
+) -> Result<(), WriteError> {
     let mut source = zip::ZipArchive::new(Cursor::new(package))?;
-    let mut out = zip::ZipWriter::new(writer);
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
     for index in 0..source.len() {
         let entry = source.by_index_raw(index)?;
         if entry.is_dir() {
@@ -2571,8 +2582,91 @@ fn reemit<W: Write + Seek>(package: &[u8], rebuild: &Rebuild, writer: W) -> Resu
         out.start_file(name.as_str(), added_options())?;
         out.write_all(bytes)?;
     }
-    out.finish()?;
+    let mut bytes = out.finish()?.into_inner();
+    restore_external_attributes(package, &mut bytes);
+    writer.write_all(&bytes)?;
     Ok(())
+}
+
+/// Puts each entry's external file attributes back to what the source package
+/// said, so a package copied through [`reemit`] is byte for byte the one that
+/// was read.
+///
+/// The `zip` writer offers no way to state those four bytes verbatim — it ORs
+/// `S_IFREG` into every mode it writes — and they live only in the central
+/// directory, never in a local header, so the correction is a fixed-width
+/// overwrite at a known offset of each record rather than a re-encode. A member
+/// the source package did not have keeps what the writer chose for it.
+///
+/// A directory it cannot parse — a zip64 archive, an archive with a comment
+/// whose bytes look like a header — is left exactly as the writer produced it:
+/// this is a cosmetic correction, and a wrong guess at an offset would not be.
+fn restore_external_attributes(source: &[u8], written: &mut [u8]) {
+    let Some(before) = central_directory(source) else {
+        return;
+    };
+    let Some(after) = central_directory(written) else {
+        return;
+    };
+    let attributes: BTreeMap<&str, [u8; 4]> = before
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.external_attributes))
+        .collect();
+    for entry in after {
+        if let Some(original) = attributes.get(entry.name.as_str()) {
+            written[entry.attributes_at..entry.attributes_at + 4].copy_from_slice(original);
+        }
+    }
+}
+
+/// One central-directory record: the member's name, its external attributes and
+/// where in the archive those four bytes are.
+struct DirectoryEntry {
+    name: String,
+    external_attributes: [u8; 4],
+    attributes_at: usize,
+}
+
+/// The central directory of a ZIP archive, read by walking it from the
+/// end-of-central-directory record rather than by scanning for signatures — a
+/// deflated part can contain any four bytes, including `PK\x01\x02`.
+///
+/// `None` for anything this simple reader does not fully understand: a
+/// zip64 archive, a truncated one, a record that does not start where the
+/// previous one ended.
+fn central_directory(archive: &[u8]) -> Option<Vec<DirectoryEntry>> {
+    const EOCD: [u8; 4] = [b'P', b'K', 5, 6];
+    const RECORD: [u8; 4] = [b'P', b'K', 1, 2];
+    // The end record is 22 bytes plus a comment of at most 64 KiB.
+    let start = archive.len().checked_sub(22)?;
+    let floor = start.saturating_sub(u16::MAX as usize);
+    let eocd = (floor..=start).rev().find(|&i| archive[i..i + 4] == EOCD)?;
+    let count = u16::from_le_bytes(archive[eocd + 10..eocd + 12].try_into().ok()?) as usize;
+    let offset = u32::from_le_bytes(archive[eocd + 16..eocd + 20].try_into().ok()?) as usize;
+    if offset == u32::MAX as usize || count == u16::MAX as usize {
+        return None; // zip64: the real values are in a record this does not read
+    }
+    let mut entries = Vec::with_capacity(count);
+    let mut at = offset;
+    for _ in 0..count {
+        if archive.len() < at + 46 || archive[at..at + 4] != RECORD {
+            return None;
+        }
+        let name_len = u16::from_le_bytes(archive[at + 28..at + 30].try_into().ok()?) as usize;
+        let extra_len = u16::from_le_bytes(archive[at + 30..at + 32].try_into().ok()?) as usize;
+        let comment_len = u16::from_le_bytes(archive[at + 32..at + 34].try_into().ok()?) as usize;
+        let name_at = at + 46;
+        let name = std::str::from_utf8(archive.get(name_at..name_at + name_len)?)
+            .ok()?
+            .to_string();
+        entries.push(DirectoryEntry {
+            name,
+            external_attributes: archive[at + 38..at + 42].try_into().ok()?,
+            attributes_at: at + 38,
+        });
+        at = name_at + name_len + extra_len + comment_len;
+    }
+    Some(entries)
 }
 
 /// How a member the original package did not have is stored.
@@ -2774,6 +2868,45 @@ mod tests {
             .collect()
     }
 
+    /// 15-H: a deck whose z-order and reading order disagree is written back
+    /// into the *elements the shapes came from*, not into the tree positions
+    /// their reading order happens to have.
+    ///
+    /// This is what a model that travelled through DocMark looks like: the
+    /// parser numbers the shapes by the position they were written at, because
+    /// DocMark-P writes them in reading order and says nothing about z-order.
+    /// Before `order::of_tree` the writer took that number for a tree index and
+    /// put every shape's text into a different shape's box — silently, and only
+    /// on a deck whose two orders differ, which is why an idempotence run over
+    /// the corpus is what found it.
+    #[test]
+    fn a_deck_renumbered_by_the_docmark_parser_still_lands_in_the_right_shapes() {
+        let path = deck("reading-order.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        let source: Vec<u32> = presentation(&document).slides[0]
+            .shapes
+            .iter()
+            .map(|shape| shape.z_index)
+            .collect();
+        assert_ne!(
+            source,
+            (0..source.len() as u32).collect::<Vec<_>>(),
+            "the fixture is meant to have a reading order that is not its z-order"
+        );
+        for (position, shape) in presentation_mut(&mut document).slides[0]
+            .shapes
+            .iter_mut()
+            .enumerate()
+        {
+            shape.z_index = position as u32;
+        }
+        assert!(
+            write_deck(&document, &assets) == original,
+            "the renumbered deck did not come back as the deck that was read"
+        );
+    }
+
     /// The claim of the increment, over the whole corpus: what goes out is what
     /// came in — not «the same parts», the same archive.
     #[test]
@@ -2789,13 +2922,14 @@ mod tests {
                 members(&original),
                 "{name}: the archive is not the one that was read"
             );
-            // Same length, because the one field that does move — the external
-            // attributes of a central-directory entry, see `reemit` — is fixed
-            // width. A size that drifts means something was recompressed.
-            assert_eq!(
-                written.len(),
-                original.len(),
-                "{name}: the package changed size"
+            // Byte for byte, not merely member for member: the deck's own
+            // identity is the content hash of these bytes, so a field that
+            // drifts renames the preserved package and makes a round trip look
+            // like an edit (15-H). The external attributes `zip` insists on
+            // rewriting are put back by `reemit`.
+            assert!(
+                written == original,
+                "{name}: the package is not the one that was read"
             );
         }
     }

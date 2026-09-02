@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A written `.pptx` is now the package that was read, byte for byte.** The `zip` writer ORs
+  `S_IFREG` into every entry's mode, so a deck's central directory came out with a permission bit it
+  did not go in with — fifteen bytes no OPC consumer reads. It renamed the deck: a preserved package
+  is addressed by the content hash of its bytes (`skeleton: assets/_skeleton/deck-<hash>.pptx`), so
+  converting a deck back and forth minted a new copy of the package every time and made every round
+  trip look like an edit. The external file attributes are now restored entry by entry after the
+  archive is built.
+- **A `.pptx` whose reading order is not its z-order is no longer written with its text permuted.**
+  The reader returns a slide's shapes in reading order and keeps the shape tree index in
+  `Shape::z_index`; DocMark writes the shapes in reading order and does not carry that index, so a
+  deck that travelled through DocMark arrived at the writer numbered by position. The writer took
+  those numbers for tree indices and wrote every shape's text into a different shape's box —
+  silently, and only for a deck whose two orders disagree. The map from a model shape to its element
+  is now the package's own reading order, computed from the tree.
 - **The `.pptx` writer names the slides whose part alignment was a guess.** Which package part a
   model slide *is* has to be recovered from what the slide says, because nothing in the chain
   carries an identity for a slide. When two or more slides were both **edited and reordered**,
@@ -25,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from.
 
 ### Added
+
+- **`roundtrip` for presentations, with the per-category fidelity metric** (plan v2 Phase 15, eighth
+  increment): `docsai roundtrip deck.pptx` runs `pptx → DocMark → pptx → DocMark` and compares both
+  the two DocMark passes and the two documents. The metric is `docs/architecture.md` §4's, computed
+  for the first time and for every format: paragraphs, headings, lists, tables, images and footnotes
+  for a text document; sheets, cells and formulas for a workbook; and for a deck **slides, shapes,
+  paragraphs, pictures, tables, notes and objects** — the units a person navigates, selects and
+  reads, plus the ones this project keeps as a stub over preserved markup. Each category prints both
+  counts (`pictures 0/1`, not `0 %`), a category neither side has is not printed, and `--json`
+  carries them. The whole `corpus/pptx` — seventeen decks, `.pptm` included — round-trips idempotent
+  with every category at 100 %, gated by `pptx_roundtrip_is_idempotent`.
 
 - **The deck with no skeleton** (plan v2 Phase 15, seventh increment): a deck that never had a
   package — Markdown typed by hand, with no attribute anywhere — is written on a **default template

@@ -117,7 +117,13 @@ notes page for a slide that has none.
 ### 15-H — `roundtrip` for presentations
 
 The existing `roundtrip` command extended to decks, with the per-category fidelity metric, and
-**idempotence**: a second pass equals the first over the whole pptx corpus.
+**idempotence**: a second pass equals the first over the whole pptx corpus. Done, in
+[[69-phase-15-roundtrip]], where extending the command was four lines and making its answer *true*
+was the increment: the measurement found two defects — the external file attributes `zip` rewrites
+on every entry, which changed the content hash of the preserved package and so renamed it on every
+write, and the writer indexing the shape tree by `Shape::z_index`, which DocMark does not carry, so
+a deck whose reading order is not its z-order had every shape's text written into another shape.
+Both are fixed in the writer; the metric's categories for a deck are stated there.
 
 ### 15-I — CI gate 1: schema validation
 
@@ -139,7 +145,10 @@ status and the acceptance criteria checked here.
 
 ## Acceptance criteria (tracked here)
 
-- [ ] pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus.
+- [x] pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus — 15-H
+      ([[69-phase-15-roundtrip]]). All seventeen decks of `corpus/pptx`, `.pptm` included: the
+      second DocMark pass is the first, every category of the per-category metric is 100 %, and
+      each written package is byte for byte the package that was read.
 - [ ] Both CI gates green on the corpus.
 - [ ] No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).
 - [x] A deck written from *attribute-free* Markdown opens correctly with a sensible layout —

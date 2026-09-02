@@ -37,7 +37,7 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
-| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused (v2 P15 continues) |
+| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused. `docsai roundtrip deck.pptx` closes the cycle and reports the per-category fidelity metric; the whole deck corpus round-trips idempotent, and a deck nobody edited comes back as the package that was read, byte for byte (v2 P15 continues) |
 | PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
 | OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
@@ -120,7 +120,8 @@ docsai search report.docx "riesgo" --json --limit 5 # machine-readable, capped
 docsai tokens report.docx                          # what the document costs an LLM
 docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary
-docsai roundtrip report.docx
+docsai roundtrip report.docx                       # full cycle, with per-category fidelity
+docsai roundtrip deck.pptx --json                  # same for a deck, machine-readable
 docsai mcp                                          # MCP server over stdio (Phase 7)
 ```
 
