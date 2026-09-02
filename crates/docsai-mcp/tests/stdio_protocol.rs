@@ -28,6 +28,9 @@ fn test_config() -> McpConfig {
         // checks.
         structured: true,
         max_inline_tokens: None,
+        // The read cache a real server runs with, so the protocol suite runs
+        // over it too and would catch an answer the cache changed.
+        cache: Some(docsai_convert::ConvertCache::shared()),
     }
 }
 

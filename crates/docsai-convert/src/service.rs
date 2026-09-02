@@ -5,12 +5,14 @@
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use docsai_docmark::{Fidelity, Options as DocMarkOptions};
 use docsai_model::assets::AssetStore;
 use docsai_model::{ConversionReport, Document, Format, MemoryAssetStore};
 
 use crate::assets::DirAssetStore;
+use crate::cache::{CacheKey, CachedRead, RecordingStore};
 use crate::inspect::{build_report, InspectReport};
 use crate::pipeline::{
     is_stdout_path, read_document_with_options, read_path_with_options, ConvertOptions,
@@ -296,16 +298,95 @@ pub(crate) fn with_scratch_document<T>(
     Ok((f(&document, &assets, &docmark), label))
 }
 
+/// Reads a document for every read-only primitive, through the cache when the
+/// caller keeps one (Phase 16-H).
+///
+/// This is the single place the MCP tools read a document, which is why the
+/// cache lives here and nowhere else: `outline_document`, `search_document`,
+/// `read_selection`, `inspect_document` and `estimate_tokens` all arrive here,
+/// and the CLI's own `convert_file` does not.
+///
+/// The cache refuses — reads normally and stores nothing — whenever it cannot
+/// promise a hit is indistinguishable from a miss:
+///
+/// - the caller kept no cache;
+/// - the asset store already holds something, so the puts this read makes are
+///   not the whole of the store state a hit would have to reproduce;
+/// - the input cannot be identified (a path that will not canonicalise, bytes
+///   that cannot be read);
+/// - the source turned out to be a legacy `.doc`, whose read may or may not
+///   have gone through LibreOffice depending on what was installed at that
+///   moment — a property of the machine, not of the document, and not
+///   something the key can carry honestly.
 fn load_document(
     source: SourceInput<'_>,
     assets: &mut dyn AssetStore,
     options: &ConvertOptions,
 ) -> Result<(Document, Format, ConversionReport, Option<String>), ConvertError> {
-    match source {
-        SourceInput::Path(path) => {
-            let (document, format, report) = read_path_with_options(path, assets, options)?;
-            Ok((document, format, report, Some(path.display().to_string())))
+    let label = match source {
+        SourceInput::Path(path) => Some(path.display().to_string()),
+        SourceInput::Bytes { filename, .. } => Some(filename.to_string()),
+    };
+
+    let Some(cache) = options.cache.clone() else {
+        let (document, format, report) = read_source(source, assets, options)?;
+        return Ok((document, format, report, label));
+    };
+
+    let key = if assets.is_empty() {
+        cache_key(&source, options)
+    } else {
+        None
+    };
+    let Some(key) = key else {
+        cache.record_refusal();
+        let (document, format, report) = read_source(source, assets, options)?;
+        return Ok((document, format, report, label));
+    };
+
+    if let Some(hit) = cache.lookup(&key) {
+        // Replay the read's puts so the caller's store ends up in the state a
+        // real read would have left it in — same ids, same manifest, and the
+        // same files on disk for a directory store.
+        for bytes in &hit.assets {
+            assets
+                .put(bytes)
+                .map_err(|e| ConvertError::Invalid(e.to_string()))?;
         }
+        return Ok((hit.document.clone(), hit.format, hit.report.clone(), label));
+    }
+
+    cache.record_miss();
+    let mut recorder = RecordingStore::new(assets);
+    let read = read_source(source, &mut recorder, options);
+    let (asset_puts, asset_bytes) = recorder.into_recording();
+    let (document, format, report) = read?;
+
+    if !crate::loffice::benefits_from_loffice(format) {
+        let entry = Arc::new(CachedRead {
+            document: document.clone(),
+            format,
+            report: report.clone(),
+            assets: asset_puts,
+            // The IR tree has no size hook and adding one is another
+            // increment's work, so the input length stands in for it: an
+            // entry is charged its input plus the media it carries, which is
+            // the part that can reach tens of megabytes on its own.
+            weight: key.content_len + asset_bytes,
+        });
+        cache.insert(key, entry);
+    }
+    Ok((document, format, report, label))
+}
+
+/// The uncached read, whichever way the input arrives.
+fn read_source(
+    source: SourceInput<'_>,
+    assets: &mut dyn AssetStore,
+    options: &ConvertOptions,
+) -> Result<(Document, Format, ConversionReport), ConvertError> {
+    match source {
+        SourceInput::Path(path) => read_path_with_options(path, assets, options),
         SourceInput::Bytes { data, filename } => {
             if data.is_empty() {
                 return Err(ConvertError::Invalid(
@@ -313,11 +394,37 @@ fn load_document(
                 ));
             }
             let mut cursor = Cursor::new(data);
-            let (document, format, report) =
-                read_document_with_options(&mut cursor, Some(filename), assets, options)?;
-            Ok((document, format, report, Some(filename.to_string())))
+            read_document_with_options(&mut cursor, Some(filename), assets, options)
         }
     }
+}
+
+/// Builds the key for this input, or `None` when the input cannot be named
+/// exactly — in which case the caller must not use the cache at all.
+///
+/// The origin is part of the key and not only the bytes: a DocMark file
+/// resolves its sidecars against its own directory, so the same bytes in two
+/// places are two different documents.
+fn cache_key(source: &SourceInput<'_>, options: &ConvertOptions) -> Option<CacheKey> {
+    let (origin, bytes) = match source {
+        SourceInput::Path(path) => {
+            let canonical = std::fs::canonicalize(path).ok()?;
+            let bytes = std::fs::read(&canonical).ok()?;
+            (canonical.display().to_string(), bytes)
+        }
+        SourceInput::Bytes { data, filename } => {
+            if data.is_empty() {
+                return None;
+            }
+            (format!("bytes:{filename}"), data.to_vec())
+        }
+    };
+    Some(CacheKey {
+        content_hash: docsai_model::assets::content_hash(&bytes),
+        content_len: bytes.len(),
+        source: origin,
+        options: options.cache_fingerprint(),
+    })
 }
 
 fn load_document_into(

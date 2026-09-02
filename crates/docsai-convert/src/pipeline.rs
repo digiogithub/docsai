@@ -3,6 +3,7 @@
 use std::fs::File;
 use std::io::{Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
 use docsai_model::addressing::IdPolicy;
@@ -38,6 +39,17 @@ pub struct ConvertOptions {
     /// (DocMark spec §2). Never rounds: raising it buys readable units for
     /// lengths two decimals cannot name, and nothing else.
     pub precision: u8,
+    /// The read cache this conversion may use (Phase 16-H).
+    ///
+    /// `None` — the default — means every read parses. A long-lived process
+    /// that answers several questions about one document (the MCP server)
+    /// keeps a [`ConvertCache`](crate::ConvertCache) here and shares it across
+    /// calls; a one-shot process gains nothing from one and pays for the
+    /// content hash, so the CLI leaves it unset.
+    ///
+    /// The cache only ever removes work: with it and without it a conversion
+    /// produces the same DocMark, the same assets and the same warnings.
+    pub cache: Option<Arc<crate::cache::ConvertCache>>,
 }
 
 impl Default for ConvertOptions {
@@ -52,6 +64,7 @@ impl Default for ConvertOptions {
             raw: RawPolicy::default(),
             ids: None,
             precision: docsai_model::units::DEFAULT_PRECISION,
+            cache: None,
         }
     }
 }
@@ -64,6 +77,35 @@ impl ConvertOptions {
         } else {
             IdPolicy::Never
         })
+    }
+
+    /// The part of these options a cache key has to carry.
+    ///
+    /// The destructuring is exhaustive on purpose. Adding a field to
+    /// [`ConvertOptions`] stops this function compiling, which forces whoever
+    /// adds it to decide whether it changes a read — the alternative is a new
+    /// option that silently makes the cache serve the wrong document.
+    ///
+    /// Everything except the cache handle itself goes in, even the fields that
+    /// no reader consults today (`fidelity`, `precision`, the style map…):
+    /// keying too widely costs a hit, keying too narrowly costs correctness.
+    pub(crate) fn cache_fingerprint(&self) -> String {
+        let ConvertOptions {
+            fidelity,
+            assets_dir,
+            target,
+            use_loffice,
+            style_map,
+            max_cells,
+            raw,
+            ids,
+            precision,
+            cache: _,
+        } = self;
+        format!(
+            "{fidelity:?}|{assets_dir:?}|{target:?}|{use_loffice:?}|{style_map:?}|\
+             {max_cells:?}|{raw:?}|{ids:?}|{precision:?}"
+        )
     }
 }
 

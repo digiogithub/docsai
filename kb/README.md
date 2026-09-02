@@ -91,6 +91,7 @@ Practical difference between the two folders:
 | [75 — Phase 16 plan](75-phase-16-plan.md) | Charts as data, objects confirmed end to end, comments, thumbnails and the cache |
 | [76 — Phase 16 A](76-phase-16-chart-data.md) | The chart's series in the IR, its workbook as an asset, and the two copies of the truth compared |
 | [77 — Phase 16 B](77-phase-16-chart-docmark.md) | The chart's series as a GFM table in DocMark, gaps that stay gaps, and the parser that reads a hand-typed one |
+| [79 — Phase 16 H](79-phase-16-cache.md) | The read cache: a hit indistinguishable from a miss, the key that carries the origin, and the asset store replayed |
 
 ## Status in one line
 

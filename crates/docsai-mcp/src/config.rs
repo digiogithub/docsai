@@ -1,6 +1,9 @@
 //! Runtime limits for the MCP server (architecture §6).
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use docsai_convert::ConvertCache;
 
 /// Environment variable: maximum accepted input size in bytes (path reads and base64).
 pub const ENV_MAX_INPUT_BYTES: &str = "DOCSAI_MCP_MAX_INPUT_BYTES";
@@ -11,6 +14,9 @@ pub const ENV_STRUCTURED: &str = "DOCSAI_MCP_STRUCTURED";
 /// Environment variable: largest DocMark a response will carry inline, in
 /// tokens (`0` disables the cap).
 pub const ENV_MAX_INLINE_TOKENS: &str = "DOCSAI_MCP_MAX_INLINE_TOKENS";
+/// Environment variable: how many bytes of parsed documents the read cache may
+/// hold (`0` turns the cache off).
+pub const ENV_CACHE_BYTES: &str = "DOCSAI_MCP_CACHE_BYTES";
 
 /// Default maximum input size: 50 MiB.
 pub const DEFAULT_MAX_INPUT_BYTES: u64 = 50 * 1024 * 1024;
@@ -35,6 +41,15 @@ pub struct McpConfig {
     pub structured: bool,
     /// Ceiling on inline DocMark, in tokens; `None` means no ceiling.
     pub max_inline_tokens: Option<usize>,
+    /// The read cache shared by every tool call this server serves
+    /// (Phase 16-H), or `None` when the operator turned it off with
+    /// `DOCSAI_MCP_CACHE_BYTES=0`.
+    ///
+    /// The server is the process the cache exists for: an agent outlines a
+    /// document, searches it and then reads a selection from it, and without
+    /// this those are three reads of the same bytes. It changes no answer —
+    /// only how long the second and third take.
+    pub cache: Option<Arc<ConvertCache>>,
 }
 
 impl Default for McpConfig {
@@ -70,11 +85,32 @@ impl McpConfig {
             Some(tokens) => Some(tokens),
             None => Some(DEFAULT_MAX_INLINE_TOKENS),
         };
+        let cache = match std::env::var(ENV_CACHE_BYTES)
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+        {
+            Some(0) => None,
+            Some(bytes) => Some(Arc::new(ConvertCache::with_capacity(
+                bytes,
+                docsai_convert::DEFAULT_MAX_ENTRIES,
+            ))),
+            None => Some(ConvertCache::shared()),
+        };
         McpConfig {
             max_input_bytes,
             timeout,
             structured,
             max_inline_tokens,
+            cache,
+        }
+    }
+
+    /// Base conversion options for this server: the read cache and nothing
+    /// else. Every tool that reads a document starts from this.
+    pub fn convert_options(&self) -> docsai_convert::ConvertOptions {
+        docsai_convert::ConvertOptions {
+            cache: self.cache.clone(),
+            ..Default::default()
         }
     }
 }
@@ -90,6 +126,7 @@ mod tests {
             timeout: Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
             structured: false,
             max_inline_tokens: Some(DEFAULT_MAX_INLINE_TOKENS),
+            cache: Some(ConvertCache::shared()),
         };
         assert!(cfg.max_input_bytes >= 1024 * 1024);
         assert!(cfg.timeout.unwrap().as_secs() >= 1);
@@ -98,5 +135,19 @@ mod tests {
             "one representation per response by default"
         );
         assert!(cfg.max_inline_tokens.unwrap() > 0);
+        assert!(cfg.convert_options().cache.is_some());
+    }
+
+    #[test]
+    fn the_cache_is_on_by_default() {
+        let cfg = McpConfig::from_env();
+        // Only meaningful when the environment has not turned it off.
+        if std::env::var(ENV_CACHE_BYTES).is_err() {
+            assert!(cfg.cache.is_some());
+            assert_eq!(
+                cfg.cache.as_ref().unwrap().capacity_bytes(),
+                docsai_convert::DEFAULT_CAPACITY_BYTES
+            );
+        }
     }
 }

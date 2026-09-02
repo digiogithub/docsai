@@ -153,6 +153,9 @@ async fn session() -> (
         // The default shape, which is the one being measured.
         structured: false,
         max_inline_tokens: None,
+        // The read cache a real server runs with: these tests measure the
+        // wire, and the cache must not change a byte of it (Phase 16-H).
+        cache: Some(docsai_convert::ConvertCache::shared()),
     };
     let (server_transport, client_transport) = tokio::io::duplex(256 * 1024);
     tokio::spawn(async move {

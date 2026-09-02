@@ -225,7 +225,7 @@ pub fn tool_convert_to_markdown(
     let options = ConvertOptions {
         fidelity,
         assets_dir: args.assets_dir.as_deref().map(PathBuf::from),
-        ..Default::default()
+        ..config.convert_options()
     };
 
     if let Some(output_path) = args.output_path.as_deref() {
@@ -377,7 +377,7 @@ pub fn tool_outline_document(
         args.filename.as_deref(),
         config,
     )?;
-    let options = read_options(args.fidelity.as_deref())?;
+    let options = read_options(args.fidelity.as_deref(), config)?;
     // `0` is how a caller says "every level"; absent is the cheap default.
     let depth = match args.depth.unwrap_or(DEFAULT_DEPTH) {
         0 => None,
@@ -495,7 +495,7 @@ pub fn tool_read_selection(
         args.filename.as_deref(),
         config,
     )?;
-    let options = read_options(args.fidelity.as_deref())?;
+    let options = read_options(args.fidelity.as_deref(), config)?;
     // The CLI refuses the levels that address nothing, and so does this: a
     // selection whose nodes have no ids cannot be written back, and handing one
     // over would be handing over a dead end.
@@ -541,7 +541,7 @@ pub fn tool_search_document(
     // Every level is allowed here, unlike `read_selection`: a level that writes
     // no id still writes text, and saying where the text is beats pretending
     // the document is empty.
-    let options = read_options(args.fidelity.as_deref())?;
+    let options = read_options(args.fidelity.as_deref(), config)?;
     let mut query: Query = args
         .query
         .parse()
@@ -566,14 +566,18 @@ pub fn tool_search_document(
     Ok(ToolOutput::rendered(to_value(&results)?, text))
 }
 
-/// Options for the read-only primitives: fidelity and nothing else.
-fn read_options(fidelity: Option<&str>) -> Result<ConvertOptions, ConvertError> {
+/// Options for the read-only primitives: fidelity, and the server's read
+/// cache so three questions about one document cost one read (Phase 16-H).
+fn read_options(
+    fidelity: Option<&str>,
+    config: &McpConfig,
+) -> Result<ConvertOptions, ConvertError> {
     Ok(ConvertOptions {
         fidelity: match fidelity {
             Some(value) => parse_fidelity(value)?,
             None => docsai_convert::Fidelity::Full,
         },
-        ..Default::default()
+        ..config.convert_options()
     })
 }
 
@@ -777,7 +781,7 @@ pub fn tool_inspect_document(
         args.filename.as_deref(),
         config,
     )?;
-    let report = inspect_input(input.as_source(), &ConvertOptions::default())?;
+    let report = inspect_input(input.as_source(), &config.convert_options())?;
     Ok(ToolOutput::json(to_value(&report)?))
 }
 
@@ -792,7 +796,7 @@ pub fn tool_estimate_tokens(
         args.filename.as_deref(),
         config,
     )?;
-    let budget = token_budget_input(input.as_source(), &ConvertOptions::default())?;
+    let budget = token_budget_input(input.as_source(), &config.convert_options())?;
     let text = budget.render_text();
     Ok(ToolOutput::rendered(to_value(&budget)?, text))
 }
@@ -837,6 +841,17 @@ mod tests {
             // The unit tests convert whole corpus documents on purpose; the
             // ceiling is exercised by the test that asks for it.
             max_inline_tokens: None,
+            // No read cache unless a test asks for one, so each test sees the
+            // reads it makes and nobody else's.
+            cache: None,
+        }
+    }
+
+    /// The same server, with the read cache a real one runs with.
+    fn cfg_cached() -> McpConfig {
+        McpConfig {
+            cache: Some(docsai_convert::ConvertCache::shared()),
+            ..cfg()
         }
     }
 
@@ -1272,5 +1287,72 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn four_tools_on_one_document_cost_one_read() {
+        // The sequence Phase 16-H exists for: an agent sizes a document,
+        // outlines it, searches it, and reads the part it wanted. Four tool
+        // calls, four reads of the same bytes before the cache.
+        let config = cfg_cached();
+        let path = corpus("long-report.docx");
+        let cache = config.cache.clone().expect("cache");
+
+        tool_estimate_tokens(&doc_args(&path), &config).expect("estimate");
+        tool_outline_document(
+            &OutlineDocumentArgs {
+                path: Some(path.clone()),
+                ..Default::default()
+            },
+            &config,
+        )
+        .expect("outline");
+        tool_search_document(
+            &SearchDocumentArgs {
+                path: Some(path.clone()),
+                query: "the".into(),
+                ..Default::default()
+            },
+            &config,
+        )
+        .expect("search");
+        tool_read_selection(
+            &ReadSelectionArgs {
+                path: Some(path.clone()),
+                select: "type:heading".into(),
+                ..Default::default()
+            },
+            &config,
+        )
+        .expect("read");
+
+        let stats = cache.stats();
+        assert_eq!(stats.misses, 1, "one read for four tool calls");
+        assert_eq!(stats.hits, 3);
+    }
+
+    #[test]
+    fn the_cache_changes_no_tool_answer() {
+        let path = corpus("images-inline.docx");
+        let cached = cfg_cached();
+        let bare = cfg();
+        for call in 0..2 {
+            let with = tool_convert_to_markdown(&to_args(&path), &cached).expect("cached");
+            let without = tool_convert_to_markdown(&to_args(&path), &bare).expect("uncached");
+            assert_eq!(with.value, without.value, "call {call}");
+            assert_eq!(with.text, without.text, "call {call}");
+        }
+        let outline_args = || OutlineDocumentArgs {
+            path: Some(path.clone()),
+            depth: Some(0),
+            ..Default::default()
+        };
+        for call in 0..2 {
+            let with = tool_outline_document(&outline_args(), &cached).expect("cached");
+            let without = tool_outline_document(&outline_args(), &bare).expect("uncached");
+            assert_eq!(with.value, without.value, "call {call}");
+        }
+        let stats = cached.cache.as_ref().expect("cache").stats();
+        assert!(stats.hits >= 2, "the second pass came from the cache");
     }
 }

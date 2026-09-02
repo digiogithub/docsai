@@ -210,6 +210,7 @@ mod tests {
             timeout: None,
             structured: false,
             max_inline_tokens: None,
+            cache: None,
         }
     }
 

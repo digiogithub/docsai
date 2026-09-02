@@ -821,6 +821,10 @@ fn run_convert(
         use_loffice,
         style_map,
         max_cells,
+        // No read cache: the CLI is one shot and never reads the same
+        // document twice, so a cache would only cost it a content hash and
+        // the memory to hold a tree nobody will ask for again (Phase 16-H).
+        cache: None,
     };
 
     let batch = out_dir.is_some() || inputs.len() > 1;
