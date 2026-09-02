@@ -270,12 +270,19 @@ Tasks:
 7. Manual checklist per release: PowerPoint and LibreOffice open every corpus output with no
    repair dialog (risk P2).
 
-Acceptance criteria:
-- [ ] pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus.
-- [ ] Both CI gates green on the corpus.
+Acceptance criteria (settled in `kb/61-phase-15-plan.md`, which carries the evidence for each):
+- [x] pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus.
+- [ ] Both CI gates green on the corpus. Gate 1 is green (34 packages, 322 parts, 0 invalid);
+      gate 2 is built and wired but has never rendered a corpus slide, because LibreOffice is
+      broken on the development machine. It closes on the first CI run that renders.
 - [ ] No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).
-- [ ] A deck written from *attribute-free* Markdown opens correctly with a sensible layout.
-- [ ] Images rewritten without recompression; geometry compared with the documented tolerance.
+      The checklist and its three decks are prepared in `docs/spikes/P2-powerpoint-gate.md`;
+      running it needs PowerPoint and a human. Risk P2 stays open until then.
+- [ ] A deck written from *attribute-free* Markdown opens correctly with a sensible layout. The
+      package is written, well formed and schema-valid, and this project's reader recovers it —
+      but no application has ever *opened* one. Item 5 of the P2 gate form.
+- [x] Images rewritten without recompression; geometry compared with the documented tolerance —
+      which Phase 11-E fixed at **zero**, so the comparison is byte equality.
 
 ## Phase 16 — Charts, embedded objects, thumbnails (3–4 weeks)
 

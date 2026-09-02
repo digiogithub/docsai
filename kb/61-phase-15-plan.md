@@ -162,33 +162,67 @@ is what CI passes.
 The PowerPoint checklist of `docs/spikes/P3-preserved-skeleton.md` §6.2, run by a human on three
 decks and recorded with its outcome; risk **P2** closed in
 `docs/technical-analysis-presentations.md` §7 if it passes. Docs, CHANGELOG, README, `AGENTS.md`
-status and the acceptance criteria checked here.
+status and the acceptance criteria checked here. Done, in [[72-phase-15-close]] — with the one
+thing this increment could not do left visibly undone: **the checklist has not been run**, because
+running it needs PowerPoint and a person, and this machine has neither. What 15-K delivers is
+everything around that step: the three decks and the negative control, reproducible in one paste;
+the fill-in form `docs/spikes/P2-powerpoint-gate.md`; risk P2 left **open** with §7.1 spelling out
+what the two gates do and do not prove and carrying the wording that closes it when the form is
+signed; and the acceptance criteria settled — two true, three waiting on an application opening a
+file, one of them un-ticked here because its verb is «opens» and nothing has.
 
-## Acceptance criteria (tracked here)
+## Acceptance criteria (settled in 15-K)
 
-- [x] pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus — 15-H
+Two of five are true today. The three that are not all wait on the same thing — an application
+actually opening a file — and none of them is softened to make the phase look finished.
+
+- [x] **pptx round-trip idempotent (2nd pass == 1st pass) over the whole pptx corpus** — 15-H
       ([[69-phase-15-roundtrip]]). All seventeen decks of `corpus/pptx`, `.pptm` included: the
       second DocMark pass is the first, every category of the per-category metric is 100 %, and
-      each written package is byte for byte the package that was read.
-- [ ] Both CI gates green on the corpus. **Still not tickable, and for a different reason now.**
-      Gate 1, schema validation, is green — 15-I ([[70-phase-15-xsd]]): 34 packages written from the
-      seventeen corpus decks, 322 parts validated, 0 invalid, 0 unmeasured. Gate 2 is **built and
-      wired** — 15-J ([[71-phase-15-render]]): `corpus/render_gate.py`, its own `render-gate` job in
-      `.github/workflows/test.yml`, its comparator measured on fourteen pairs and its threshold
-      chosen from those numbers, four negative controls red and named, and the skip path exercised on
-      this machine's real broken LibreOffice. What is missing is the only thing that would make this
-      box true: **no corpus slide has ever been rendered by LibreOffice here**, so gate 2 has never
-      been *green on the corpus* — it has been green on its comparator and on a stand-in renderer.
-      The first real numbers come from the first CI run, and the threshold may have to move when they
-      do. The box closes when that run is seen, and no earlier.
-- [ ] No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).
-- [x] A deck written from *attribute-free* Markdown opens correctly with a sensible layout —
-      15-G ([[68-phase-15-template]]). **With one caveat, stated rather than hidden**: the layout is
-      chosen and the package is well formed (parts, content types, every relationship resolving,
-      and this project's reader recovering the deck), but no application has *opened* it — the
-      LibreOffice install on this machine is broken, and «opens without a repair dialog» is the P2
-      checklist of 15-K.
-- [ ] Images rewritten without recompression; geometry compared with the documented tolerance.
+      each written package is byte for byte the package that was read. Re-verified in 15-K:
+      `cargo test --workspace --no-fail-fast` → 666 passed, 1 failed, 1 ignored, and neither the
+      failure (`docx_roundtrip_is_idempotent` on `corpus/docx/footnotes.docx`, pre-existing since
+      `88ff8e11` and unrelated to this phase) nor the ignored test
+      (`agent_fidelity_is_at_most_fifteen_percent_of_full`) is a pptx one.
+
+- [ ] **Both CI gates green on the corpus.** Gate 1, schema validation, **is** green — 15-I
+      ([[70-phase-15-xsd]]), re-run in 15-K: 17 decks, 34 packages, 322 parts, 0 invalid, 0 not
+      measured. Gate 2 is **built and wired** — 15-J ([[71-phase-15-render]]): `corpus/render_gate.py`,
+      its own `render-gate` job in `.github/workflows/test.yml`, its comparator measured on fourteen
+      pairs and its threshold chosen from those numbers, four negative controls red and named.
+      What is missing is the only thing that would make this box true: **no corpus slide has ever
+      been rendered by LibreOffice on any machine** — re-run in 15-K, `corpus/render_gate.py` exits
+      3 with the skip banner (`soffice.bin: libreglo.so`) and `--self-test` exits 0. The first real
+      numbers come from the first CI run, and the threshold may have to move when they do. The box
+      closes when that run is seen, and no earlier.
+
+- [ ] **No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).**
+      The checklist is now written and the decks it needs are reproducible in one paste:
+      `docs/spikes/P2-powerpoint-gate.md` (15-K, [[72-phase-15-close]]). It is **unrun**, because
+      running it needs PowerPoint and a human, and neither is available here. Everything that can
+      be checked without an application has been: every deck it builds passes `corpus/opc_check.py`
+      and its negative control fails it. This box is the last one Phase 15 owns, and it is an
+      owner action, not a code action.
+
+- [ ] **A deck written from *attribute-free* Markdown opens correctly with a sensible layout.**
+      **Un-ticked in 15-K, deliberately** — 15-G ([[68-phase-15-template]]) ticked it with the
+      caveat written beside it, and on re-reading, the caveat *is* the criterion: the verb is
+      «opens». What is true is everything short of it — the layout is chosen from the shape of the
+      content, the package is well formed (parts, content types, every relationship resolving,
+      `opc_check.py` clean), every part the writer created is schema-valid under gate 1, and this
+      project's own reader recovers the deck. What is not true is that any application has ever
+      opened one. Deck **C** of the P2 gate form is that file; item 5 of the form is this criterion.
+
+- [x] **Images rewritten without recompression; geometry compared with the documented tolerance.**
+      Both halves hold, and neither was measured before 15-K said so out loud. *Recompression*:
+      media go back as the bytes the `AssetStore` holds, asserted on a swapped image whose
+      extension the deck never carried —
+      `pptx::write::tests::a_swapped_image_goes_in_as_its_own_bytes_and_is_declared` — and the
+      preserved path never inflates an entry at all (15-A copies stored bytes). *Geometry*: the
+      documented tolerance is **zero**, fixed in Phase 11-E and normative in
+      `docs/docmark-specification.md` §2 (`readable_units.rs::the_tolerance_is_zero_at_every_precision`),
+      so the comparison is byte equality — which is exactly what 15-H asserts over the corpus. The
+      criterion was written expecting a non-zero tolerance; the project earned a stricter one.
 
 ## Rules that bind this phase
 

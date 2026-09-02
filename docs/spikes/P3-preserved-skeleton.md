@@ -320,6 +320,13 @@ pdftotext -q a.pdf - | diff - <(pdftotext -q b.pdf -)
 Record the outcome in this section and, if step 2 passes on three decks, close risk P2 in
 `docs/technical-analysis-presentations.md` §7.
 
+> **Superseded by [`P2-powerpoint-gate.md`](P2-powerpoint-gate.md)** (Phase 15-K). The procedure
+> above was written before the writer existed and calls a throwaway `/tmp` harness that is gone;
+> the same four steps are now run through `docsai convert` itself, on three decks chosen for the
+> three paths that actually produce bytes, with a fill-in form for the outcome and a negative
+> control for step 4. **The run has still not happened**: no PowerPoint has been in front of any of
+> this. When it does, its verdict is copied back into this section.
+
 ### 6.3 The corpus fixtures this spike added
 
 `charts-embedded.pptx` and `smartart-fallback.pptx` were listed in the 12-A table and built here,

@@ -51,6 +51,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The PowerPoint gate, prepared and unrun — and Phase 15 closed with it open** (plan v2 Phase 15,
+  eleventh increment). `docs/spikes/P2-powerpoint-gate.md` is the fill-in form for the one thing
+  this project cannot test itself: whether **PowerPoint** opens a deck docsai wrote without offering
+  to repair it. It builds, in one paste, the three decks that cover Phase 15's three paths to bytes
+  — a preserved package spliced with one rebuilt slide, a SmartArt deck whose diagram only
+  PowerPoint resolves (LibreOffice takes the `mc:Fallback`), and a package generated end to end on
+  the embedded template that **no application has ever opened** — plus a negative control, a valid
+  deck with three parts removed and their relationships left dangling, which `corpus/opc_check.py`
+  correctly refuses and which spike P3 §2.4 measured LibreOffice accepting in silence. Seven items,
+  the repair dialog first, with what counts as a pass and what counts as a failure written before
+  the first tick. The decks are not committed: they are derived byte for byte from the tracked
+  corpus and the tracked writer, and they are built into the gitignored `target/p2-gate/`.
+  **Risk P2 stays OPEN.** `docs/technical-analysis-presentations.md` §7.1 now says in writing what
+  the two CI gates do and do not prove — byte-identical round trips over seventeen decks, 322 parts
+  schema-valid, every relationship resolving, and *nothing at all* about how any of it looks or
+  about PowerPoint's own loader — and carries the exact table row that closes the risk once the form
+  is signed. Phase 15's acceptance criteria are settled in `kb/61-phase-15-plan.md`: two are true,
+  three wait on an application opening a file, and one of those three was **un-ticked** here because
+  its verb is «opens» and nothing has opened it. `kb/72-phase-15-close.md` records the phase and the
+  thirteen things it carries forward.
+
 - **CI gate 2: the render diff, before and after the round trip** (plan v2 Phase 15, tenth
   increment). `corpus/render_gate.py` has headless LibreOffice render each corpus deck to PDF and
   `pdftoppm` rasterise every page to greyscale, then scores the pairs with a low-frequency

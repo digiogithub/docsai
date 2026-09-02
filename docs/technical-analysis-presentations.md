@@ -324,7 +324,7 @@ document handles.
 | # | Risk | Prob. | Impact | Mitigation |
 |---|---|---|---|---|
 | P1 | The slide→layout→master→theme cascade costs more than docx's | High | High | Spike (Phase 12); v1 resolves colour/font/size and leaves the rest to the layout reference |
-| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **Open after spike P3**: the mechanism loses nothing over 48 packages in LibreOffice, but LibreOffice was measured to accept a deck with five dangling relationships, so it cannot stand in for PowerPoint. Steps to close it in [`spikes/P3-preserved-skeleton.md`](spikes/P3-preserved-skeleton.md) §6.2 |
+| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **STILL OPEN after Phase 15** — see §7.1 for exactly what is and is not proven. The gate that closes it is prepared and unrun: [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md) |
 | P3 | Freeform shapes / SmartArt / animations fragment the effort | High | Medium | Aggressive raw-block from day one; only model what has a Markdown representation |
 | P4 | DocMark-P becomes unreadable (stops being Markdown, becomes XML with `:::`) | Medium | High | Golden rule: `--fidelity standard` must be hand-editable by a human; if it is not, the design failed |
 | P5 | Text overflow after an agent edit | High | Medium | Explicit `Warning::AutofitStale`; no measurement in v1 |
@@ -332,6 +332,54 @@ document handles.
 | P7 | Stable ids drift or collide across round trips | Medium | **Very high** (silently wrong edits) | Ids are part of the golden tests; dedicated property test: ids survive N round trips and never get reused |
 | P8 | `apply_edits` surface grows without bound (one op per IR feature) | High | Medium | Closed op set in v2, versioned; anything not covered is done by `read --select` + rewrite of that node |
 | P9 | The skeleton blob makes `.dmk.md` packages heavy on disk | Medium | Low | Content-hash dedupe (already in `AssetStore`) + `--no-skeleton` for plain/standard fidelity |
+
+### 7.1 P2 at the end of Phase 15 — the state of the evidence
+
+Phase 15 built the writer and both CI gates and **did not close P2**, because the only instrument
+that can close it is a person in front of PowerPoint and this project has never had one. Written
+out so that nobody reads the two green gates as an answer to a question they do not ask.
+
+**What is actually proven, and by what:**
+
+- A deck nobody edited comes back **byte for byte** the package that was read — the whole `.pptx`
+  corpus, seventeen decks, `.pptm` included (`pptx_roundtrip_is_idempotent`). The strongest
+  statement available without an application, and it is a statement about *preservation*, not
+  about acceptance: the input decks are docsai's own fixtures, not PowerPoint's output.
+- Every part whose bytes the writer **changed or created** is legal ECMA-376 — 34 packages, 322
+  parts, 0 invalid, 0 unmeasured (`corpus/schema_gate.py`, CI gate 1). Schema validity is a
+  necessary condition for PowerPoint not repairing a file. It is not a sufficient one: a dangling
+  relationship, an `r:embed` pointing at nothing or a content-type gap is schema-valid and gets
+  repaired.
+- Every written package **hangs together** as OPC — every relationship resolves, every part has a
+  content type (`corpus/opc_check.py`). This is the check that covers what the schema gate cannot,
+  and it is what caught the negative control of the P2 gate form.
+- Nothing about how a corpus deck *looks*. CI gate 2 (`corpus/render_gate.py`) is built, wired and
+  its comparator measured on fourteen pairs, but LibreOffice is broken on the development machine
+  and the gate has **never rendered a corpus slide anywhere**. Its first real numbers come from
+  the first CI run.
+
+**What none of that reaches:**
+
+- PowerPoint's own loader, which is stricter than every check above and stricter than LibreOffice —
+  spike P3 §2.4 measured LibreOffice opening a package with five dangling relationships in silence.
+- Whether PowerPoint will **re-save** a deck it opened. It is stricter on write than on read.
+- Whether a preserved object survives as *itself* — a chart still a chart with its workbook behind
+  it, a SmartArt still a diagram and not its `mc:Fallback` text box. LibreOffice resolves
+  `mc:Fallback`; only PowerPoint resolves `mc:Choice`, so this is a question no tool here can ask.
+- The package docsai authors end to end, on the embedded template, from attribute-free Markdown.
+  **No application has ever opened one.**
+
+**What would close it**: the checklist of [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md),
+run by a human on the three decks that document builds — a spliced preserved deck, a raw
+re-injected SmartArt deck, and a deck generated on the template — with its negative control
+failing as designed.
+
+**The wording that replaces the P2 row when it passes.** Prepared here so the run itself is one
+sitting and the commit is one line. Do not use it until §3 of the gate form is filled in and
+signed; then substitute it for the P2 row above, fill in the two blanks from that form, and delete
+this §7.1.
+
+> | P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | **CLOSED**. Preserved-skeleton strategy (§5.1) plus the two CI gates (§5.5), and the checklist of [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md) run in PowerPoint _____ on _____: no repair dialog on a spliced preserved deck, on a raw re-injected SmartArt deck or on a package generated end to end on the embedded template; the chart still opened its embedded workbook, the SmartArt was still a diagram, all three re-saved from PowerPoint and reopened clean, and the negative control — the same deck with three parts removed and their relationships left dangling — was refused, which is what makes the other three answers mean anything. |
 
 ## 8. Sources consulted
 

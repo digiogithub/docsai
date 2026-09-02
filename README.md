@@ -37,7 +37,7 @@ cargo run -p docsai-cli -- mcp
 | Excel binary | `.xls` | ✅ | ➖ | Read only (calamine) |
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
-| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused. `docsai roundtrip deck.pptx` closes the cycle and reports the per-category fidelity metric; the whole deck corpus round-trips idempotent, and a deck nobody edited comes back as the package that was read, byte for byte (v2 P15 continues) |
+| PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused. `docsai roundtrip deck.pptx` closes the cycle and reports the per-category fidelity metric; the whole deck corpus round-trips idempotent, and a deck nobody edited comes back as the package that was read, byte for byte. **Phase 15 is closed with one item outstanding**: no *application* has yet opened a written deck — the PowerPoint checklist that would say so is prepared and unrun in [`docs/spikes/P2-powerpoint-gate.md`](docs/spikes/P2-powerpoint-gate.md), and risk P2 stays open until it is signed |
 | PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
 | OpenDocument Presentation | `.odp` | 🕓 v2 P18 | 🕓 v2 P18 | Free equivalent of `.pptx` |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
@@ -404,6 +404,13 @@ green tick — while CI runs it with `--require-renderer`, where a missing rende
 comparator can be measured on its own, with no renderer at all, by
 `python3 corpus/render_gate.py --self-test`. It is CI-only too, and adds no image dependency
 anywhere.
+
+Neither gate is the oracle for a `.pptx`, and neither pretends to be: schema-valid markup that
+hangs together as a package can still be repaired by PowerPoint, and LibreOffice has been measured
+opening a deck with five dangling relationships in silence. The check that decides it is a human
+one, written out item by item in
+[`docs/spikes/P2-powerpoint-gate.md`](docs/spikes/P2-powerpoint-gate.md), which builds its three
+decks and its negative control in one paste. It has **not been run**.
 
 Golden files live next to the corpus (`corpus/docx/*.expected.dmk.md`). To update them:
 `DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens`, and **review the diff**.

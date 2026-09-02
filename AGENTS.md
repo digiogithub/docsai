@@ -336,7 +336,27 @@ a banner and exit 3, and in CI, which installs LibreOffice deliberately, `--requ
 it a failure. LibreOffice on this machine is broken (`libreglo.so`), so the gate has never rendered a
 real slide here: the skip path and the comparator were exercised, the render path only against a
 stand-in renderer.
-Next is **15-K**: the P2 PowerPoint checklist, run by a human on three decks, and the phase close.
+The eleventh is done and **Phase 15 is closed — with one item outstanding, named rather than
+buried**: the P2 gate is **prepared and unrun**. `docs/spikes/P2-powerpoint-gate.md` builds in one
+paste the three decks that cover this phase's three paths to bytes — a preserved package spliced
+with one rebuilt slide, a SmartArt deck whose diagram only PowerPoint resolves because LibreOffice
+takes the `mc:Fallback`, and a package generated end to end on the embedded template that **no
+application has ever opened** — plus a negative control, a valid deck with three parts removed and
+their relationships left dangling, which `corpus/opc_check.py` refuses and which spike P3 §2.4
+measured LibreOffice accepting in silence. Seven items, the repair dialog first. Running it needs
+PowerPoint and a person, and this machine has neither, so **risk P2 stays open**:
+`docs/technical-analysis-presentations.md` §7.1 states what the two gates do and do not prove and
+carries the row that closes the risk when the form is signed. Of the phase's five acceptance
+criteria two are true (corpus idempotence; images without recompression, with the geometry tolerance
+Phase 11-E fixed at zero), and three wait on an application opening a file — including «a deck
+written from attribute-free Markdown opens correctly», **un-ticked here** because its verb is
+«opens». What the phase carries forward is listed in `kb/72-phase-15-close.md`: the unrun gate, a
+render gate that has never rendered, the broken LibreOffice, `<a:p/>` not surviving a round trip, a
+preserved table whose grid moved, a shape *added* to a preserved slide discarding that slide's other
+edits, unvalidated preserved parts, `align`'s content-based pairing, the refused internal hyperlink,
+the inherited `agent` ≤ 15 % criterion, and the still-red `docx_roundtrip_is_idempotent` on
+`corpus/docx/footnotes.docx`.
+Next is **Phase 16**: charts, embedded objects and thumbnails — after the P2 form is signed.
 
 ## 2. Documents you must read before implementing
 

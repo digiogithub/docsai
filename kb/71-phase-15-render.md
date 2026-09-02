@@ -300,7 +300,11 @@ Stated here so the next increment does not inherit an overclaim.
 
 ## Next
 
-15-K: the P2 gate and the phase close — the PowerPoint checklist of
-`docs/spikes/P3-preserved-skeleton.md` §6.2, run by a human on three decks and recorded with its
-outcome, risk P2 closed in `docs/technical-analysis-presentations.md` §7 if it passes, and the
-phase's acceptance criteria settled.
+15-K: the P2 gate and the phase close — [[72-phase-15-close]]. The checklist could not be *run*
+here (no PowerPoint, no working LibreOffice), so what it delivers is everything around the human
+step: three decks and a negative control, the fill-in form `docs/spikes/P2-powerpoint-gate.md`, risk
+P2 left **open** with the state of the evidence written out in
+`docs/technical-analysis-presentations.md` §7.1 and the closing wording prepared there, and the
+phase's acceptance criteria settled — two true, three waiting on an application opening a file. This
+gate's own missing half, «no corpus slide has ever been rendered», is carried forward there as item
+2 of what Phase 15 leaves open.
