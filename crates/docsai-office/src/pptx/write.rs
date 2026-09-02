@@ -41,8 +41,15 @@
 //! go in **as they came out of the store**: the asset is the file that was
 //! read, and nothing here re-encodes a bitmap.
 //!
-//! What the writer cannot yet put back it **keeps and reports**: a chart or a
-//! preserved object (15-D), a notes page (15-E), a field, a table whose grid
+//! Since 15-D a **preserved object** — SmartArt, OLE, a group, a custom
+//! geometry, an animation timeline — is not a loss at all: the splice leaves
+//! its markup where the reader found it, so it goes out as the original XML at
+//! its original z-order, and a payload the model carries that differs from the
+//! package's is written back over it. A fragment in another dialect is dropped
+//! with `Warning::RawBlockDropped` rather than emitted as nonsense.
+//!
+//! What the writer cannot yet put back it **keeps and reports**: a chart's
+//! data (Phase 16), a notes page (15-E), a field, a table whose grid
 //! changed, a slide added or removed. Each one is a `Degraded` warning naming
 //! what was copied and the increment that lifts it, because a caller who edited
 //! the model and got the original back has to be able to learn that from the
@@ -54,9 +61,11 @@ use std::ops::Range;
 
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{ImageGeometry, ImageRef};
-use docsai_model::presentation::{Placeholder, Presentation, ShapeKind, SkeletonRef, Slide};
+use docsai_model::presentation::{
+    Placeholder, Presentation, RawShape, ShapeKind, SkeletonRef, Slide,
+};
 use docsai_model::report::{ConversionReport, Warning};
-use docsai_model::text::Table;
+use docsai_model::text::{RawFragment, Table};
 use docsai_model::units::{Length, Size};
 use docsai_model::Document;
 
@@ -178,6 +187,13 @@ fn rebuild_slides(
     }
 
     let mut media = Media::new(&package, assets);
+    // The payloads are one deck-wide list and the stubs point into it by id
+    // ([[43-phase-13-raw]] decision 3), so the writer indexes it once.
+    let fragments: BTreeMap<&str, &RawFragment> = deck
+        .raw
+        .iter()
+        .map(|fragment| (fragment.id.as_str(), fragment))
+        .collect();
 
     for (index, (part, slide)) in parts.iter().zip(&deck.slides).enumerate() {
         let number = index + 1;
@@ -208,8 +224,18 @@ fn rebuild_slides(
             });
         }
         let mut rels = PartRels::new(&package, part);
-        match rewrite_slide(&root, source, slide, &package, &mut rels, &mut media) {
-            Ok(Rewritten { xml, kept }) => {
+        let mut outside = Outside {
+            part,
+            package: &package,
+            rels: &mut rels,
+            media: &mut media,
+            fragments: &fragments,
+        };
+        match rewrite_slide(&root, source, slide, &mut outside) {
+            Ok(Rewritten { xml, kept, dropped }) => {
+                for (id, format) in dropped {
+                    report.warn(Warning::RawBlockDropped { id, format });
+                }
                 for reason in kept {
                     report.warn(Warning::Degraded {
                         what: format!("slide {number}"),
@@ -285,16 +311,30 @@ fn slide_parts(package: &Package) -> Option<Vec<String>> {
 struct Rewritten {
     xml: String,
     kept: Vec<String>,
+    /// Fragments the model carried in a dialect this package cannot hold:
+    /// their id and the format they were written in.
+    dropped: Vec<(String, String)>,
 }
 
 /// Rewrites the text bodies of one slide, leaving every other byte alone.
+/// Everything a slide's rewrite reaches outside the slide itself: the package
+/// it was read from, the three neighbours an edit can move, and the payloads
+/// the stubs point into.
+struct Outside<'a, 'm> {
+    /// Name of the part being rewritten, which is what says whether a
+    /// fragment's markup belongs to it.
+    part: &'a str,
+    package: &'a Package,
+    rels: &'a mut PartRels,
+    media: &'a mut Media<'m>,
+    fragments: &'a BTreeMap<&'a str, &'a RawFragment>,
+}
+
 fn rewrite_slide(
     root: &Element,
     source: &str,
     slide: &Slide,
-    package: &Package,
-    rels: &mut PartRels,
-    media: &mut Media<'_>,
+    outside: &mut Outside<'_, '_>,
 ) -> Result<Rewritten, String> {
     let tree = root
         .path(&["cSld", "spTree"])
@@ -317,6 +357,20 @@ fn rewrite_slide(
     let lang = editing_language(tree);
     let mut edits: Vec<(Range<usize>, String)> = Vec::new();
     let mut kept: Vec<String> = Vec::new();
+    let mut dropped: Vec<(String, String)> = Vec::new();
+    // What is not a shape: `p:transition`, `p:timing` and anything else the
+    // reader took off `p:sld` itself, put back at the level it came from.
+    for id in &slide.raw {
+        // `p:cSld` is not a candidate whatever a fragment calls itself: an edit
+        // spanning it would swallow every text edit inside the shape tree, and
+        // `splice` drops an overlapping edit without a word.
+        let candidates = root.children().filter(|child| child.name != "cSld");
+        match reinject(candidates, source, id.as_str(), outside, &mut edits) {
+            Reinjected::Standing => {}
+            Reinjected::Dropped(format) => dropped.push((id.as_str().to_string(), format)),
+            Reinjected::Kept(reason) => kept.push(reason),
+        }
+    }
     for shape in &slide.shapes {
         let Some(element) = children.get(shape.z_index as usize) else {
             return Err(format!(
@@ -332,18 +386,51 @@ fn rewrite_slide(
             // drawn at and its crop, each written only where it differs from
             // what the part already says.
             ShapeKind::Picture(image) => {
-                if let Err(reason) =
-                    rewrite_picture(element, source, image, package, rels, media, &mut edits)
-                {
+                if let Err(reason) = rewrite_picture(
+                    element,
+                    source,
+                    image,
+                    outside.package,
+                    outside.rels,
+                    outside.media,
+                    &mut edits,
+                ) {
                     kept.push(reason);
                 }
                 continue;
             }
             ShapeKind::Table(table) => {
                 if let Err(reason) =
-                    rewrite_table(element, table, lang.as_deref(), rels, &mut edits)
+                    rewrite_table(element, table, lang.as_deref(), outside.rels, &mut edits)
                 {
                     kept.push(reason);
+                }
+                continue;
+            }
+            // A preserved object goes back **as the bytes that came out**:
+            // SmartArt, OLE, a group, a custom geometry, an animation the IR
+            // never modelled. The splice already leaves the element alone, so
+            // the work here is to say so honestly and to put the fragment back
+            // when the model carries one that differs from the package's.
+            ShapeKind::Raw(RawShape { raw, .. }) => {
+                let Some(id) = raw else {
+                    // No payload at this fidelity level: the stub is all the
+                    // model has, and the object standing in the package is the
+                    // original XML at its original z-order. Nothing is lost.
+                    continue;
+                };
+                match reinject(
+                    std::iter::once(*element),
+                    source,
+                    id.as_str(),
+                    outside,
+                    &mut edits,
+                ) {
+                    Reinjected::Standing => {}
+                    Reinjected::Dropped(format) => {
+                        dropped.push((id.as_str().to_string(), format));
+                    }
+                    Reinjected::Kept(reason) => kept.push(reason),
                 }
                 continue;
             }
@@ -363,7 +450,7 @@ fn rewrite_slide(
             kept.push("a text shape with no text body".into());
             continue;
         };
-        match write_text::write_body(body, bulleted, lang.as_deref(), rels) {
+        match write_text::write_body(body, bulleted, lang.as_deref(), outside.rels) {
             Ok(paragraphs) => {
                 let range = paragraph_range(tx_body);
                 if paragraphs.is_empty() && !source[range.clone()].trim().is_empty() {
@@ -381,7 +468,93 @@ fn rewrite_slide(
     Ok(Rewritten {
         xml: splice(source, edits),
         kept,
+        dropped,
     })
+}
+
+/// What became of one raw fragment on the way out.
+enum Reinjected {
+    /// The original markup is in the written part — either because the
+    /// preserved package already holds it byte for byte, or because the
+    /// fragment the model carried was spliced back over it.
+    Standing,
+    /// The fragment is in a dialect this package cannot hold, so it was not
+    /// emitted: `Warning::RawBlockDropped`, never nonsense in the file.
+    Dropped(String),
+    /// The fragment could not be placed, and the package's own bytes stand.
+    Kept(String),
+}
+
+/// Puts one raw fragment back where it came from.
+///
+/// The preserved package is the first answer: a fragment nobody edited is
+/// already in the part, at its original z-order, byte for byte — so the
+/// comparison is with the source, and an identical fragment produces no edit
+/// and no warning. What this adds is the case the skeleton cannot cover: a
+/// payload that differs from the package's bytes, which is written back over
+/// the element it belongs to.
+///
+/// `candidates` are the elements the fragment could be: one shape for a shape
+/// fragment, the children of `p:sld` for a slide-level one, where the match is
+/// by element name because the id is not in the file.
+fn reinject<'a>(
+    candidates: impl Iterator<Item = &'a Element>,
+    source: &str,
+    id: &str,
+    outside: &Outside<'_, '_>,
+    edits: &mut Vec<(Range<usize>, String)>,
+) -> Reinjected {
+    let Some(fragment) = outside.fragments.get(id) else {
+        // The stub points at a payload this document does not carry — a deck
+        // read back from DocMark, whose sidecar the deck parser does not load.
+        // The object is in the package all the same, which is what the caller
+        // needs; inventing markup for it would be worse than saying nothing.
+        return Reinjected::Standing;
+    };
+    if fragment.format != "ooxml" {
+        return Reinjected::Dropped(fragment.format.clone());
+    }
+    if fragment.part != outside.part {
+        // A chart's fragment is the chart part, not this slide's markup, and
+        // that part is outside `rebuilt_parts`: it is copied, not rewritten.
+        return Reinjected::Kept(format!(
+            "the preserved markup `{id}`, which belongs to `{}`",
+            fragment.part
+        ));
+    }
+    // A fragment whose own root element cannot be read matches **nothing**:
+    // falling back to the first candidate would put a slide-level payload over
+    // `p:spTree`, which is a corrupt slide rather than a degraded one.
+    let Some(name) = fragment_name(&fragment.content) else {
+        return Reinjected::Kept(format!(
+            "the preserved markup `{id}`, which does not open with an element this writer can name"
+        ));
+    };
+    for element in candidates {
+        if name != qualified(element) {
+            continue;
+        }
+        if element.raw(source) == fragment.content {
+            return Reinjected::Standing;
+        }
+        edits.push((element.span.clone(), fragment.content.clone()));
+        return Reinjected::Standing;
+    }
+    Reinjected::Kept(format!(
+        "the preserved markup `{id}`, which no element of the part answers to"
+    ))
+}
+
+/// The qualified name of a fragment's own root element, read off its first tag.
+///
+/// The fragment is a slice of a part, so its first `<` opens the element it
+/// preserves; `None` for markup this cannot read rather than a guess that would
+/// match the wrong element.
+fn fragment_name(content: &str) -> Option<&str> {
+    let rest = content.strip_prefix('<')?;
+    let end = rest.find(|c: char| c.is_whitespace() || c == '>' || c == '/')?;
+    let name = &rest[..end];
+    (!name.is_empty() && !name.starts_with('?') && !name.starts_with('!')).then_some(name)
 }
 
 /// The editing language the slide's runs already state, if they agree.
@@ -1801,5 +1974,244 @@ mod tests {
         let mut out = Cursor::new(Vec::new());
         let error = write_pptx(&document, &assets, &mut out).expect_err("refuses");
         assert!(error.to_string().contains(".pptx"), "{error}");
+    }
+
+    /// 15-D: a preserved object is not a loss, and must not be reported as one.
+    ///
+    /// The group, the custom geometry, the transition and the timing of
+    /// `raw-preserved.pptx` are markup the IR only stubs. The splice never
+    /// touched them, so they leave the writer as the bytes that came in, at
+    /// the z-order they came in at — which is what 15-D promises, and what a
+    /// `Degraded` warning would have been lying about.
+    #[test]
+    fn a_preserved_object_goes_out_as_the_bytes_that_came_in() {
+        let path = deck("raw-preserved.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (document, assets) = read_deck(&path);
+        let deck_ir = presentation(&document);
+        assert!(
+            !deck_ir.raw.is_empty() && !deck_ir.slides[0].raw.is_empty(),
+            "the fixture stopped carrying raw fragments"
+        );
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            !report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("preserved"))
+            }),
+            "a preserved object was reported as copied: {:?}",
+            report.warnings
+        );
+        let part = "ppt/slides/slide1.xml";
+        assert_eq!(
+            part_of(&original, part),
+            part_of(&written, part),
+            "the slide holding the preserved objects moved"
+        );
+    }
+
+    /// A payload the model changed is written back over the shape it belongs to.
+    ///
+    /// This is the case the preserved package cannot cover on its own: the
+    /// bytes in the skeleton are the old ones, and the fragment is what the
+    /// caller edited. The match is by element name, because the fragment is a
+    /// slice of the part and carries no id of its own.
+    #[test]
+    fn an_edited_fragment_is_written_back_over_its_shape() {
+        let path = deck("raw-preserved.pptx");
+        let (mut document, assets) = read_deck(&path);
+        {
+            let deck_ir = presentation_mut(&mut document);
+            let fragment = deck_ir
+                .raw
+                .iter_mut()
+                .find(|fragment| fragment.content.contains("custGeom"))
+                .expect("the custom geometry fragment");
+            fragment.content = fragment
+                .content
+                .replace("Triángulo libre", "Triángulo reescrito");
+        }
+
+        let written = write_deck(&document, &assets);
+        let slide =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            slide.contains("Triángulo reescrito") && !slide.contains("Triángulo libre"),
+            "the edited fragment is not in the part: {slide}"
+        );
+        // The neighbouring shapes were spliced around, not regenerated.
+        assert!(slide.contains("Caja agrupada 2") && slide.contains("<a:close/>"));
+    }
+
+    /// A slide-level fragment goes back at the level it came from.
+    ///
+    /// `p:transition` and `p:timing` are children of `p:sld`, not shapes on the
+    /// tree, and the reader captures them onto `Slide::raw`
+    /// ([[43-phase-13-raw]] decision 4). Writing them back at shape level would
+    /// put an animation inside `p:spTree`.
+    #[test]
+    fn an_edited_slide_level_fragment_reaches_the_deck() {
+        let path = deck("raw-preserved.pptx");
+        let (mut document, assets) = read_deck(&path);
+        {
+            let deck_ir = presentation_mut(&mut document);
+            let fragment = deck_ir
+                .raw
+                .iter_mut()
+                .find(|fragment| fragment.content.starts_with("<p:transition"))
+                .expect("the transition fragment");
+            fragment.content = fragment.content.replace("spd=\"slow\"", "spd=\"fast\"");
+        }
+
+        let written = write_deck(&document, &assets);
+        let slide =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            slide.contains("<p:transition spd=\"fast\"") && !slide.contains("spd=\"slow\""),
+            "the slide-level fragment did not move: {slide}"
+        );
+        // The edit landed on `p:transition` and on nothing else: its siblings
+        // are the bytes that were read.
+        let original = std::fs::read(&path).expect("reads the deck");
+        let before =
+            String::from_utf8(part_of(&original, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert_eq!(
+            slide.replace("spd=\"fast\"", "spd=\"slow\""),
+            before,
+            "something other than the transition moved"
+        );
+    }
+
+    /// A fragment this writer cannot name does not land on the first element
+    /// that happens to be there.
+    ///
+    /// The candidates for a slide-level fragment are every child of `p:sld`,
+    /// and the first of them is `p:cSld` — the whole shape tree. Matching it
+    /// by default would not degrade the slide, it would corrupt it.
+    #[test]
+    fn a_fragment_that_opens_with_nothing_is_kept_and_named() {
+        let path = deck("raw-preserved.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        {
+            let deck_ir = presentation_mut(&mut document);
+            let fragment = deck_ir
+                .raw
+                .iter_mut()
+                .find(|fragment| fragment.content.starts_with("<p:transition"))
+                .expect("the transition fragment");
+            fragment.content = "<!-- lo que quedó del fragmento -->".into();
+        }
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("does not open with an element"))
+            }),
+            "the fragment that could not be placed is not named: {:?}",
+            report.warnings
+        );
+        assert_eq!(
+            part_of(&original, "ppt/slides/slide1.xml"),
+            part_of(&written, "ppt/slides/slide1.xml"),
+            "an unplaceable fragment moved the slide"
+        );
+    }
+
+    /// A fragment in another dialect is dropped, never emitted as nonsense.
+    ///
+    /// `odf` markup inside a `p:spTree` is not a degraded deck, it is a broken
+    /// one. The package's own bytes stand and `Warning::RawBlockDropped` names
+    /// the fragment and the dialect it was in.
+    #[test]
+    fn a_fragment_in_another_dialect_is_dropped_and_named() {
+        let path = deck("raw-preserved.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        let id = {
+            let deck_ir = presentation_mut(&mut document);
+            let fragment = deck_ir
+                .raw
+                .iter_mut()
+                .find(|fragment| fragment.content.contains("custGeom"))
+                .expect("the custom geometry fragment");
+            fragment.format = "odf".into();
+            fragment.content = "<draw:custom-shape/>".into();
+            fragment.id.as_str().to_string()
+        };
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::RawBlockDropped { id: reported, format }
+                    if *reported == id && format == "odf")
+            }),
+            "the dropped fragment is not in the report: {:?}",
+            report.warnings
+        );
+        let slide =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            !slide.contains("draw:custom-shape"),
+            "foreign markup reached the package: {slide}"
+        );
+        assert_eq!(
+            part_of(&original, "ppt/slides/slide1.xml"),
+            part_of(&written, "ppt/slides/slide1.xml"),
+            "the slide moved for a fragment that was not written"
+        );
+    }
+
+    /// A fragment whose markup belongs to another part is kept and named.
+    ///
+    /// `rebuilt_parts` is the licence, and a part outside it is copied whatever
+    /// the IR seems to know about it — a chart's XML is the case that exists in
+    /// the corpus, and it is Phase 16's, not this writer's.
+    #[test]
+    fn a_fragment_from_another_part_is_kept_and_named() {
+        let path = deck("raw-preserved.pptx");
+        let (mut document, assets) = read_deck(&path);
+        {
+            let deck_ir = presentation_mut(&mut document);
+            let fragment = deck_ir
+                .raw
+                .iter_mut()
+                .find(|fragment| fragment.content.contains("custGeom"))
+                .expect("the custom geometry fragment");
+            fragment.part = "ppt/charts/chart1.xml".into();
+            fragment.content = fragment.content.replace("Triángulo libre", "Otro sitio");
+        }
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("ppt/charts/chart1.xml"))
+            }),
+            "the part that was not rewritten is not named: {:?}",
+            report.warnings
+        );
+        let slide =
+            String::from_utf8(part_of(&written, "ppt/slides/slide1.xml").expect("the slide"))
+                .expect("utf-8");
+        assert!(
+            !slide.contains("Otro sitio"),
+            "the fragment was written into the wrong part: {slide}"
+        );
     }
 }

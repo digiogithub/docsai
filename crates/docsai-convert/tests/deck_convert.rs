@@ -422,3 +422,56 @@ fn an_image_swapped_in_docmark_reaches_the_package() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 15-D through the pipeline: a preserved object survives the round trip.
+///
+/// This is the case the writer's own tests cannot see, because the deck parser
+/// does not load the raw sidecar: `Presentation::raw` comes back **empty**, so
+/// the stub in the Markdown points at a payload nothing carries. The group and
+/// the custom geometry are in the written package all the same — they are in
+/// the preserved skeleton, at the z-order they were read at — and the writer
+/// says nothing about them, because nothing was lost.
+#[test]
+fn a_preserved_object_survives_the_docmark_round_trip() {
+    let dir = scratch("write-back-raw");
+    let markdown = dir.join("deck.dmk.md");
+    convert_file(
+        &corpus().join("raw-preserved.pptx"),
+        Some(&markdown),
+        &options(Fidelity::Full),
+    )
+    .expect("converts to DocMark");
+
+    let source = std::fs::read_to_string(&markdown).expect("reads the deck back");
+    let edited = source.replace("Lo que no se modela", "Lo que sigue ahí");
+    assert_ne!(edited, source, "the fixture no longer holds the title");
+    std::fs::write(&markdown, &edited).expect("writes the edit");
+
+    let package = dir.join("deck.pptx");
+    convert_file(&markdown, Some(&package), &options(Fidelity::Full))
+        .expect("writes the package back");
+
+    let slide = {
+        let file = std::fs::File::open(&package).expect("the package was written");
+        let mut zip = zip::ZipArchive::new(file).expect("the written package is a zip");
+        let mut xml = String::new();
+        std::io::Read::read_to_string(
+            &mut zip.by_name("ppt/slides/slide1.xml").expect("slide 1"),
+            &mut xml,
+        )
+        .expect("slide 1 is text");
+        xml
+    };
+    assert!(
+        slide.contains("Lo que sigue ahí"),
+        "the edit is not in the package"
+    );
+    for markup in ["<p:grpSp>", "<a:custGeom>", "<p:transition", "<p:timing>"] {
+        assert!(
+            slide.contains(markup),
+            "`{markup}` did not survive the round trip: {slide}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

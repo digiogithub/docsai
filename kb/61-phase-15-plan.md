@@ -77,7 +77,10 @@ tool: a cell is a text body, and the grid around it is preserved like everything
 
 A shape the IR kept only as a raw fragment ([[43-phase-13-raw]]) returns as its original XML at
 its original z-order: SmartArt, OLE, charts and custom geometry. A fragment whose dialect is not
-`ooxml` is dropped with `Warning::RawBlockDropped`, never emitted as nonsense.
+`ooxml` is dropped with `Warning::RawBlockDropped`, never emitted as nonsense. Done, in
+[[65-phase-15-raw]], where the preserved skeleton turned out to have done most of the work
+already: the increment's real content is saying so honestly, and covering the payload that
+differs from it.
 
 ### 15-E — notes pages, sections and the deck's own parts
 

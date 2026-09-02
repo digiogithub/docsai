@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Nothing the writer does not model is lost on the way out** (plan v2 Phase 15, fourth
+  increment): a **preserved object** — SmartArt, an OLE object, a group, a custom geometry, an
+  animation timeline, anything the IR keeps only as a stub over a raw fragment — goes back into the
+  package as the original markup at its original z-order, and is no longer reported as a copied
+  loss, because nothing was lost: the splice never touched it. When the document carries a payload
+  that *differs* from the package's bytes, that payload is written back over the element it belongs
+  to; a slide-level fragment (`p:transition`, `p:timing`) goes back as a child of `p:sld` rather
+  than into the shape tree. A fragment in another dialect is **dropped** with
+  `Warning::RawBlockDropped` naming it and the dialect, never emitted as nonsense inside a
+  `p:spTree`, and a fragment whose markup belongs to a part outside `rebuilt_parts` — a chart's XML
+  — is copied and named, because the licence to rebuild a part is the skeleton's, not the model's.
+
+
 - **Pictures, tables and media come back too** (plan v2 Phase 15, third increment): the splice that
   rebuilt a slide's text now reaches what a text body is not. A picture's bitmap, alt text, drawn
   size and crop; the text of a table's cells; and the hyperlinks a run carries. Media goes into the

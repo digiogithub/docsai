@@ -259,8 +259,15 @@ holds (nothing re-encodes an image) and the parts that have to agree with it *sp
 `Default` for an extension it never carried. An unedited deck is still byte for byte the one that
 was read, `_rels` included. A table whose grid moved is copied and named (15-G writes an `a:tbl`
 from the model), and a link no relationship can state as it stands is refused rather than pointed
-at nothing. Next is **15-D**: raw re-injection — a shape kept only as a raw fragment returns as its
-original XML at its original z-order.
+at nothing. The fourth is done: **raw re-injection** — a shape the IR keeps only as a stub over a
+raw fragment (SmartArt, OLE, a group, a custom geometry) goes back as the original markup at its
+original z-order, and is no longer reported as a loss, because the splice never touched it; a
+payload the document carries that differs from the package's bytes is written back over the element
+it belongs to, a slide-level fragment (`p:transition`, `p:timing`) at the level it came from. A
+fragment in another dialect is dropped with `Warning::RawBlockDropped` rather than emitted as
+nonsense, and one whose markup belongs to a part outside `rebuilt_parts` — a chart's XML — is
+copied and named. Next is **15-E**: notes pages, `p:sldIdLst` and `p14:sectionLst` — the only edits
+to `ppt/presentation.xml`, which is otherwise copied.
 
 ## 2. Documents you must read before implementing
 

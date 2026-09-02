@@ -116,3 +116,8 @@ overwrite the asset with a different PNG, `convert deck.dmk.md -o out.pptx` — 
 relationships intact, and the retyped `descr`. Headless LibreOffice renders it and `pdfimages`
 reports the 2×2 bitmap that was swapped in. A smoke test, not the P2 gate: that is PowerPoint, in
 15-K.
+
+## Next
+
+15-D: raw re-injection — a shape kept only as a stub over a raw fragment returns as its original
+markup at its original z-order ([[65-phase-15-raw]]).
