@@ -94,6 +94,11 @@ and the two facts `ppt/presentation.xml` states about the deck rather than about
 
 ## Known losses, written down rather than discovered later
 
+- **A shape the model added to a *preserved* slide is not written** — the slide-level refusal below
+  has a shape-level twin, and it used to be worse: the whole slide was copied, which threw away
+  every *other* edit made to it. Fixed in [[73-phase-15-carried]]: the slide's other edits are now
+  spliced and the shape that could not be added is named on its own. Adding the shape itself is
+  still not performed, for the reasons that record states.
 - **A slide the model *added* is refused.** There is no part to splice into, and writing a slide
   part from the model rather than into one is the deck-with-no-skeleton work of **15-G**. The
   package is copied whole and the warning names the increment — copying *some* of the edits would

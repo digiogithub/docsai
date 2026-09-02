@@ -83,7 +83,7 @@ use std::ops::Range;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{ImageGeometry, ImageRef};
 use docsai_model::presentation::{
-    PhType, Placeholder, Presentation, RawShape, ShapeKind, SkeletonRef, Slide,
+    PhType, Placeholder, Presentation, RawShape, Shape, ShapeKind, SkeletonRef, Slide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::text::{RawFragment, Table};
@@ -751,12 +751,19 @@ fn rebuild_slides(
                 kept,
                 dropped,
                 stale,
+                unpaired,
             }) => {
                 for (id, format) in dropped {
                     report.warn(Warning::RawBlockDropped { id, format });
                 }
                 for (what, scale) in stale {
                     report.warn(Warning::AutofitStale { what, scale });
+                }
+                for why in unpaired {
+                    report.warn(Warning::Degraded {
+                        what: format!("slide {number}"),
+                        why,
+                    });
                 }
                 for reason in kept {
                     report.warn(Warning::Degraded {
@@ -1359,6 +1366,12 @@ struct Rewritten {
     /// Autofit scales dropped because the text under them changed (15-F):
     /// the clause naming the shape, and the scale that was in the file.
     stale: Vec<(String, u32)>,
+    /// Shapes the two sides do not share: one the model **added**, which this
+    /// writer cannot splice into a preserved slide, or one the preserved slide
+    /// holds that the model no longer names. Each is a complete clause, because
+    /// neither is «something was copied instead of being rewritten» — the rest
+    /// of the slide *was* rewritten.
+    unpaired: Vec<String>,
 }
 
 /// Rewrites the text bodies of one slide, leaving every other byte alone.
@@ -1390,14 +1403,6 @@ fn rewrite_slide(
         .children()
         .filter(|child| !matches!(child.name.as_str(), "nvGrpSpPr" | "grpSpPr"))
         .collect();
-    if children.len() != slide.shapes.len() {
-        return Err(format!(
-            "the model holds {} shape(s) and the slide {}; adding or removing a shape \
-             is not this increment's",
-            slide.shapes.len(),
-            children.len()
-        ));
-    }
 
     let lang = editing_language(tree);
     let part = outside.part;
@@ -1405,6 +1410,7 @@ fn rewrite_slide(
     let mut kept: Vec<String> = Vec::new();
     let mut dropped: Vec<(String, String)> = Vec::new();
     let mut stale: Vec<(String, u32)> = Vec::new();
+    let mut unpaired: Vec<String> = Vec::new();
     // What is not a shape: `p:transition`, `p:timing` and anything else the
     // reader took off `p:sld` itself, put back at the level it came from.
     for id in &slide.raw {
@@ -1424,11 +1430,40 @@ fn rewrite_slide(
     // consulted: a deck that travelled through DocMark carries the position it
     // was written at there, not the z-order the tree has (`order::of_tree`).
     let reading = super::order::of_tree(&children);
+    // Which tree child each model shape is written into, and what the two sides
+    // do not share.
+    let pairing = pair_shapes(&slide.shapes, &children, &reading).ok_or_else(|| {
+        format!(
+            "the model holds {} shape(s) and the slide {}, and which of them are the \
+             same shape could not be told from what they are",
+            slide.shapes.len(),
+            children.len()
+        )
+    })?;
+    for &at in &pairing.unclaimed {
+        unpaired.push(format!(
+            "the shape {} stands in the preserved slide and the model holds none that \
+             is it; removing a shape from a preserved slide is not written, so it is \
+             still in the file",
+            element_label(children[at])
+        ));
+    }
     for (position, shape) in slide.shapes.iter().enumerate() {
-        let Some(element) = reading.get(position).and_then(|at| children.get(*at)) else {
-            return Err(format!(
-                "shape {position} is outside the slide's shape tree"
+        let Some(element) = pairing.into_part[position].map(|at| &children[at]) else {
+            // A shape the model has and the part has not: 15-G writes a shape
+            // from the model only onto a slide it generates whole, where there
+            // is no `p:spTree` position, no placeholder index and no geometry
+            // to invent. Everything else on this slide is still rewritten —
+            // discarding the slide's other edits because one shape could not be
+            // added is a second loss, and the one the caller notices.
+            unpaired.push(format!(
+                "the {} `{}` the model holds is not in the preserved slide, and this \
+                 writer does not add a shape to a slide it did not generate, so it is \
+                 not in the file; every other edit to the slide was written",
+                shape_noun(&shape.kind),
+                shape_name(shape)
             ));
+            continue;
         };
         let (body, bulleted) = match &shape.kind {
             ShapeKind::Placeholder(Placeholder { body, ph_type, .. }) => (body, ph_type.is_body()),
@@ -1452,9 +1487,14 @@ fn rewrite_slide(
                 continue;
             }
             ShapeKind::Table(table) => {
-                if let Err(reason) =
-                    rewrite_table(element, table, lang.as_deref(), outside.rels, &mut edits)
-                {
+                if let Err(reason) = rewrite_table(
+                    element,
+                    source,
+                    table,
+                    lang.as_deref(),
+                    outside.rels,
+                    &mut edits,
+                ) {
                     kept.push(reason);
                 }
                 continue;
@@ -1515,32 +1555,31 @@ fn rewrite_slide(
                 // 15-F: *this* is what «the shape's text changed» means, and
                 // the writer already knew it — 15-B's rule is that nothing is
                 // written unless it differs from what the part already says, so
-                // a body whose new bytes are the old bytes did not change and
-                // its scale is not stale.
-                if source[range.clone()] != written {
-                    if let Some(scale) = drop_stale_autofit(tx_body, source, &mut edits) {
-                        // Named the way the *part* names it when the model has
-                        // no name of its own: a deck that came back through
-                        // DocMark carries none, and «shape 1» is not something
-                        // a caller can go and look at.
-                        let named = shape
-                            .name
-                            .clone()
-                            .or_else(|| {
-                                element
-                                    .path(&["nvSpPr", "cNvPr"])
-                                    .and_then(|nv| nv.attr("name"))
-                                    .filter(|name| !name.is_empty())
-                                    .map(str::to_string)
-                            })
-                            .unwrap_or_else(|| shape_name(shape));
-                        stale.push((
-                            format!(
-                                "the text of `{named}` on `{part}` changed, so the writer dropped"
-                            ),
-                            scale,
-                        ));
-                    }
+                // a body whose new bytes say what the old bytes said did not
+                // change: it is not written back and its scale is not stale.
+                if !body_changed(&source[range.clone()], &written) {
+                    continue;
+                }
+                if let Some(scale) = drop_stale_autofit(tx_body, source, &mut edits) {
+                    // Named the way the *part* names it when the model has no
+                    // name of its own: a deck that came back through DocMark
+                    // carries none, and «shape 1» is not something a caller can
+                    // go and look at.
+                    let named = shape
+                        .name
+                        .clone()
+                        .or_else(|| {
+                            element
+                                .path(&["nvSpPr", "cNvPr"])
+                                .and_then(|nv| nv.attr("name"))
+                                .filter(|name| !name.is_empty())
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| shape_name(shape));
+                    stale.push((
+                        format!("the text of `{named}` on `{part}` changed, so the writer dropped"),
+                        scale,
+                    ));
                 }
                 edits.push((range, written));
             }
@@ -1553,7 +1592,215 @@ fn rewrite_slide(
         kept,
         dropped,
         stale,
+        unpaired,
     })
+}
+
+/// Which tree child each model shape is written into.
+///
+/// When the two sides hold the same number of shapes this is the reading order
+/// and nothing else: the model's shapes are in the order the reader produced
+/// them, which is the order [`super::order::of_tree`] recomputes from the part,
+/// and that is the pairing every other increment of this phase relies on.
+///
+/// When they do not, one of the two holds a shape the other does not — a shape
+/// added to the slide as text, or one deleted from it — and the pairing has to
+/// be *recovered* the way [`align`] recovers a slide's part. The claim is
+/// weaker than that one and is therefore held to a stricter standard: the
+/// surviving shapes are in the same relative order on both sides (both lists
+/// are reading order over the same slide), so the question is only *where* the
+/// odd one out sits, and it is answered by counting the order-preserving
+/// alignments in which every shape is matched to one of its own kind. **One
+/// alignment is an answer; none or several is a refusal**, and the caller then
+/// copies the slide whole as it always did. A wrong pairing would write one
+/// shape's text into another's box, which is exactly the silent corruption
+/// 15-H found and is worse than not writing the edit at all.
+struct Pairing {
+    /// For each model shape, its index in `children`, or `None` for a shape the
+    /// preserved slide has no counterpart for.
+    into_part: Vec<Option<usize>>,
+    /// Indices into `children` no model shape claims.
+    unclaimed: Vec<usize>,
+}
+
+fn pair_shapes(shapes: &[Shape], children: &[&Element], reading: &[usize]) -> Option<Pairing> {
+    if reading.len() != children.len() {
+        return None;
+    }
+    if shapes.len() == children.len() {
+        return Some(Pairing {
+            into_part: reading.iter().map(|&at| Some(at)).collect(),
+            unclaimed: Vec::new(),
+        });
+    }
+    let model: Vec<ShapeKey> = shapes.iter().map(|shape| model_key(&shape.kind)).collect();
+    let part: Vec<ShapeKey> = reading.iter().map(|&at| part_key(children[at])).collect();
+    let matched = unique_alignment(&model, &part)?;
+
+    let mut into_part = vec![None; shapes.len()];
+    let mut claimed = vec![false; children.len()];
+    for (i, j) in matched {
+        into_part[i] = Some(reading[j]);
+        claimed[reading[j]] = true;
+    }
+    Some(Pairing {
+        into_part,
+        unclaimed: (0..children.len()).filter(|&at| !claimed[at]).collect(),
+    })
+}
+
+/// The one order-preserving alignment of the two key sequences in which every
+/// shape of the shorter side is matched to a shape of its own kind, or `None`
+/// when there is not exactly one.
+///
+/// Counting rather than searching is the point: a search finds *an* answer and
+/// a count knows whether it was the only one. Two text boxes and a third added
+/// between them have two alignments and no way to choose, so the deck is
+/// refused rather than half written.
+fn unique_alignment(model: &[ShapeKey], part: &[ShapeKey]) -> Option<Vec<(usize, usize)>> {
+    let (n, k) = (model.len(), part.len());
+    // The DP is O(n·k) and a slide has a handful of shapes; the bound is
+    // against a pathological part rather than against a real one.
+    if n.max(k) > 512 {
+        return None;
+    }
+    let skip_model = n > k;
+    let skip_part = k > n;
+    let mut memo = vec![u32::MAX; (n + 1) * (k + 1)];
+    // `ways[i][j]`: how many alignments of `model[i..]` with `part[j..]` there
+    // are, saturating at 2 — the only thing the caller asks is «exactly one?».
+    fn ways(
+        i: usize,
+        j: usize,
+        model: &[ShapeKey],
+        part: &[ShapeKey],
+        skip_model: bool,
+        skip_part: bool,
+        memo: &mut Vec<u32>,
+    ) -> u32 {
+        let (n, k) = (model.len(), part.len());
+        let slot = i * (k + 1) + j;
+        if memo[slot] != u32::MAX {
+            return memo[slot];
+        }
+        let total = if i == n && j == k {
+            1
+        } else if i == n {
+            if skip_part {
+                ways(i, j + 1, model, part, skip_model, skip_part, memo)
+            } else {
+                0
+            }
+        } else if j == k {
+            if skip_model {
+                ways(i + 1, j, model, part, skip_model, skip_part, memo)
+            } else {
+                0
+            }
+        } else {
+            let mut total = if model[i] == part[j] {
+                ways(i + 1, j + 1, model, part, skip_model, skip_part, memo)
+            } else {
+                0
+            };
+            if skip_model {
+                total += ways(i + 1, j, model, part, skip_model, skip_part, memo);
+            }
+            if skip_part {
+                total += ways(i, j + 1, model, part, skip_model, skip_part, memo);
+            }
+            total
+        };
+        memo[slot] = total.min(2);
+        memo[slot]
+    }
+
+    if ways(0, 0, model, part, skip_model, skip_part, &mut memo) != 1 {
+        return None;
+    }
+    // With one alignment there is exactly one branch out of every state that
+    // leads anywhere, so following the non-zero one reconstructs it.
+    let mut matched = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < n || j < k {
+        if i < n
+            && j < k
+            && model[i] == part[j]
+            && ways(i + 1, j + 1, model, part, skip_model, skip_part, &mut memo) == 1
+        {
+            matched.push((i, j));
+            i += 1;
+            j += 1;
+        } else if skip_model && i < n {
+            i += 1;
+        } else if skip_part && j < k {
+            j += 1;
+        } else {
+            return None;
+        }
+    }
+    Some(matched)
+}
+
+/// What a shape is recognised by when the two sides have to be matched.
+///
+/// Coarse on purpose. It has to survive an *edit* — a retyped placeholder is
+/// still the same placeholder — so it says nothing about content; and the last
+/// class is deliberately one class, because telling a table from a chart from a
+/// diagram in a `p:graphicFrame` is the reader's judgement and repeating it here
+/// would be a second opinion that could disagree with the first. A key too
+/// coarse costs a refusal; a key that disagreed with the reader would cost a
+/// wrong pairing.
+#[derive(PartialEq, Eq)]
+enum ShapeKey {
+    Placeholder(PhType, Option<u32>),
+    TextBox,
+    Picture,
+    Other,
+}
+
+fn model_key(kind: &ShapeKind) -> ShapeKey {
+    match kind {
+        ShapeKind::Placeholder(ph) => ShapeKey::Placeholder(ph.ph_type.clone(), ph.idx),
+        ShapeKind::TextBox { .. } => ShapeKey::TextBox,
+        ShapeKind::Picture(_) => ShapeKey::Picture,
+        _ => ShapeKey::Other,
+    }
+}
+
+/// The mirror of [`model_key`] on the part, following the reader's own rules
+/// ([`super::read_shapes`]): a `p:sp` with a custom geometry is a stub and not
+/// a text shape, and every element that is not a `p:sp` or a `p:pic` became one
+/// of the kinds the last class covers.
+fn part_key(element: &Element) -> ShapeKey {
+    match element.name.as_str() {
+        "sp" if element.path(&["spPr", "custGeom"]).is_none() => {
+            match element.path(&["nvSpPr", "nvPr", "ph"]) {
+                Some(ph) => ShapeKey::Placeholder(
+                    PhType::parse(ph.attr("type").unwrap_or_default()),
+                    ph.attr_i64("idx").and_then(|n| u32::try_from(n).ok()),
+                ),
+                None => ShapeKey::TextBox,
+            }
+        }
+        "pic" => ShapeKey::Picture,
+        _ => ShapeKey::Other,
+    }
+}
+
+/// An element as a warning can name it: its qualified name and the name the
+/// deck gave it, when it has one.
+fn element_label(element: &Element) -> String {
+    let named = element
+        .children()
+        .find(|child| child.name.starts_with("nv"))
+        .and_then(|nv| nv.child("cNvPr"))
+        .and_then(|nv| nv.attr("name"))
+        .filter(|name| !name.is_empty());
+    match named {
+        Some(name) => format!("`{}` \"{name}\"", qualified(element)),
+        None => format!("`{}`", qualified(element)),
+    }
 }
 
 /// Drops the autofit scale of a text body whose text has just changed, and
@@ -1690,15 +1937,15 @@ fn rewrite_notes(
     // note that has been retyped is as stale as one on a slide (15-F).
     let mut edits = Vec::new();
     let mut stale = Vec::new();
-    if source[range.clone()] != written {
+    if body_changed(&source[range.clone()], &written) {
         if let Some(scale) = drop_stale_autofit(tx_body, source, &mut edits) {
             stale.push((
                 format!("the note in `{notes_part}` changed, so the writer dropped"),
                 scale,
             ));
         }
+        edits.push((range, written));
     }
-    edits.push((range, written));
     let xml = splice(source, edits);
     if xml != source {
         rebuild
@@ -1841,6 +2088,54 @@ fn paragraph_range(tx_body: &Element) -> std::ops::Range<usize> {
             after..after
         }
     }
+}
+
+/// Whether the `a:p` sequence the writer produced says something the part does
+/// not already say.
+///
+/// 15-B's rule is that **nothing is written unless it differs from what the
+/// part already says**, and «differs» is a question about what the markup
+/// *means*, not about its bytes: two spellings the reader cannot tell apart are
+/// the same body, and rewriting one into the other is an edit nobody asked for.
+///
+/// One such pair exists, and it is the one 15-I recorded as a limit: an empty
+/// paragraph is `<a:p/>` to some producers and `<a:p><a:endParaRPr/></a:p>` to
+/// others. [`super::text`] reads both as a paragraph with no runs and no direct
+/// properties — an `a:p` with no `a:endParaRPr` states none, and an
+/// `a:endParaRPr` with no attributes and no children states none either — so
+/// the two are the same paragraph in the IR. This writer only ever produces the
+/// long form (it is where the properties of the text typed there live, and it
+/// is what every producer writes), which used to mean that a deck spelling it
+/// the short way came back changed on a shape nobody had touched. Expanding the
+/// short spelling before the comparison answers the question in the reader's
+/// units, so the source bytes stand.
+///
+/// It is deliberately a comparison and not a normalisation of the output: a
+/// body that really was edited is still written in this writer's own spelling.
+fn body_changed(current: &str, written: &str) -> bool {
+    current != written && expand_empty_paragraphs(current) != written
+}
+
+/// The short spelling of an empty paragraph in the long one, so that a
+/// comparison against what [`write_text::write_body`] produces is a comparison
+/// of what the two say.
+///
+/// The prefix is `a:` because everything this writer emits is: a package that
+/// binds the DrawingML namespace to another prefix is already rewritten in this
+/// one wherever a body is touched. Neither spelling can occur inside text or an
+/// attribute value — both `<` and `&` are escaped there — so a literal search
+/// cannot match anything but an element.
+fn expand_empty_paragraphs(source: &str) -> std::borrow::Cow<'_, str> {
+    const SHORT: [&str; 3] = ["<a:p/>", "<a:p />", "<a:p></a:p>"];
+    const LONG: &str = "<a:p><a:endParaRPr/></a:p>";
+    if !SHORT.iter().any(|short| source.contains(short)) {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let mut out = source.to_string();
+    for short in SHORT {
+        out = out.replace(short, LONG);
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// Applies non-overlapping edits to the source, left to right.
@@ -2029,6 +2324,7 @@ fn src_rect_xml(crop: &docsai_model::image::CropRect) -> String {
 /// the deck that has no skeleton to preserve.
 fn rewrite_table(
     frame: &Element,
+    source: &str,
     table: &Table,
     lang: Option<&str>,
     rels: &mut PartRels,
@@ -2078,10 +2374,13 @@ fn rewrite_table(
             let paragraphs = write_text::write_body(&cell.blocks, false, lang, rels)
                 .map_err(|reason| format!("its table, which holds {reason}"))?;
             let range = paragraph_range(body);
-            if paragraphs.is_empty() {
-                edits.push((range, "<a:p/>".to_string()));
+            let written = if paragraphs.is_empty() {
+                "<a:p/>".to_string()
             } else {
-                edits.push((range, paragraphs));
+                paragraphs
+            };
+            if body_changed(&source[range.clone()], &written) {
+                edits.push((range, written));
             }
         }
     }
@@ -2993,6 +3292,189 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The short spelling of an empty paragraph is not an edit.
+    ///
+    /// `<a:p/>` and `<a:p><a:endParaRPr/></a:p>` are the same paragraph to the
+    /// reader, and this writer only ever produces the long one. Comparing the
+    /// two by bytes made a shape nobody had touched come back rewritten —
+    /// schema-valid, visually identical and not the package that was read,
+    /// which is the byte-identity property every increment of this phase rests
+    /// on. `corpus/pptx/placeholders-empty.pptx` carries the short spelling on
+    /// purpose since this test was written; the corpus-wide byte-identity tests
+    /// above are what actually catch a regression, and this one says why.
+    #[test]
+    fn the_short_spelling_of_an_empty_paragraph_is_not_an_edit() {
+        let path = deck("placeholders-empty.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let source = String::from_utf8(
+            part_of(&original, "ppt/slides/slide1.xml").expect("the deck has a first slide"),
+        )
+        .expect("the part is text");
+        assert!(
+            source.contains("<a:p/>"),
+            "the fixture is meant to spell an empty paragraph the short way"
+        );
+
+        let (document, assets) = read_deck(&path);
+        let written = write_deck(&document, &assets);
+        assert_eq!(
+            part_of(&written, "ppt/slides/slide1.xml"),
+            Some(source.clone().into_bytes()),
+            "the empty paragraph was rewritten into the writer's own spelling"
+        );
+
+        // And the other half: a body that really changed is still written in
+        // this writer's spelling, so the comparison did not become a licence to
+        // skip an edit.
+        let mut document = document;
+        set_first_text(&mut document, "Título reescrito");
+        let edited = write_deck(&document, &assets);
+        let after = String::from_utf8(
+            part_of(&edited, "ppt/slides/slide1.xml").expect("the slide is in the written deck"),
+        )
+        .expect("the part is text");
+        assert!(
+            after.contains("Título reescrito"),
+            "the edit is not in the file"
+        );
+        assert!(
+            after.contains("<a:p/>"),
+            "the untouched empty paragraph was rewritten anyway"
+        );
+    }
+
+    /// A text box the model adds, for the pairing tests below.
+    fn a_text_box(name: &str, text: &str) -> Shape {
+        let paragraph = docsai_model::text::Paragraph {
+            content: vec![docsai_model::text::Inline::Text(text.into())],
+            ..Default::default()
+        };
+        Shape {
+            name: Some(name.into()),
+            ..Shape::new(
+                99,
+                ShapeKind::TextBox {
+                    body: vec![docsai_model::text::Block::Paragraph(paragraph)],
+                },
+            )
+        }
+    }
+
+    /// A shape the model added does not take the slide's other edits with it.
+    ///
+    /// The writer refused the whole slide when the two sides did not hold the
+    /// same number of shapes, and copying the slide back threw away every
+    /// *other* edit made to it: a caller who added a shape and retyped the
+    /// title lost the retyped title too, which is a loss the warning did not
+    /// mention because the warning was about the shape. Now the shape that
+    /// cannot be added is named on its own and everything else is written.
+    #[test]
+    fn a_shape_added_to_a_preserved_slide_keeps_the_slide_s_other_edits() {
+        let path = deck("placeholders-empty.pptx");
+        let (mut document, assets) = read_deck(&path);
+        set_first_text(&mut document, "Título reescrito");
+        presentation_mut(&mut document).slides[0]
+            .shapes
+            .push(a_text_box("Caja nueva", "Texto añadido"));
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        let slide = String::from_utf8(
+            part_of(&written, "ppt/slides/slide1.xml").expect("the slide is in the package"),
+        )
+        .expect("the part is text");
+
+        assert!(
+            slide.contains("Título reescrito"),
+            "the slide's other edit was thrown away with the shape that could not be added"
+        );
+        assert!(
+            !slide.contains("Texto añadido"),
+            "a shape was spliced into a preserved slide"
+        );
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("Caja nueva"))
+            }),
+            "the shape that was not added is not named: {:?}",
+            report.warnings
+        );
+    }
+
+    /// The other side of the same pairing: a shape the model no longer holds
+    /// stands in the file, said so, and the slide's other edits are written.
+    #[test]
+    fn a_shape_removed_from_a_preserved_slide_is_named_and_stands() {
+        let path = deck("placeholders-empty.pptx");
+        let (mut document, assets) = read_deck(&path);
+        set_first_text(&mut document, "Título reescrito");
+        let gone = presentation_mut(&mut document).slides[0].shapes.pop();
+        assert!(gone.is_some(), "the fixture is meant to have shapes");
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        let slide = String::from_utf8(
+            part_of(&written, "ppt/slides/slide1.xml").expect("the slide is in the package"),
+        )
+        .expect("the part is text");
+
+        assert!(
+            slide.contains("Título reescrito"),
+            "the slide's other edit was thrown away with the shape that could not be removed"
+        );
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("still in the file"))
+            }),
+            "the shape that stands was not named: {:?}",
+            report.warnings
+        );
+    }
+
+    /// A pairing with more than one answer is refused, not guessed.
+    ///
+    /// Two shapes of the same kind and a third added between them leave nothing
+    /// to choose by, and choosing wrong writes one shape's text into another's
+    /// box — the silent corruption 15-H found. So the slide is copied whole,
+    /// exactly as it was before this fix, and the warning says why.
+    #[test]
+    fn an_ambiguous_shape_pairing_copies_the_slide() {
+        let path = deck("placeholders-empty.pptx");
+        let original = std::fs::read(&path).expect("reads the deck");
+        let (mut document, assets) = read_deck(&path);
+        set_first_text(&mut document, "Título reescrito");
+        let twin = presentation(&document).slides[0]
+            .shapes
+            .iter()
+            .find(|shape| matches!(&shape.kind, ShapeKind::Placeholder(ph) if ph.idx == Some(1)))
+            .expect("the fixture has a body placeholder")
+            .clone();
+        // *Before* the placeholder it is a twin of: appended after it, the
+        // alignment would still be forced by the order of the ones that follow.
+        presentation_mut(&mut document).slides[0]
+            .shapes
+            .insert(1, twin);
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        assert!(
+            part_of(&written, "ppt/slides/slide1.xml")
+                == part_of(&original, "ppt/slides/slide1.xml"),
+            "an ambiguous pairing was written anyway"
+        );
+        assert!(
+            report.warnings.iter().any(|warning| {
+                matches!(warning, Warning::Degraded { why, .. } if why.contains("could not be told"))
+            }),
+            "the refusal was silent: {:?}",
+            report.warnings
+        );
     }
 
     /// The claim of 15-B: an edit to the model is in the file.

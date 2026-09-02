@@ -2490,6 +2490,16 @@ def a_p(text: str, *, lvl: int = 0, bullet: str = "") -> str:
     return f'<a:p>{props}<a:r><a:rPr lang="es-ES"/><a:t>{text}</a:t></a:r></a:p>'
 
 
+#: The *other* legal spelling of an empty paragraph. `<a:p/>` and the
+#: `<a:p><a:endParaRPr/></a:p>` :func:`a_p` writes say the same thing — a
+#: paragraph with no runs and no properties — and both are what real producers
+#: emit. The corpus carries one on purpose: the writer only ever produces the
+#: long form, so a deck spelling it the short way is the case that proves the
+#: writer compares a rewritten body against what the part already *says* rather
+#: than against its bytes. It did not, until `kb/73-phase-15-carried.md`.
+A_P_SHORT = "<a:p/>"
+
+
 def tx_body(paragraphs: str, *, body_pr: str = "<a:bodyPr/>") -> str:
     """A `p:txBody`. A text body with **no** `a:p` at all is not schema-valid —
     ECMA-376 `CT_TextBody` requires at least one paragraph, and no application
@@ -2827,12 +2837,18 @@ def pptx_placeholders_cascade() -> None:
 def pptx_placeholders_empty() -> None:
     """An empty placeholder is content: it holds a position the layout gave it
     and a user is expected to fill it. Phase 1 shipped a bug that dropped empty
-    paragraphs; this is where the same bug would land in a deck."""
+    paragraphs; this is where the same bug would land in a deck.
+
+    The two spellings of an empty paragraph are both here on purpose: the body
+    placeholder uses the short `<a:p/>` and the text placeholder the long
+    `<a:p><a:endParaRPr/></a:p>`. They say the same thing, and a writer that
+    rewrote one into the other would break byte identity on a shape nobody
+    edited — which it did until `kb/73-phase-15-carried.md`."""
     build_pptx(
         "placeholders-empty.pptx",
         [slide(
             shape(2, "Title 1", a_p("Título con cuerpo vacío"), ph=ph("title"))
-            + shape(3, "Content Placeholder 2", a_p(""), ph=ph("body", 1))
+            + shape(3, "Content Placeholder 2", A_P_SHORT, ph=ph("body", 1))
             + shape(4, "Text Placeholder 3", a_p("Primera línea") + a_p("") + a_p("Tras el hueco"),
                     ph=ph("body", 2), frame=xfrm(838200, 4500000, 7467600, 1500000))
         )],

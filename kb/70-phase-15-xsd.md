@@ -221,6 +221,12 @@ After both fixes and the Part 3 step: **34 packages, 322 parts, 0 invalid, 0 not
   means a flag in the model saying which form the source used, which is an IR change and not this
   increment's. No corpus deck contains a bare `<a:p/>` any more, so nothing hides it — but a deck in
   the wild that does will fail the byte-identity claim on that shape and nothing will say so.
+
+  **Fixed in [[73-phase-15-carried]], and the diagnosis above was wrong**: no IR flag is needed. The
+  writer's own 15-B rule is that nothing is written unless it differs from what the part already
+  *says*, and the two spellings say the same thing to the reader — so the comparison, not the model,
+  was where the defect lived. `corpus/pptx/placeholders-empty.pptx` now carries the short spelling
+  on purpose, which is what makes the byte-identity tests able to see this fail.
 - **Schema validity is not «PowerPoint opens it».** A package can be schema-valid and still be
   repaired — a dangling relationship, a `r:embed` pointing at nothing, an `[Content_Types]` gap.
   That is what `corpus/opc_check.py` covers, and the two are complementary: this gate answers «is
