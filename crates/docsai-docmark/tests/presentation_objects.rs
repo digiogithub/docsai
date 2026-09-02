@@ -6,13 +6,13 @@
 //! about the three kinds that are *not* containers and the ones that are
 //! nothing but a stub.
 
-use docsai_docmark::{serialize, Fidelity, Options};
+use docsai_docmark::{parse, serialize, Fidelity, Options};
 use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{ImageGeometry, ImageRef, RawId};
 use docsai_model::presentation::{
-    ChartRef, Layout, LayoutId, LayoutPlaceholder, PhType, Placeholder, Presentation, Shape,
-    ShapeGeometry, ShapeKind, Slide,
+    ChartRef, ChartSeries, Layout, LayoutId, LayoutPlaceholder, PhType, Placeholder, Presentation,
+    Shape, ShapeGeometry, ShapeKind, Slide,
 };
 use docsai_model::text::{Block, Paragraph, Table, TableCell, TableRow};
 use docsai_model::units::{Length, Point, Size};
@@ -407,8 +407,9 @@ fn a_chart_is_a_stub_naming_its_kind_and_where_its_numbers_are() {
         &options(Fidelity::Full),
     );
 
-    // Rule 8: a stub, until Phase 16 turns the series into a table. Its title
-    // is the body, because a title is what a reader can see.
+    // A chart the reader could not resolve into data is the stub it always
+    // was: an empty table would claim it plots nothing. Its title is the body,
+    // because a title is what a reader can see.
     assert_eq!(
         body_of(&markdown),
         format!(
@@ -481,4 +482,211 @@ fn a_slide_of_objects_is_byte_deterministic() {
     let (first, _) = serialize(&document, &store, &options(Fidelity::Full));
     let (second, _) = serialize(&document, &store, &options(Fidelity::Full));
     assert_eq!(first, second);
+}
+
+// --------------------------------------------------------------------------
+// The chart's data table (spec §11.2; plan v2 Phase 16 increment B)
+// --------------------------------------------------------------------------
+
+/// A chart that plots something: two series over three categories, a hole in
+/// the second, and a format code on one of them.
+fn plotting_chart() -> Shape {
+    let mut shape = chart_shape(None);
+    if let ShapeKind::Chart(chart) = &mut shape.kind {
+        chart.categories = vec!["Q1".into(), "Q2".into(), "Q3".into()];
+        chart.series = vec![
+            ChartSeries {
+                name: Some("North".into()),
+                values: vec![Some(1200.0), Some(980.0), Some(1440.5)],
+                number_format: Some("#,##0".into()),
+            },
+            ChartSeries {
+                name: Some("South".into()),
+                values: vec![Some(800.0), None, Some(910.0)],
+                number_format: None,
+            },
+        ];
+    }
+    shape
+}
+
+/// The `ChartRef` a deck's single object shape holds.
+fn chart_of(document: &Document) -> &ChartRef {
+    let Document::Presentation(deck) = document else {
+        panic!("not a deck");
+    };
+    deck.slides
+        .iter()
+        .flat_map(|slide| &slide.shapes)
+        .find_map(|shape| match &shape.kind {
+            ShapeKind::Chart(chart) => Some(chart),
+            _ => None,
+        })
+        .expect("a chart")
+}
+
+#[test]
+fn a_chart_writes_its_series_as_a_table() {
+    let store = MemoryAssetStore::new();
+    let (markdown, report) = serialize(
+        &deck(vec![plotting_chart()]),
+        &store,
+        &options(Fidelity::Full),
+    );
+
+    // The title first — it is what the object *shows* — then the table it
+    // plots. The first header cell is empty because the category axis has no
+    // title in the model, and the gap in South is an empty cell: a `0` there
+    // would draw a line through the floor.
+    assert_eq!(
+        body_of(&markdown),
+        "## Q3 results {#n1 .slide layout=L1}\n\n\
+         Revenue up 12 %\n\n\
+         ::: {#n2 .chart kind=barChart name=\"Chart 5\" raw=r5}\n\
+         Revenue by region\n\n\
+         |     | North {format=\"#,##0\"} | South |\n\
+         | --- | ---------------------- | ----- |\n\
+         | Q1  | 1200                   | 800   |\n\
+         | Q2  | 980                    |       |\n\
+         | Q3  | 1440.5                 | 910   |\n\
+         :::\n",
+        "{markdown}"
+    );
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+}
+
+#[test]
+fn standard_writes_the_table_and_not_the_number_formats() {
+    let store = MemoryAssetStore::new();
+    let (markdown, _) = serialize(&deck(vec![plotting_chart()]), &store, &standard());
+
+    // `format=` is the one attribute block that would show *inside* a rendered
+    // table cell, and `standard` is the level a plain viewer reads.
+    assert!(
+        body_of(&markdown).contains(
+            "|     | North  | South |\n\
+             | --- | ------ | ----- |\n\
+             | Q1  | 1200   | 800   |\n"
+        ),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("format="), "{markdown}");
+}
+
+#[test]
+fn plain_still_writes_only_what_the_chart_shows() {
+    let store = MemoryAssetStore::new();
+    let (markdown, _) = serialize(
+        &deck(vec![plotting_chart()]),
+        &store,
+        &options(Fidelity::Plain),
+    );
+
+    // `plain` writes no container, so there is nowhere for the table to go —
+    // and a bare GFM table of numbers with no box around it is not what the
+    // slide shows either.
+    assert_eq!(
+        body_of(&markdown),
+        "## Q3 results\n\nRevenue up 12 %\n\nRevenue by region\n",
+        "{markdown}"
+    );
+}
+
+#[test]
+fn a_chart_round_trips_through_docmark() {
+    let mut store = MemoryAssetStore::new();
+    let document = deck(vec![plotting_chart()]);
+    let (markdown, _) = serialize(&document, &store, &options(Fidelity::Full));
+    let (back, report) = parse(&markdown, &mut store).expect("parses");
+
+    assert_eq!(chart_of(&back), chart_of(&document));
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+}
+
+#[test]
+fn a_category_less_chart_round_trips_as_one() {
+    let mut store = MemoryAssetStore::new();
+    let mut shape = plotting_chart();
+    if let ShapeKind::Chart(chart) = &mut shape.kind {
+        chart.categories.clear();
+    }
+    let document = deck(vec![shape]);
+    let (markdown, _) = serialize(&document, &store, &options(Fidelity::Full));
+
+    // The first column is still there and is empty from top to bottom: one
+    // rule — trailing empty category cells are not categories — covers both a
+    // scatter and a series longer than its axis.
+    assert!(
+        markdown.contains(
+            "|     | North {format=\"#,##0\"} | South |\n\
+             | --- | ---------------------- | ----- |\n\
+             |     | 1200                   | 800   |\n"
+        ),
+        "{markdown}"
+    );
+    let (back, _) = parse(&markdown, &mut store).expect("parses");
+    assert_eq!(chart_of(&back), chart_of(&document));
+}
+
+#[test]
+fn a_chart_table_typed_by_hand_parses() {
+    let mut store = MemoryAssetStore::new();
+    // No front matter, no ids, no `kind=`, no padding, no leading pipes: a
+    // person writing DocMark in an editor. Input is tolerant (spec §11.2).
+    let markdown = "## Sales {.slide}\n\n\
+                    ::: {.chart}\n\
+                    Sales by quarter\n\n\
+                    Quarter | North | South\n\
+                    --- | --- | ---\n\
+                    Q1 | 1200 | 800\n\
+                    Q2 | 980 |\n\
+                    :::\n";
+    let (document, report) = parse(markdown, &mut store).expect("parses");
+    let chart = chart_of(&document);
+
+    assert_eq!(chart.title.as_deref(), Some("Sales by quarter"));
+    assert_eq!(chart.categories, vec!["Q1".to_string(), "Q2".to_string()]);
+    assert_eq!(chart.series.len(), 2);
+    assert_eq!(chart.series[0].name.as_deref(), Some("North"));
+    assert_eq!(chart.series[0].values, vec![Some(1200.0), Some(980.0)]);
+    // An empty cell is a gap, and a row that stops short is the same thing.
+    assert_eq!(chart.series[1].values, vec![Some(800.0), None]);
+
+    // The axis label is the one thing a hand-typed table can carry that the
+    // model cannot hold, so it is dropped — and said.
+    assert!(
+        report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::Degraded { why, .. } if why.contains("`Quarter`")
+        )),
+        "{:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn a_value_that_is_not_a_number_is_a_gap_and_a_warning() {
+    let mut store = MemoryAssetStore::new();
+    let markdown = "## Sales {.slide}\n\n\
+                    ::: {.chart}\n\
+                    |  | North |\n\
+                    | --- | --- |\n\
+                    | Q1 | 1.200,00 |\n\
+                    | Q2 | 980 |\n\
+                    :::\n";
+    let (document, report) = parse(markdown, &mut store).expect("parses");
+
+    // Never a silent zero: a zero plots a point the author did not write.
+    assert_eq!(
+        chart_of(&document).series[0].values,
+        vec![None, Some(980.0)]
+    );
+    assert!(
+        report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::UnsupportedElement { kind, .. } if kind == "chart value `1.200,00`"
+        )),
+        "{:?}",
+        report.warnings
+    );
 }

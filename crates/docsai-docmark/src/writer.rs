@@ -1353,7 +1353,7 @@ fn escape_link_target(target: &str) -> String {
 }
 
 /// Column widths for a padded GFM table (spec §8: padded below 120 columns).
-fn column_widths(grid: &[Vec<String>], columns: usize) -> Vec<usize> {
+pub(crate) fn column_widths(grid: &[Vec<String>], columns: usize) -> Vec<usize> {
     const MAX_PADDED_COLUMNS: usize = 120;
     if columns > MAX_PADDED_COLUMNS {
         return vec![0; columns];
@@ -1369,7 +1369,7 @@ fn column_widths(grid: &[Vec<String>], columns: usize) -> Vec<usize> {
     widths
 }
 
-fn render_row(row: &[String], widths: &[usize]) -> String {
+pub(crate) fn render_row(row: &[String], widths: &[usize]) -> String {
     let cells: Vec<String> = row
         .iter()
         .zip(widths)
@@ -1381,7 +1381,7 @@ fn render_row(row: &[String], widths: &[usize]) -> String {
     format!("| {} |\n", cells.join(" | "))
 }
 
-fn render_delimiter(widths: &[usize]) -> String {
+pub(crate) fn render_delimiter(widths: &[usize]) -> String {
     let cells: Vec<String> = widths.iter().map(|w| "-".repeat((*w).max(3))).collect();
     format!("| {} |\n", cells.join(" | "))
 }

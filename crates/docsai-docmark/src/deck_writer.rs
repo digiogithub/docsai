@@ -21,7 +21,7 @@
 use docsai_model::addressing::{implicit_shapes, NodeKind};
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{Flip, ImageRef};
-use docsai_model::presentation::{PhType, Presentation, Shape, ShapeKind, Slide};
+use docsai_model::presentation::{ChartRef, PhType, Presentation, Shape, ShapeKind, Slide};
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::text::{Block, Table};
 
@@ -30,7 +30,7 @@ use crate::dict::AttrDict;
 use crate::escape::{escape, TextContext};
 use crate::ids::IdSource;
 use crate::units::number;
-use crate::writer::Writer;
+use crate::writer::{column_widths, render_delimiter, render_row, Writer};
 use crate::{Fidelity, Options};
 
 /// The DrawingML preset every plain box has (`a:prstGeom@prst="rect"`).
@@ -260,6 +260,9 @@ fn write_shape(
     let mut blocks: &[Block] = &[];
     let mut label = "";
     let mut raw = None;
+    // A chart is the one stub whose body is more than a label: the series it
+    // plots, as the table of spec §11.2.
+    let mut data = None;
     // What only one kind of shape knows, folded into its container.
     let mut extra = Attrs::new();
     match &shape.kind {
@@ -278,12 +281,14 @@ fn write_shape(
             return;
         }
         ShapeKind::Chart(chart) => {
-            // A chart is a rule-8 stub until Phase 16 turns its series into a
-            // table. The title is what a reader can see, so it is the body
-            // rather than an attribute, and it survives `plain`.
+            // A chart is a stub over markup, and — since Phase 16 — the data
+            // that markup plots. The title is what a reader can see, so it is
+            // the body rather than an attribute, and it survives `plain`; the
+            // table follows it, at every level that writes a container.
             class = "chart";
             label = chart.title.as_deref().unwrap_or_default();
             raw = chart.raw.as_ref();
+            data = chart_table(chart, options.fidelity);
             extra.set_opt("kind", chart.kind.clone());
             if let Some(path) = chart.workbook.as_ref().and_then(|w| writer.asset_path(w)) {
                 // Where the numbers are. Not a raw payload — the workbook is a
@@ -396,6 +401,15 @@ fn write_shape(
         // label is a silent loss.
         body = escape(label, TextContext::Block);
     }
+    if let Some(table) = data {
+        // Title first, then the table: a paragraph is what the object *shows*
+        // and the table is what it plots, and a reader — ours or a human's —
+        // tells them apart by the delimiter row, never by position.
+        if !body.trim().is_empty() {
+            body = format!("{}\n\n", body.trim_end());
+        }
+        body.push_str(&table);
+    }
 
     let rendered = if body.trim().is_empty() {
         format!("::: {}\n:::", attrs.render_with(writer.dict()))
@@ -410,6 +424,95 @@ fn write_shape(
         .ids()
         .record(id.as_deref(), NodeKind::Shape, &rendered, mark);
     push_block(out, &rendered);
+}
+
+/// A chart's series as the GFM table of spec §11.2.
+///
+/// Categories down the first column, one column per series, the series name as
+/// its header. Four decisions are the format, not this function:
+///
+/// - **The first header cell is empty.** The category axis has no title in the
+///   IR — a chart part states one nowhere the model keeps — and inventing a
+///   word for it would put a label in the document that the file never said.
+/// - **An empty cell is a gap.** `None` is not a zero: PowerPoint leaves a hole
+///   in the line where a zero would draw one, and a blank cell is what a
+///   spreadsheet means by the same thing. A zero is written `0`.
+/// - **Trailing empty category cells are not categories.** That is one rule for
+///   two cases: a series longer than the axis, and a **category-less** chart —
+///   a scatter — whose first column is empty from top to bottom.
+/// - **`format=` rides on the series header**, and only at the levels that
+///   write back. It is `c:formatCode`, the difference between `0.42` and
+///   `42 %`; it is also the one attribute block that would show *inside* a
+///   rendered table cell, which is exactly what `standard` may not leak.
+fn chart_table(chart: &ChartRef, fidelity: Fidelity) -> Option<String> {
+    if fidelity == Fidelity::Plain {
+        // `plain` writes no container at all, so there is nowhere to put it.
+        return None;
+    }
+    let rows = chart.categories.len().max(
+        chart
+            .series
+            .iter()
+            .map(|series| series.values.len())
+            .max()
+            .unwrap_or(0),
+    );
+    if rows == 0 {
+        // A chart the reader could not resolve into data is the stub it always
+        // was: an empty table would claim it plots nothing.
+        return None;
+    }
+    let columns = chart.series.len() + 1;
+    let with_format = fidelity.addresses();
+
+    let mut grid: Vec<Vec<String>> = Vec::with_capacity(rows + 1);
+    let mut header = Vec::with_capacity(columns);
+    header.push(String::new());
+    for series in &chart.series {
+        let mut cell = escape(
+            series.name.as_deref().unwrap_or_default(),
+            TextContext::TableCell,
+        );
+        if with_format {
+            if let Some(format) = &series.number_format {
+                let mut attrs = Attrs::new();
+                attrs.set("format", format.clone());
+                cell.push_str(&attrs.suffix());
+            }
+        }
+        header.push(cell);
+    }
+    grid.push(header);
+
+    for index in 0..rows {
+        let mut row = Vec::with_capacity(columns);
+        row.push(escape(
+            chart
+                .categories
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or_default(),
+            TextContext::TableCell,
+        ));
+        for series in &chart.series {
+            row.push(match series.values.get(index) {
+                // `f64`'s own `Display` is the shortest text that reads back as
+                // the same number: rounding a chart's values to two decimals
+                // would change what the slide plots.
+                Some(Some(value)) => value.to_string(),
+                _ => String::new(),
+            });
+        }
+        grid.push(row);
+    }
+
+    let widths = column_widths(&grid, columns);
+    let mut out = render_row(&grid[0], &widths);
+    out.push_str(&render_delimiter(&widths));
+    for row in &grid[1..] {
+        out.push_str(&render_row(row, &widths));
+    }
+    Some(out.trim_end().to_string())
 }
 
 /// Where a shape sits, as the levels that write back need it (rule 7).

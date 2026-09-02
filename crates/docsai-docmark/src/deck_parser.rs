@@ -24,8 +24,8 @@ use docsai_model::addressing::NodeId;
 use docsai_model::assets::AssetStore;
 use docsai_model::image::{Flip, RawId};
 use docsai_model::presentation::{
-    ChartRef, LayoutCatalog, LayoutId, PhType, Placeholder, Presentation, RawShape, RawShapeKind,
-    Shape, ShapeGeometry, ShapeKind, SkeletonRef, Slide,
+    ChartRef, ChartSeries, LayoutCatalog, LayoutId, PhType, Placeholder, Presentation, RawShape,
+    RawShapeKind, Shape, ShapeGeometry, ShapeKind, SkeletonRef, Slide,
 };
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::text::Block;
@@ -34,10 +34,11 @@ use docsai_model::{Document, Format};
 
 use crate::attrs::Attrs;
 use crate::error::ParseError;
+use crate::escape::unescape;
 use crate::frontmatter_parse::FrontMatter;
 use crate::parser::{
-    apply_table_attrs, looks_like_table, split_one_fence, split_tight_attrs, split_top_level,
-    split_trailing_attrs, BodyParser,
+    apply_table_attrs, looks_like_table, split_one_fence, split_table_row, split_tight_attrs,
+    split_top_level, split_trailing_attrs, BodyParser,
 };
 
 /// True when the document should be parsed as a deck rather than as text.
@@ -369,19 +370,28 @@ fn parse_shape(
             }
             ShapeKind::Group(children)
         }
-        "chart" => ShapeKind::Chart(ChartRef {
-            kind: attrs.get("kind").map(str::to_string),
-            title: label(body, parser, line)?,
-            workbook: match attrs.get("data") {
-                Some(path) => parser.find_asset(path)?,
-                None => None,
-            },
-            raw: attrs.get("raw").map(RawId::new),
-            // The series are the chart's data table, and 16-B is what writes
-            // and reads it. Until then a parsed chart plots nothing, which is
-            // what the DocMark it came from says.
-            ..ChartRef::default()
-        }),
+        "chart" => {
+            // The body of a chart is what it *shows* and what it *plots*: a
+            // title, and the table of spec §11.2. The delimiter row is what
+            // separates them, so a hand-typed chart needs no marker and the
+            // order of the two is not load-bearing.
+            let (prose, table) = split_chart_table(body);
+            let (categories, series) = match &table {
+                Some(text) => parse_chart_table(text, line, parser),
+                None => (Vec::new(), Vec::new()),
+            };
+            ShapeKind::Chart(ChartRef {
+                kind: attrs.get("kind").map(str::to_string),
+                title: label(&prose, parser, line)?,
+                workbook: match attrs.get("data") {
+                    Some(path) => parser.find_asset(path)?,
+                    None => None,
+                },
+                categories,
+                series,
+                raw: attrs.get("raw").map(RawId::new),
+            })
+        }
         "connector" | "smartart" | "ole" | "media" | "object" => ShapeKind::Raw(RawShape {
             kind: raw_kind(class),
             raw: attrs.get("raw").map(RawId::new),
@@ -450,6 +460,154 @@ fn label(
         .collect::<Vec<_>>()
         .join(" ");
     Ok(Some(text).filter(|t| !t.is_empty()))
+}
+
+/// Splits a `.chart` body into the prose it shows and the table it plots.
+///
+/// The table is found by its **delimiter row** — the `| --- | --- |` GFM
+/// requires — and runs from the header line above it to the first line that is
+/// not part of a table. Everything else, before or after, is prose. Nothing
+/// here depends on the writer's own layout: a table a person typed, unpadded
+/// and with no leading pipe, is found by the same rule.
+fn split_chart_table(body: &str) -> (String, Option<String>) {
+    let lines: Vec<&str> = body.lines().collect();
+    let mut start = None;
+    for (index, line) in lines.iter().enumerate() {
+        if !is_delimiter_row(line) || index == 0 {
+            continue;
+        }
+        // The header is the line above it, and a delimiter row with nothing
+        // above it heads no table.
+        if lines[index - 1].contains('|') {
+            start = Some(index - 1);
+            break;
+        }
+    }
+    let Some(start) = start else {
+        return (body.to_string(), None);
+    };
+    let mut end = start + 2;
+    while end < lines.len() && lines[end].contains('|') {
+        end += 1;
+    }
+    let table = lines[start..end].join("\n");
+    let mut prose: Vec<&str> = lines[..start].to_vec();
+    prose.extend_from_slice(&lines[end..]);
+    (prose.join("\n"), Some(table))
+}
+
+fn is_delimiter_row(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty()
+        && line.contains('|')
+        && line.contains('-')
+        && line.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+}
+
+/// The chart's table, read back into categories and series.
+///
+/// The mirror of [`crate::deck_writer`]'s writer, and the same four rules: the
+/// first column is the categories, an empty cell is a **gap**, trailing empty
+/// category cells are not categories — which is how a category-less chart
+/// reads back — and `format=` on a series header is its `c:formatCode`.
+///
+/// A cell that is not a number is a gap **and a warning**: reading it as a zero
+/// would draw a line through the floor where the author wrote a typo
+/// (`AGENTS.md` §7 rule 3).
+fn parse_chart_table(
+    text: &str,
+    line: usize,
+    parser: &mut BodyParser<'_>,
+) -> (Vec<String>, Vec<ChartSeries>) {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || !trimmed.contains('|') || is_delimiter_row(trimmed) {
+            continue;
+        }
+        rows.push(split_table_row(trimmed));
+    }
+    if rows.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let header = rows.remove(0);
+    let columns = rows
+        .iter()
+        .map(Vec::len)
+        .chain(std::iter::once(header.len()))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    // The first header cell names the category axis, and the IR has nowhere to
+    // put that. Our own writer leaves it empty, so this fires only on a table
+    // somebody typed — which is when something is really being dropped.
+    if let Some(axis) = header
+        .first()
+        .map(|cell| cell.trim())
+        .filter(|c| !c.is_empty())
+    {
+        // `Degraded`, not `UnsupportedElement`: one word of an axis heading is
+        // a Minor loss beside a value read as a gap, and 16-A says the same
+        // thing about the chart losses on the way in.
+        parser.report.warn(Warning::Degraded {
+            what: format!("chart table at line {line}"),
+            why: format!(
+                "the category axis label `{axis}` is dropped: a chart's axis carries no title in the model"
+            ),
+        });
+    }
+
+    let mut categories: Vec<String> = rows
+        .iter()
+        .map(|row| unescape(row.first().map(String::as_str).unwrap_or_default()))
+        .collect();
+    while categories.last().is_some_and(|c| c.is_empty()) {
+        categories.pop();
+    }
+
+    let mut series = Vec::with_capacity(columns - 1);
+    for column in 1..columns {
+        let (name, number_format) = match header.get(column) {
+            Some(cell) => {
+                let (text, attrs) = split_trailing_attrs(cell.trim());
+                let name = unescape(text.trim());
+                (
+                    Some(name).filter(|n| !n.is_empty()),
+                    attrs.and_then(|a| a.get("format").map(str::to_string)),
+                )
+            }
+            None => (None, None),
+        };
+        let values = rows
+            .iter()
+            .map(|row| {
+                let cell = row.get(column).map(|c| c.trim()).unwrap_or_default();
+                if cell.is_empty() {
+                    // A gap. This is the one place the format has to be read
+                    // exactly as a spreadsheet reads a blank cell.
+                    return None;
+                }
+                match cell.parse::<f64>() {
+                    Ok(value) if value.is_finite() => Some(value),
+                    _ => {
+                        parser.report.warn(Warning::UnsupportedElement {
+                            kind: format!("chart value `{cell}`"),
+                            location: format!("line {line}"),
+                            action: "read as a gap: not a number a chart can plot".into(),
+                        });
+                        None
+                    }
+                }
+            })
+            .collect();
+        series.push(ChartSeries {
+            name,
+            values,
+            number_format,
+        });
+    }
+    (categories, series)
 }
 
 fn raw_kind(class: &str) -> RawShapeKind {

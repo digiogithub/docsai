@@ -22,4 +22,9 @@ skeleton: assets/_skeleton/deck-80d100d0.pptx
 - La hoja viaja igualmente como activo, porque dice de dónde salieron.
 
 ::: {#n3 .chart data="assets/asset-d8a11a3d.xlsx" kind=barChart name="Gráfico 1" pos="88px,143.75pt" raw=raw-0001 size="784px,10cm"}
+|       | Ventas {format=General} |
+| ----- | ----------------------- |
+| Norte | 1200                    |
+| Sur   | 980                     |
+| Este  | 1440                    |
 :::

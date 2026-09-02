@@ -23,4 +23,10 @@ skeleton: assets/_skeleton/deck-0f13be3a.pptx
 
 ::: {#n3 .chart kind=lineChart name="Gráfico 1" pos="88px,143.75pt" raw=raw-0001 size="784px,10cm"}
 Ventas por trimestre
+
+|     | Norte {format="#,##0"} | Sur {format="#,##0"} | Total {format=General} |
+| --- | ---------------------- | -------------------- | ---------------------- |
+| Q1  | 1200                   | 800                  | 2000                   |
+| Q2  | 980                    |                      | 980                    |
+| Q3  | 1440                   | 910                  | 2350                   |
 :::

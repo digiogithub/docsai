@@ -17,4 +17,9 @@ skeleton: assets/_skeleton/deck-16fecad6.pptx
 ## Ventas por zona {#n1 .slide layout="ppt/slideLayouts/slideLayout1.xml"}
 
 ::: {#n2 .chart data="assets/asset-48b54984.xlsx" kind=barChart name="Gráfico 1" pos="88px,143.75pt" raw=raw-0001 size="784px,10cm"}
+|       | Ventas {format=General} |
+| ----- | ----------------------- |
+| Norte | 1200                    |
+| Sur   | 980                     |
+| Este  | 1440                    |
 :::

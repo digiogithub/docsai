@@ -2153,7 +2153,7 @@ fn split_attrs(text: &str, require_space: bool) -> (&str, Option<Attrs>) {
     (text, None)
 }
 
-fn split_table_row(line: &str) -> Vec<String> {
+pub(crate) fn split_table_row(line: &str) -> Vec<String> {
     let line = line.trim().trim_matches('|');
     let mut cells = Vec::new();
     let mut cur = String::new();

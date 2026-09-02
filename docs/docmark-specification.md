@@ -800,6 +800,63 @@ so it survives even at `plain`.
 | `kind=` | What kind of chart — `barChart`, `lineChart` — as the chart part names it | every level but `plain` |
 | `data=` | The embedded workbook holding the series, as an asset reference. Not a raw payload: the file sits beside the document | every level but `plain` |
 
+#### A chart's data table
+
+A `.chart` is the one stub whose body is more than a label, because a chart's meaning **is**
+recoverable: what it plots is a table, and Markdown already has one. The container's body is the
+chart's title, when it has one, and then the series as a GFM table:
+
+```markdown
+::: {#n2 .chart kind=barChart data="assets/asset-48b54984.xlsx"}
+Sales by region
+
+|       | North {format="#,##0"} | South |
+| ----- | ---------------------- | ----- |
+| Q1    | 1200                   | 800   |
+| Q2    | 980                    |       |
+| Q3    | 1440                   | 910   |
+:::
+```
+
+Six rules, and a second implementation has to give the same answers:
+
+1. **The categories are the first column, the series are the rest**, one column each, its name in
+   the header. The categories belong to the chart and not to a series — that is what a chart part's
+   category reference is, one axis for the whole plot — so writing them once is what the file says,
+   and a column per series could state two axes no chart can draw.
+2. **The first header cell is empty, and whatever is in it is not data.** A category axis has no
+   title in this format, so a reader drops a word typed there and warns; a writer never puts one
+   back. It is left empty rather than filled with a word like `Category` because a document must
+   not carry a label its source never said, and because a chart in any language would then read
+   its own axis heading as a series name.
+3. **An empty cell is a gap**, not a zero and not an empty label. A gap is a category a series does
+   not plot: the value is missing, and a renderer leaves a hole where a `0` would draw a point on
+   the floor. A zero is written `0`.
+4. **Trailing empty category cells are not categories.** One rule covers two shapes: a series
+   longer than the axis, and a **category-less** chart — a scatter — whose first column is empty
+   from top to bottom and whose series are read by position. A chart whose every category label is
+   genuinely empty is therefore read as category-less, and that is the price of the rule.
+5. **`format=` on a series header is its number format** — the difference between `0.42` and
+   `42 %`, and what lets a consumer render the numbers as the slide renders them. It is written at
+   `full` and `agent` only: it is the one attribute block that would show *inside* a rendered table
+   cell, and `standard` is the level a plain viewer reads. Nothing else is written back from
+   `standard`, so nothing is spent that was going to be used.
+6. **A value that is not a number is a gap, and a warning.** Reading `1.200,00` as `1200`, or as
+   `0`, would plot a number nobody wrote.
+
+A chart the reader could not resolve into any data writes no table at all: an empty one would claim
+the chart plots nothing. At `plain` there is no container, so there is no table either — the chart
+is the text it shows, and the loss is warned like every other.
+
+Input is tolerant here as everywhere else (see *Reading a deck back*): the table is found by its
+delimiter row, so a table a person typed — unpadded, without leading pipes, before or after the
+title — reads as the same series.
+
+This is **not** a version bump. 1.2 already defined the `.chart` stub and its body as free text, and
+a 1.2 reader that knows nothing of this table sees a GFM table where it expected a label: it keeps
+the title, it renders the numbers, and it loses only the fact that they are a series. The profile
+grew where it said it would, which is what the additive rule below means.
+
 #### Speaker notes
 
 Rule 5 in full. The notes of a slide are written after its shapes, and they are the one node whose
@@ -866,8 +923,17 @@ tables and images: principle §0.1 holds, which is the whole point of the implic
 
 #### Not yet implemented
 
-Charts and SmartArt have no representation of their own: both are rule-8 stubs, and turning a
-chart into data (series and categories as a table) is plan v2 Phase 16. `data=` is written when the
-IR names the workbook; the pptx reader of Phase 13 keeps it inside the skeleton instead, so today
-the attribute is the exception rather than the rule. The `.odp` reader
-(Phase 18) and the pptx writer (Phase 15) consume this profile but do not change it.
+**SmartArt is still a stub, and stays one.** A diagram's meaning is its layout algorithm — a
+hierarchy, a cycle, a matrix — and there is no Markdown form that states it; a bare list of the
+node texts would read as a list, which is not what the shape is. `.smartart` therefore remains a
+rule-8 marker over the preserved markup, and the text it shows is its body. A chart is the
+opposite case, and *A chart's data table* above is what came of it.
+
+Two things a chart carries that this format does not. A **multi-level category axis** — `2026 / Q1`
+as a tree — is one column here, so a chart whose axis has more than one level loses the levels
+above the bottom, and the reader that finds one says so rather than flattening it silently. And the
+**formulas** behind a series, the workbook ranges a chart part records beside its cached values,
+are not written: `data=` names the workbook, the table states what the chart plots, and a range
+copied into the document would be a second copy that a hand edit could contradict.
+
+The `.odp` reader (Phase 18) consumes this profile but does not change it.
