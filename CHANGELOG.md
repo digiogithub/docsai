@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- pptx writer: a shape added to a preserved slide no longer discards that
+  slide's other edits. The shape that cannot be added — and, symmetrically, one
+  the model removed — is named on its own, and every other edit to the slide is
+  written. A pairing with more than one answer is still refused rather than
+  guessed.
+- pptx writer: an empty paragraph spelt `<a:p/>` survives a round trip. The
+  writer compared a rewritten text body against the part's bytes rather than
+  against what the part says, so a deck using that spelling came back changed on
+  a shape nobody had edited — and reported a stale autofit scale that was not.
+- **The `.docx` writer no longer writes DocMark's own node ids into the package
+  as Word bookmarks.** A node id has two provenances and only one of them is
+  document content: a name read off a `w:bookmarkStart` in the source
+  (`_Toc234329254`) is what a TOC's hyperlinks and `PAGEREF` fields address the
+  paragraph by, and it is still written back; a counter id the allocator handed
+  out (`n7`) is DocMark's own address, derived deterministically from document
+  order, and nothing in the package refers to it. Writing the counter ids back
+  invented bookmarks the document never had and broke round-trip idempotence:
+  only a paragraph and a heading own a `w:p` to carry one, so their ids stuck
+  across a round trip while a footnote's, a table's and an image's were handed
+  out afresh, and the second pass numbered the rest around the survivors. It is
+  what had kept `docx_roundtrip_is_idempotent` red on `corpus/docx/footnotes.docx`
+  since commit `88ff8e11`, where the bookmark path was added: its two footnotes
+  came back as `{#n4}` and `{#n5}` where the first pass had said `{#n2}` and
+  `{#n4}`.
+
 - **Two corpus decks were not schema-valid, and the packages written from them inherited it.**
   The new schema gate found both on its first run, in fixtures nine increments of writer tests had
   round-tripped without complaint. `corpus/generate.py` gave a shape with no text a `p:txBody` with

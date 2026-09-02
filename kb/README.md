@@ -42,9 +42,52 @@ Practical difference between the two folders:
 | [26 — jj, not git](26-jj-vcs.md) | This repository is driven by Jujutsu; what git misreports, what `git commit` left behind, and the command map |
 | [27 — Phase 11 G](27-phase-11-search.md) | `docsai search`: why the unit is the block and not the addressed node, and the relative address prose gets |
 | [28 — Phase 11 H](28-phase-11-mcp.md) | The three primitives over MCP, `include_images` as a ladder of cost, and the phase close |
+| [29 — Phase 12 plan](29-phase-12-plan.md) | The three presentation spikes, what each has to answer before any code is written |
+| [30 — Phase 12 A](30-phase-12-pptx-corpus.md) | The `corpus/pptx` decks, built by hand: one trait per file, and why they are generated |
+| [31 — Phase 12 B](31-phase-12-spike-p1.md) | Spike P1: `ooxmlsdk` weighed against a parser of our own, and the decision |
+| [32 — Phase 12 C](32-phase-12-spike-p2.md) | Spike P2: the DocMark-P draft, its eight rules and the residue probe |
+| [33 — Phase 12 D](33-phase-12-spike-p3.md) | Spike P3: the preserved skeleton, and what LibreOffice accepts in silence |
+| [34 — Phase 13 plan](34-phase-13-plan.md) | Increments A–K of reading a `.pptx` into the IR |
+| [35 — Phase 13 A](35-phase-13-ir-root.md) | `Document::Presentation`: the third IR root beside text and workbook |
+| [36 — Phase 13 B](36-phase-13-package-layer.md) | Parts, layouts, masters, slide order and sections |
+| [37 — Phase 13 C](37-phase-13-slide-text.md) | The shapes and text of a slide |
+| [38 — Phase 13 D](38-phase-13-cascade.md) | The placeholder cascade stored as reference + delta, never as a copy |
+| [39 — Phase 13 E](39-phase-13-pictures-tables.md) | A slide's pictures and tables: the same `ImageRef` and `Table` a `.docx` carries |
+| [40 — Phase 13 F](40-phase-13-notes.md) | Speaker notes, reached through the slide's own relationships |
+| [41 — Phase 13 G](41-phase-13-reading-order.md) | A computed reading order that stays reversible because every shape keeps its tree index |
+| [42 — Phase 13 H](42-phase-13-skeleton.md) | `Presentation::skeleton`: the original package kept whole in the asset store |
+| [43 — Phase 13 I](43-phase-13-raw.md) | Groups, connectors, SmartArt and animations as stub + raw fragment + warning |
+| [44 — Phase 13 J](44-phase-13-pptm-robustness.md) | `.pptm` as its macro-free equivalent, and a broken package that is never a panic |
+| [45 — Phase 13 K](45-phase-13-inspect-inventory.md) | The `inspect` slide inventory, the refused conversion, and Phase 13 closed |
+| [46 — Phase 14 plan](46-phase-14-plan.md) | Increments A–K of DocMark-P, the presentation profile |
+| [47 — Phase 14 A](47-phase-14-spec-1-2.md) | DocMark 1.2 becomes normative: the eight rules, `layouts:`, `skeleton:`, the version rule |
+| [48 — Phase 14 B](48-phase-14-deck-frontmatter.md) | A deck's front matter, and what each fidelity level writes of it |
+| [49 — Phase 14 C](49-phase-14-slide.md) | The `##` slide heading, the consumed title, and the implicit body |
+| [50 — Phase 14 D](50-phase-14-containers.md) | `::: {.ph}`, `{.shape}`, `{.connector}`: geometry in readable units with `emu` as the fallback |
+| [51 — Phase 14 E](51-phase-14-notes.md) | Speaker notes: the one node whose syntax depends on the level |
+| [52 — Phase 14 F](52-phase-14-objects.md) | Pictures, tables, groups and the stubs over the sidecar |
+| [53 — Phase 14 G](53-phase-14-plain.md) | `plain` proven by the residue probe, and the three writer defects it found |
+| [54 — Phase 14 H](54-phase-14-parser.md) | The deck parser, tolerant of Markdown typed by hand |
+| [55 — Phase 14 I](55-phase-14-goldens.md) | Deck goldens and `serialize(parse(md)) == md`, byte for byte |
+| [56 — Phase 14 J](56-phase-14-convert.md) | The deck converts: the refusal lifted, the skeleton written beside the Markdown |
+| [57 — Phase 14 K](57-phase-14-p4-gate.md) | The P4 hand-edit gate, the second notes blockquote it caught, and Phase 14 closed |
 | [58 — MCP token efficiency plan](58-mcp-token-efficiency-plan.md) | Measured waste in the MCP responses (double serialization, outline at 93 % of a deck, documents through the context window) and the E1–E8 fix |
 | [59 — MCP efficiency E1–E5](59-mcp-e1-e5.md) | One representation per response, `output_path` / `markdown_path`, a bounded outline, and `estimate_tokens` |
 | [60 — MCP efficiency E7–E8](60-mcp-e7-e8.md) | A trimmed `tools/list` (9 403 → 6 470 bytes) and a golden that measures the bytes and tokens each agent task puts on the wire |
+| [61 — Phase 15 plan](61-phase-15-plan.md) | Increments A–K of the pptx writer and the anti-repair gate |
+| [62 — Phase 15 A](62-phase-15-package.md) | The preserved package re-emitted entry by entry, bytes copied rather than re-deflated |
+| [63 — Phase 15 B](63-phase-15-slides.md) | The text body as the unit of rewriting: everything around it stays the bytes that were read |
+| [64 — Phase 15 C](64-phase-15-media.md) | Pictures, tables and media from the model, with `_rels` and `[Content_Types].xml` spliced |
+| [65 — Phase 15 D](65-phase-15-raw.md) | A preserved object goes back as itself, at its original z-order |
+| [66 — Phase 15 E](66-phase-15-notes.md) | The notes page, and `p:sldIdLst` restated when the model's slides are not the package's |
+| [67 — Phase 15 F](67-phase-15-autofit.md) | The stale autofit scale dropped — the one thing this writer deliberately does not preserve |
+| [68 — Phase 15 G](68-phase-15-template.md) | The deck with no skeleton: the template embedded in the binary, and the layout chosen from the content |
+| [69 — Phase 15 H](69-phase-15-roundtrip.md) | `roundtrip` for decks, the per-category metric, and the two silent defects idempotence found |
+| [70 — Phase 15 I](70-phase-15-xsd.md) | CI gate 1: the vendored ECMA-376 XSDs, and the two corpus fixtures they caught |
+| [71 — Phase 15 J](71-phase-15-render.md) | CI gate 2: the render diff, its measured threshold, and the loader fault behind `soffice` |
+| [72 — Phase 15 K](72-phase-15-close.md) | The P2 gate prepared and unrun, and Phase 15 closed with one box open |
+| [73 — Phase 15 carried](73-phase-15-carried.md) | The shape added to a preserved slide, and `<a:p/>` surviving a round trip |
+| [74 — The docx bookmark id](74-docx-bookmark-node-ids.md) | Why `docx_roundtrip_is_idempotent` was red on `footnotes.docx`, and the node ids that are not document content |
 
 ## Status in one line
 
@@ -69,6 +112,38 @@ self-contained DocMark (11-F), and `docsai search` says where a document says so
 handing over the document (11-G). All three are MCP tools (11-H), where `include_images` now
 defaults to `refs` instead of every image inline — a documented breaking change. Next is Phase
 12: the presentation spikes.
+
+**Phase 12 is closed**: the three presentation spikes (`docs/spikes/P1`–`P3`) — the parser
+decision, the DocMark-P draft with its eight rules, and the preserved skeleton — with the
+`corpus/pptx` deck corpus built by hand beside them.
+
+**Phase 13 is closed**: `.pptx` **reads** into the IR. `Document::Presentation` is the third IR
+root; `docsai-office::pptx` reads the package layer, the shapes and text of every slide resolved
+against the placeholder cascade as a delta, the pictures, tables and speaker notes, in a computed
+reading order that stays reversible. The original package is kept whole as `Presentation::skeleton`,
+what the IR does not model comes back as a stub plus a raw fragment plus a typed warning, a `.pptm`
+reads macro-free with a warning, and a broken package is a typed error and never a panic. `docsai
+inspect` reports the slide inventory; converting a deck to DocMark was still refused here.
+
+**Phase 14 is closed**: DocMark-P, the presentation profile. DocMark 1.2 is normative; a deck writes
+its front matter, an `##` heading per slide with the title consumed and the primary body implicit,
+a container for every other shape, notes in two syntaxes, and pictures, tables, groups and stubs.
+`plain` is proven by a residue probe rather than asserted, the parser reads all of it back — a deck
+typed by hand, with no attribute anywhere, parses — the seventeen decks are pinned by their goldens
+with byte idempotence, and `docsai convert deck.pptx -o deck.dmk.md` works. Its fourth acceptance
+criterion, the inherited `--fidelity agent` ≤ 15 %, is **not met** and is in the suite as an
+`#[ignore]`d test rather than softened: closing it is a specification decision.
+
+**Phase 15 is closed, with one item outstanding**: the pptx **writer**. The preserved package is
+re-emitted byte for byte and only what the model changed is rewritten — a text body, a picture, a
+table, a notes page, the slide list — with `_rels` and `[Content_Types].xml` spliced, raw objects
+re-injected as themselves, and the stale autofit scale the one thing deliberately not preserved. A
+deck with no skeleton is written on a template embedded in the binary. The whole corpus is
+idempotent, seventeen decks byte for byte, and the two CI gates are real: the schema gate against
+the vendored ECMA-376 XSDs (17 decks, 34 packages, 322 parts, 0 invalid) and the render gate through
+headless LibreOffice. What stays open is in [`72-phase-15-close.md`](72-phase-15-close.md) and
+[`73-phase-15-carried.md`](73-phase-15-carried.md): the P2 PowerPoint gate is **prepared and unrun**,
+because running it needs PowerPoint and a person.
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives

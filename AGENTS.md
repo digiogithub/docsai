@@ -363,8 +363,13 @@ render gate whose threshold no real render has yet scored, the LibreOffice loade
 surviving a round trip, a
 preserved table whose grid moved, a shape *added* to a preserved slide discarding that slide's other
 edits, unvalidated preserved parts, `align`'s content-based pairing, the refused internal hyperlink,
-the inherited `agent` ≤ 15 % criterion, and the still-red `docx_roundtrip_is_idempotent` on
-`corpus/docx/footnotes.docx`.
+the inherited `agent` ≤ 15 % criterion, and the red `docx_roundtrip_is_idempotent` on
+`corpus/docx/footnotes.docx`. Three of those are now closed: the shape added to a preserved slide
+and `<a:p/>` in `kb/73-phase-15-carried.md`, and the docx test in `kb/74-docx-bookmark-node-ids.md`
+— the `.docx` writer was minting a Word bookmark from every allocated node id (`n7`), so a
+paragraph's id survived a round trip while a footnote's, which has nowhere to be written, was handed
+out afresh and renumbered around it. Only ids that are document content — a bookmark name read off
+the source, which a TOC's `PAGEREF` fields address — are written back now.
 Next is **Phase 16**: charts, embedded objects and thumbnails — after the P2 form is signed.
 
 ## 2. Documents you must read before implementing

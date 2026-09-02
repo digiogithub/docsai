@@ -498,10 +498,30 @@ fn write_paragraph(
     write_paragraph_with_bookmark(p, ctx, out, list_ctx, style_override, p.id.as_ref());
 }
 
-/// A paragraph, plus (when `bookmark` is `Some`) the `w:bookmarkStart`/
+/// The node ids that go back into the package as a `w:bookmarkStart`.
+///
+/// A node id has two provenances, and only one of them is document content.
+/// A name read off a `w:bookmarkStart` in the source (`_Toc234329254`,
+/// `_Ref12`) is content: a TOC's hyperlinks and its `PAGEREF` fields address
+/// the paragraph by that exact name, so dropping it on the way out leaves
+/// those links pointing nowhere. A counter id the allocator handed out
+/// (`n7`) is not content — it is DocMark's own address, derived
+/// deterministically from document order, and nothing in the package refers
+/// to it.
+///
+/// Writing a counter id back as a bookmark invents a feature the document
+/// never had, and it breaks round-trip idempotence: only a paragraph or a
+/// heading has a bookmark to be written into, so those ids stick across a
+/// round trip while a footnote's, a table's or an image's is handed out
+/// afresh — and the second pass then numbers the rest around the survivors.
+fn source_bookmark(id: Option<&NodeId>) -> Option<&NodeId> {
+    id.filter(|id| id.counter().is_none())
+}
+
+/// A paragraph, plus (when `bookmark` names one) the `w:bookmarkStart`/
 /// `w:bookmarkEnd` pair that lets an internal link address it by that exact
-/// id — the mechanism a TOC's hyperlinks and `PAGEREF` fields rely on (spec
-/// §9's node ids double as Word bookmark names on the way back).
+/// name — the mechanism a TOC's hyperlinks and `PAGEREF` fields rely on.
+/// Which ids qualify is [`source_bookmark`]'s decision.
 fn write_paragraph_with_bookmark(
     p: &Paragraph,
     ctx: &mut WriterCtx<'_>,
@@ -510,6 +530,7 @@ fn write_paragraph_with_bookmark(
     style_override: Option<&str>,
     bookmark: Option<&NodeId>,
 ) {
+    let bookmark = source_bookmark(bookmark);
     out.push_str("<w:p>");
     let style = style_override
         .map(str::to_string)
@@ -1632,6 +1653,78 @@ mod tests {
     use super::*;
     use docsai_model::MemoryAssetStore;
     use std::io::Cursor;
+
+    /// A bookmark read off the source goes back out; an allocated node id
+    /// does not.
+    ///
+    /// The second half is what keeps a round trip idempotent: a counter id is
+    /// DocMark's own address and has no home in a `.docx`, so writing it as a
+    /// bookmark makes it survive for the two node kinds that own a paragraph
+    /// — a paragraph and a heading — while a footnote's or an image's is
+    /// handed out again on the next read, which renumbers them.
+    #[test]
+    fn write_keeps_source_bookmarks_and_drops_allocated_ids() {
+        use docsai_model::text::Footnote;
+
+        let mut with_note = Paragraph::text("Texto con nota");
+        with_note.id = Some(NodeId::new("n7"));
+        with_note
+            .content
+            .push(Inline::Footnote(Footnote::new(vec![Block::Paragraph(
+                Paragraph::text("La nota"),
+            )])));
+
+        let doc = Document::Text(TextDocument {
+            sections: vec![Section {
+                blocks: vec![
+                    Block::Heading(Heading {
+                        id: Some(NodeId::new("_Toc234329254")),
+                        level: 1,
+                        paragraph: Paragraph::text("Titulo"),
+                    }),
+                    Block::Paragraph(with_note),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        let assets = MemoryAssetStore::new();
+        let mut buf = Cursor::new(Vec::new());
+        write_docx(&doc, &assets, &mut buf).expect("write");
+        let xml = {
+            buf.set_position(0);
+            let mut zip = zip::ZipArchive::new(&mut buf).expect("zip");
+            let mut part = zip.by_name("word/document.xml").expect("document.xml");
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut part, &mut text).expect("read part");
+            text
+        };
+        assert!(
+            xml.contains(r#"w:name="_Toc234329254""#),
+            "the source bookmark was not written back:\n{xml}"
+        );
+        assert!(
+            !xml.contains(r#"w:name="n7""#),
+            "an allocated node id was written as a bookmark:\n{xml}"
+        );
+
+        buf.set_position(0);
+        let mut assets2 = MemoryAssetStore::new();
+        let (read_back, _) = crate::docx::read(buf, &mut assets2).expect("read");
+        let Document::Text(text) = read_back else {
+            panic!("expected text")
+        };
+        let ids: Vec<Option<String>> = text
+            .blocks()
+            .filter_map(|b| match b {
+                Block::Heading(h) => Some(h.id.as_ref().map(|id| id.as_str().to_string())),
+                Block::Paragraph(p) => Some(p.id.as_ref().map(|id| id.as_str().to_string())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, vec![Some("_Toc234329254".to_string()), None]);
+    }
 
     #[test]
     fn write_then_read_preserves_basic_text() {
