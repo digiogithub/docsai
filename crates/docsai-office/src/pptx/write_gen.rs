@@ -30,7 +30,7 @@
 
 use docsai_model::image::ImageRef;
 use docsai_model::presentation::{
-    ChartRef, LayoutId, PhType, Placeholder, RawShape, Shape, ShapeKind, Slide,
+    LayoutId, PhType, Placeholder, RawShape, Shape, ShapeKind, Slide,
 };
 use docsai_model::text::{Block, Table};
 use docsai_model::units::{Length, Size};
@@ -58,6 +58,15 @@ pub(super) trait Parts: Links {
     /// The relationship id for an image's bytes, minting the media part when
     /// the package does not already carry it.
     fn image(&mut self, image: &ImageRef) -> Result<String, String>;
+
+    /// The relationship id for a chart part holding this XML, minting
+    /// `ppt/charts/chartN.xml` and its content-type `Override`.
+    ///
+    /// A chart is the one shape whose content is a **part** rather than markup
+    /// on the slide, which is why the generator asks for it the same way it
+    /// asks for an image: it writes the `c:chartSpace` and knows nothing about
+    /// where the package puts it or what it is called.
+    fn chart(&mut self, xml: &str) -> Result<String, String>;
 }
 
 /// A layout of the package, as the chooser sees it.
@@ -314,6 +323,30 @@ pub(super) fn slide_xml(
             ShapeKind::Table(table) => {
                 out.push_str(&table_xml(shape, table, id, frame, parts)?);
             }
+            // A chart *can* be generated: its data is in the model since 16-A,
+            // and 16-C writes the part it lives in. What it cannot recover is
+            // the chart's design — its colours, its legend, its data labels —
+            // so what goes out is the plot, the axes and the caches, and the
+            // rest is whatever the consumer draws by default.
+            ShapeKind::Chart(chart) => {
+                let (xml, why) = super::write_chart::generated(chart);
+                kept.extend(why);
+                if chart.workbook.is_some() {
+                    kept.push(
+                        "its embedded workbook: a generated chart carries its cached series \
+                         and no sheet, so «Edit Data» has nothing to open — the cache is a \
+                         column per series and not the spreadsheet those numbers came from"
+                            .into(),
+                    );
+                }
+                let rel = parts.chart(&xml)?;
+                out.push_str(&super::write_chart::frame_xml(
+                    &shape_name(shape, id, "Chart"),
+                    id,
+                    &xfrm(frame, "p:"),
+                    &rel,
+                ));
+            }
             other => {
                 // A chart, a diagram, an OLE object: markup no model holds and
                 // no template can supply. The label the stub carries is written
@@ -371,7 +404,6 @@ fn is_placeholder(shape: &Shape) -> bool {
 /// Why a shape could not be generated, in the words a warning carries.
 fn unbuildable(kind: &ShapeKind) -> String {
     let what = match kind {
-        ShapeKind::Chart(_) => "a chart, whose data lives in a part of its own",
         ShapeKind::Group(_) => "a group, whose children the IR keeps but whose markup it does not",
         ShapeKind::Raw(_) => "a preserved object, which is markup only its own package holds",
         _ => "a shape this writer cannot generate",
@@ -384,7 +416,6 @@ fn unbuildable(kind: &ShapeKind) -> String {
 
 fn stub_label(kind: &ShapeKind) -> String {
     match kind {
-        ShapeKind::Chart(ChartRef { title, .. }) => title.clone().unwrap_or_default(),
         ShapeKind::Raw(RawShape { text, .. }) => text.clone(),
         _ => String::new(),
     }
@@ -654,6 +685,8 @@ pub(super) fn content_type_of(part: &str) -> Option<String> {
         Some(format!("{}.slide+xml", super::PML))
     } else if part.starts_with("ppt/notesSlides/") {
         Some(format!("{}.notesSlide+xml", super::PML))
+    } else if part.starts_with("ppt/charts/") {
+        Some(super::write_chart::CHART_TYPE.to_string())
     } else {
         None
     }

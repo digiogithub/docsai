@@ -46,6 +46,7 @@ mod raw;
 mod skeleton;
 mod text;
 pub mod write;
+mod write_chart;
 mod write_gen;
 mod write_text;
 

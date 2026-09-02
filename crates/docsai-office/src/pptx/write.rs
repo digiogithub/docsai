@@ -94,6 +94,7 @@ use crate::package::{rels_part_name, Package, Relationships};
 use crate::write_error::WriteError;
 use crate::xml::Element;
 
+use super::write_chart;
 use super::write_gen;
 use super::write_text::{self, Links};
 
@@ -305,6 +306,7 @@ fn seed(
         .map(|rel| rel.target.clone());
 
     let mut media = Media::new(&package, assets);
+    let mut charts = ChartParts::new(&package);
     let mut main_rels = PartRels::new(&package, &parts.main);
     let mut taken: BTreeSet<String> = package.part_names().map(str::to_string).collect();
     let mut written: Vec<(String, Vec<u8>)> = Vec::new();
@@ -361,6 +363,7 @@ fn seed(
             let mut new = NewParts {
                 rels: PartRels::new(&package, &part),
                 media: &mut media,
+                charts: &mut charts,
             };
             new.rels.relate(LAYOUT_REL, &layout.part, false);
             if let Some(notes) = &notes_part {
@@ -392,6 +395,7 @@ fn seed(
             let mut new = NewParts {
                 rels: PartRels::new(&package, notes),
                 media: &mut media,
+                charts: &mut charts,
             };
             new.rels.relate(NOTES_MASTER_REL, master, false);
             new.rels.relate(SLIDE_REL, &part, false);
@@ -441,6 +445,7 @@ fn seed(
         let mut new = NewParts {
             rels: PartRels::new(&package, &notes),
             media: &mut media,
+            charts: &mut charts,
         };
         new.rels.relate(NOTES_MASTER_REL, master, false);
         new.rels.relate(SLIDE_REL, &part, false);
@@ -495,6 +500,13 @@ fn seed(
         }
     }
 
+    for (name, bytes) in std::mem::take(&mut charts.written) {
+        overrides.insert(
+            name.clone(),
+            write_gen::content_type_of(&name).unwrap_or_default(),
+        );
+        written.push((name, bytes));
+    }
     let mut rebuild = Rebuild::default();
     for (name, bytes) in written {
         rebuild.put(&package, name, bytes);
@@ -523,6 +535,7 @@ fn seed(
 struct NewParts<'a, 'm> {
     rels: PartRels,
     media: &'a mut Media<'m>,
+    charts: &'a mut ChartParts,
 }
 
 impl Links for NewParts<'_, '_> {
@@ -535,6 +548,42 @@ impl write_gen::Parts for NewParts<'_, '_> {
     fn image(&mut self, image: &ImageRef) -> Result<String, String> {
         let part = self.media.part_for(image)?;
         Ok(self.rels.relate(IMAGE_REL, &part, false))
+    }
+
+    fn chart(&mut self, xml: &str) -> Result<String, String> {
+        let part = self.charts.mint(xml);
+        Ok(self.rels.relate(write_chart::CHART_REL, &part, false))
+    }
+}
+
+/// The chart parts a seeding pass writes, and the names it has already used.
+///
+/// A generated chart carries **no embedded workbook**, so it needs no `_rels`
+/// of its own and no `ppt/embeddings/` entry: the model holds one cached column
+/// per series, which is not the spreadsheet those numbers came from, and
+/// writing one would invent a provenance rather than restore it. PowerPoint
+/// draws a chart from its caches without opening anything else — that is 16-A's
+/// whole argument for the cache being authoritative — so what is lost is «Edit
+/// Data», and the generator says so per chart.
+#[derive(Default)]
+struct ChartParts {
+    taken: BTreeSet<String>,
+    written: Vec<(String, Vec<u8>)>,
+}
+
+impl ChartParts {
+    fn new(package: &Package) -> ChartParts {
+        ChartParts {
+            taken: package.part_names().map(str::to_string).collect(),
+            written: Vec::new(),
+        }
+    }
+
+    fn mint(&mut self, xml: &str) -> String {
+        let part = free_part(&self.taken, "ppt/charts", "chart");
+        self.taken.insert(part.clone());
+        self.written.push((part.clone(), xml.as_bytes().to_vec()));
+        part
     }
 }
 
@@ -752,7 +801,18 @@ fn rebuild_slides(
                 dropped,
                 stale,
                 unpaired,
+                parts: extra,
+                charts,
             }) => {
+                for (chart, why) in charts {
+                    report.warn(Warning::Degraded {
+                        what: format!("chart `{chart}`"),
+                        why,
+                    });
+                }
+                for (name, bytes) in extra {
+                    rebuild.put(&package, name, bytes);
+                }
                 for (id, format) in dropped {
                     report.warn(Warning::RawBlockDropped { id, format });
                 }
@@ -1372,6 +1432,13 @@ struct Rewritten {
     /// neither is «something was copied instead of being rewritten» — the rest
     /// of the slide *was* rewritten.
     unpaired: Vec<String>,
+    /// Parts that are not this slide and that its rewrite produced: a chart's
+    /// own `ppt/charts/chartN.xml`, spliced rather than regenerated (16-C).
+    parts: Vec<(String, Vec<u8>)>,
+    /// What a chart of this slide kept, named by the chart's **own** part
+    /// rather than by the slide's number: a chart's data is in a file of its
+    /// own and «slide 1» is not something a caller can go and look at.
+    charts: Vec<(String, String)>,
 }
 
 /// Rewrites the text bodies of one slide, leaving every other byte alone.
@@ -1411,6 +1478,8 @@ fn rewrite_slide(
     let mut dropped: Vec<(String, String)> = Vec::new();
     let mut stale: Vec<(String, u32)> = Vec::new();
     let mut unpaired: Vec<String> = Vec::new();
+    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut charts: Vec<(String, String)> = Vec::new();
     // What is not a shape: `p:transition`, `p:timing` and anything else the
     // reader took off `p:sld` itself, put back at the level it came from.
     for id in &slide.raw {
@@ -1496,6 +1565,44 @@ fn rewrite_slide(
                     &mut edits,
                 ) {
                     kept.push(reason);
+                }
+                continue;
+            }
+            // A chart's data is not on this slide at all: it is in
+            // `ppt/charts/chartN.xml`, a part outside `rebuilt_parts` and
+            // therefore one this writer **splices** rather than regenerates.
+            // The frame itself — its position, its `r:id` — is the bytes that
+            // were read, and nothing here touches them.
+            ShapeKind::Chart(chart) => {
+                match chart_part_of(element, outside.rels) {
+                    Some(part) => {
+                        let spliced =
+                            write_chart::rewrite(outside.package, &part, chart, outside.fragments);
+                        let edited = spliced.part.is_some();
+                        if let Some(bytes) = spliced.part {
+                            parts.push((part.clone(), bytes));
+                        }
+                        for why in spliced.kept {
+                            charts.push((part.clone(), why));
+                        }
+                        // The workbook is the chart's *other* copy of the data
+                        // and it is preserved byte for byte, so an edit to the
+                        // caches leaves the two disagreeing. Said only when a
+                        // splice actually happened, and only when there is a
+                        // workbook to disagree.
+                        if edited {
+                            if let Some(workbook) = embedded_workbook(outside.package, &part) {
+                                charts.push((
+                                    part.clone(),
+                                    write_chart::workbook_note(&part, &workbook),
+                                ));
+                            }
+                        }
+                    }
+                    None => kept.push(
+                        "its chart, whose frame names no chart part inside this package"
+                            .to_string(),
+                    ),
                 }
                 continue;
             }
@@ -1593,7 +1700,36 @@ fn rewrite_slide(
         dropped,
         stale,
         unpaired,
+        parts,
+        charts,
     })
+}
+
+/// The chart part a `p:graphicFrame` shows, when it shows one inside this
+/// package.
+///
+/// Reached the way the reader reaches it: `a:graphicData@uri` says the frame
+/// holds a chart, and `c:chart@r:id` resolves against the **slide's** own
+/// relationships. Never by guessing at a part name — `ppt/charts/chart1.xml`
+/// is a convention, not a rule.
+fn chart_part_of(frame: &Element, rels: &PartRels) -> Option<String> {
+    let data = frame.path(&["graphic", "graphicData"])?;
+    if data.attr("uri") != Some(write_chart::CHART_URI) {
+        return None;
+    }
+    rels.target_of(data.child("chart")?.attr_qualified("r:id")?)
+}
+
+/// The workbook a chart part embeds, when it embeds one: the relationship
+/// whose type ends in `/relationships/package`, resolved against the chart
+/// part's *own* `_rels` — one level further in than the frame's `r:id`.
+fn embedded_workbook(package: &Package, chart_part: &str) -> Option<String> {
+    package
+        .relationships(chart_part)
+        .of_kind("package")
+        .find(|rel| !rel.external)
+        .map(|rel| rel.target.clone())
+        .filter(|target| package.has_part(target))
 }
 
 /// Which tree child each model shape is written into.
@@ -2139,7 +2275,7 @@ fn expand_empty_paragraphs(source: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// Applies non-overlapping edits to the source, left to right.
-fn splice(source: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> String {
+pub(super) fn splice(source: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> String {
     edits.sort_by_key(|(range, _)| range.start);
     let mut out = String::with_capacity(source.len());
     let mut cursor = 0;
@@ -5070,10 +5206,10 @@ mod tests {
         let mut slide = typed_slide("Ventas", &[]);
         slide.shapes.push(Shape::new(
             1,
-            ShapeKind::Chart(docsai_model::presentation::ChartRef {
-                kind: Some("bar".into()),
-                title: Some("Ventas por región".into()),
-                ..Default::default()
+            ShapeKind::Raw(RawShape {
+                kind: docsai_model::presentation::RawShapeKind::SmartArt,
+                raw: None,
+                text: "Ciclo de ventas".into(),
             }),
         ));
         let document = typed_deck(vec![slide]);
@@ -5083,16 +5219,16 @@ mod tests {
         let written = out.into_inner();
 
         let slide = text_of(&written, "ppt/slides/slide1.xml");
-        assert!(slide.contains("<a:t>Ventas por región</a:t>"), "{slide}");
+        assert!(slide.contains("<a:t>Ciclo de ventas</a:t>"), "{slide}");
         assert!(
             !slide.contains("graphicFrame"),
-            "a chart frame was invented for a chart part that does not exist: {slide}"
+            "markup was invented for a diagram only its own package holds: {slide}"
         );
         assert!(
             report.warnings.iter().any(|warning| matches!(
                 warning,
                 Warning::Degraded { what, why }
-                    if what.contains("Ventas") && why.contains("chart")
+                    if what.contains("Ventas") && why.contains("preserved object")
             )),
             "the report does not name the shape that could not be generated: {:?}",
             report.warnings
@@ -5387,5 +5523,405 @@ mod tests {
             !slide.contains("Otro sitio"),
             "the fragment was written into the wrong part: {slide}"
         );
+    }
+
+    // --- 16-C: the chart written back -----------------------------------
+
+    /// The chart of the first slide, as the model holds it.
+    fn chart_mut(document: &mut Document) -> &mut docsai_model::presentation::ChartRef {
+        presentation_mut(document).slides[0]
+            .shapes
+            .iter_mut()
+            .find_map(|shape| match &mut shape.kind {
+                ShapeKind::Chart(chart) => Some(chart),
+                _ => None,
+            })
+            .expect("the slide holds a chart")
+    }
+
+    /// Every `Degraded` clause naming a chart part.
+    fn chart_warnings(report: &ConversionReport) -> Vec<String> {
+        report
+            .warnings
+            .iter()
+            .filter_map(|warning| match warning {
+                Warning::Degraded { what, why } if what.starts_with("chart `") => {
+                    Some(format!("{what}: {why}"))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The common case, and the one the whole increment is measured on: a chart
+    /// nobody touched costs nothing. Not one byte of the chart part, not one of
+    /// its `_rels`, not one of the workbook, not one of `[Content_Types].xml` —
+    /// and **no warning**, which is the half of §7 rule 3 that is easy to fail.
+    #[test]
+    fn a_chart_nobody_edited_produces_no_edit_and_no_warning() {
+        for name in [
+            "charts-embedded.pptx",
+            "charts-multi-series.pptx",
+            "charts-stale-workbook.pptx",
+        ] {
+            let path = deck(name);
+            let (document, assets) = read_deck(&path);
+            let mut out = Cursor::new(Vec::new());
+            let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+            let written = out.into_inner();
+            let original = std::fs::read(&path).expect("reads the deck");
+
+            assert_eq!(members(&written), members(&original), "{name} moved");
+            assert!(
+                chart_warnings(&report).is_empty(),
+                "{name}: a chart nobody edited was reported as a loss: {:?}",
+                chart_warnings(&report)
+            );
+        }
+    }
+
+    /// One number retyped in the document, one number moved in the package.
+    #[test]
+    fn an_edited_value_is_spliced_into_the_preserved_chart_part() {
+        let path = deck("charts-embedded.pptx");
+        let (mut document, assets) = read_deck(&path);
+        chart_mut(&mut document).series[0].values[1] = Some(2501.0);
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        let original = std::fs::read(&path).expect("reads the deck");
+
+        let before = text_of(&original, "ppt/charts/chart1.xml");
+        let after = text_of(&written, "ppt/charts/chart1.xml");
+        assert_eq!(
+            after.replace("<c:v>2501</c:v>", "<c:v>980</c:v>"),
+            before,
+            "something other than the one value moved: {after}"
+        );
+        // The chart is the *only* part that moved: not its `_rels`, not the
+        // workbook, not the content types, not the slide.
+        for (part, _, _, _) in members(&original) {
+            if part == "ppt/charts/chart1.xml" {
+                continue;
+            }
+            assert_eq!(
+                part_of(&written, &part),
+                part_of(&original, &part),
+                "`{part}` moved and had no business moving"
+            );
+        }
+        // And the deck reads back saying what was typed.
+        let (deck_ir, _) = read_bytes(&written);
+        let chart = deck_ir.slides[0]
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.kind {
+                ShapeKind::Chart(chart) => Some(chart),
+                _ => None,
+            })
+            .expect("a chart");
+        assert_eq!(chart.series[0].values[1], Some(2501.0));
+
+        let said = chart_warnings(&report);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(
+            said[0].contains("workbook1.xlsx") && said[0].contains("preserved byte for byte"),
+            "the workbook the edit left behind is not named: {said:?}"
+        );
+    }
+
+    /// A series with a point more than the range it was read from: `c:ptCount`
+    /// and `c:f` both have to say so, or the file states two lengths for one
+    /// column and «Edit Data» truncates the edit that was just made.
+    #[test]
+    fn a_longer_column_restates_the_range_its_cache_names() {
+        let path = deck("charts-embedded.pptx");
+        let (mut document, assets) = read_deck(&path);
+        {
+            let chart = chart_mut(&mut document);
+            chart.categories.push("Oeste".into());
+            chart.series[0].values.push(Some(1610.0));
+        }
+
+        let written = write_deck(&document, &assets);
+        let after = text_of(&written, "ppt/charts/chart1.xml");
+        assert!(
+            after.contains("<c:f>Hoja1!$B$2:$B$5</c:f>"),
+            "the value range was left stale: {after}"
+        );
+        assert!(
+            after.contains("<c:f>Hoja1!$A$2:$A$5</c:f>"),
+            "the category range was left stale: {after}"
+        );
+        assert!(
+            after.contains("<c:ptCount val=\"4\"/><c:pt idx=\"0\"><c:v>Norte</c:v>"),
+            "{after}"
+        );
+        assert!(
+            after.contains("<c:pt idx=\"3\"><c:v>1610</c:v></c:pt>"),
+            "{after}"
+        );
+        let (deck_ir, _) = read_bytes(&written);
+        let ShapeKind::Chart(chart) = &deck_ir.slides[0].shapes[1].kind else {
+            panic!("the chart is not where it was");
+        };
+        assert_eq!(chart.categories, ["Norte", "Sur", "Este", "Oeste"]);
+        assert_eq!(chart.series[0].values.len(), 4);
+    }
+
+    /// A gap is an absent point, in the part exactly as in the model.
+    #[test]
+    fn a_value_turned_into_a_gap_leaves_no_point_behind() {
+        let path = deck("charts-embedded.pptx");
+        let (mut document, assets) = read_deck(&path);
+        chart_mut(&mut document).series[0].values[1] = None;
+
+        let written = write_deck(&document, &assets);
+        let after = text_of(&written, "ppt/charts/chart1.xml");
+        assert!(
+            after.contains("<c:ptCount val=\"3\"/>") && !after.contains("idx=\"1\"><c:v>0"),
+            "a gap was written as a zero: {after}"
+        );
+        let (deck_ir, _) = read_bytes(&written);
+        let ShapeKind::Chart(chart) = &deck_ir.slides[0].shapes[1].kind else {
+            panic!("no chart");
+        };
+        assert_eq!(chart.series[0].values, [Some(1200.0), None, Some(1440.0)]);
+    }
+
+    /// Adding a series is a `c:ser` element, not a cache: refused by name, with
+    /// the part left exactly as it was.
+    #[test]
+    fn a_series_added_to_a_preserved_chart_is_refused_by_name() {
+        let path = deck("charts-embedded.pptx");
+        let (mut document, assets) = read_deck(&path);
+        chart_mut(&mut document)
+            .series
+            .push(docsai_model::presentation::ChartSeries {
+                name: Some("Costes".into()),
+                values: vec![Some(10.0), Some(20.0), Some(30.0)],
+                number_format: None,
+            });
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        let original = std::fs::read(&path).expect("reads the deck");
+        assert_eq!(
+            part_of(&written, "ppt/charts/chart1.xml"),
+            part_of(&original, "ppt/charts/chart1.xml"),
+            "an invented `c:ser` reached the part"
+        );
+        let said = chart_warnings(&report);
+        assert!(
+            said.iter()
+                .any(|why| why.contains("its series") && why.contains("`ppt/charts/chart1.xml`")),
+            "the refusal does not name the chart: {said:?}"
+        );
+    }
+
+    /// A retyped title is a text body with run properties the model never held.
+    #[test]
+    fn a_retyped_chart_title_is_kept_and_named() {
+        let path = deck("charts-multi-series.pptx");
+        let (mut document, assets) = read_deck(&path);
+        chart_mut(&mut document).title = Some("Otro título".into());
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        let original = std::fs::read(&path).expect("reads the deck");
+        assert_eq!(
+            part_of(&written, "ppt/charts/chart1.xml"),
+            part_of(&original, "ppt/charts/chart1.xml"),
+        );
+        assert!(
+            chart_warnings(&report)
+                .iter()
+                .any(|why| why.contains("its title") && why.contains("Otro título")),
+            "{:?}",
+            chart_warnings(&report)
+        );
+    }
+
+    /// Text from the model reaches XML as text. `A & B <x>` is a label a person
+    /// types, and a writer that pasted it in would produce a part no consumer
+    /// can open.
+    #[test]
+    fn a_hostile_label_reaches_the_chart_part_escaped() {
+        let path = deck("charts-embedded.pptx");
+        let (mut document, assets) = read_deck(&path);
+        {
+            let chart = chart_mut(&mut document);
+            chart.categories[0] = "A & B <x>".into();
+            chart.series[0].name = Some("\"Q1\" & <b>".into());
+            chart.series[0].number_format = Some("0.0 & \"%\"".into());
+        }
+
+        let written = write_deck(&document, &assets);
+        let after = text_of(&written, "ppt/charts/chart1.xml");
+        assert!(after.contains("A &amp; B &lt;x&gt;"), "{after}");
+        assert!(!after.contains("B <x>"), "{after}");
+        let (deck_ir, _) = read_bytes(&written);
+        let ShapeKind::Chart(chart) = &deck_ir.slides[0].shapes[1].kind else {
+            panic!("no chart");
+        };
+        assert_eq!(chart.categories[0], "A & B <x>");
+        assert_eq!(chart.series[0].name.as_deref(), Some("\"Q1\" & <b>"));
+        assert_eq!(
+            chart.series[0].number_format.as_deref(),
+            Some("0.0 & \"%\"")
+        );
+    }
+
+    /// A chart with no embedded workbook has no workbook to warn about, however
+    /// much its data was edited. A false warning is the same failure as a
+    /// missing one.
+    #[test]
+    fn a_chart_with_no_workbook_says_nothing_about_one() {
+        let path = deck("charts-multi-series.pptx");
+        let (mut document, assets) = read_deck(&path);
+        chart_mut(&mut document).series[1].values[0] = Some(801.0);
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        assert!(
+            text_of(&written, "ppt/charts/chart1.xml").contains("<c:v>801</c:v>"),
+            "the edit did not reach the part"
+        );
+        assert!(
+            !chart_warnings(&report)
+                .iter()
+                .any(|why| why.contains("workbook")),
+            "a workbook that is not there was reported: {:?}",
+            chart_warnings(&report)
+        );
+    }
+
+    /// A chart on a slide this writer generates is a chart part, not a text box
+    /// carrying the title (which is what 15-G could do and 16-C replaces).
+    #[test]
+    fn a_generated_chart_is_a_part_of_its_own() {
+        let path = deck("charts-embedded.pptx");
+        let (document, assets) = read_deck(&path);
+        // The same deck with its preserved package taken away: the whole
+        // package is then written on the embedded template.
+        let mut typed = document.clone();
+        presentation_mut(&mut typed).skeleton = None;
+
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&typed, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+
+        let chart = text_of(&written, "ppt/charts/chart1.xml");
+        assert!(chart.contains("<c:barChart>"), "{chart}");
+        assert!(
+            chart.contains("<c:pt idx=\"2\"><c:v>Este</c:v></c:pt>"),
+            "{chart}"
+        );
+        assert!(
+            chart.contains("<c:pt idx=\"2\"><c:v>1440</c:v></c:pt>"),
+            "{chart}"
+        );
+        assert!(
+            text_of(&written, "[Content_Types].xml").contains(
+                "<Override PartName=\"/ppt/charts/chart1.xml\" \
+                 ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>"
+            ),
+            "the chart part has no content type"
+        );
+        let rels = rels_of(&written, "ppt/slides/slide1.xml");
+        assert!(rels.contains("../charts/chart1.xml"), "{rels}");
+        assert!(
+            text_of(&written, "ppt/slides/slide1.xml").contains("<p:graphicFrame>"),
+            "the chart is still standing in as a text box"
+        );
+        // Every relationship of every part resolves, and the deck reads back.
+        let (deck_ir, _) = read_bytes(&written);
+        let ShapeKind::Chart(back) = &deck_ir.slides[0].shapes[1].kind else {
+            panic!("the generated chart did not read back as a chart");
+        };
+        assert_eq!(back.categories, ["Norte", "Sur", "Este"]);
+        assert_eq!(
+            back.series[0].values,
+            [Some(1200.0), Some(980.0), Some(1440.0)]
+        );
+        assert_eq!(back.series[0].name.as_deref(), Some("Ventas"));
+        // What a generated chart is not, said once, plus the workbook that
+        // could not come with it.
+        let said: Vec<&str> = report
+            .warnings
+            .iter()
+            .filter_map(|warning| match warning {
+                Warning::Degraded { why, .. } => Some(why.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            said.iter().any(|why| why.contains("its chart's design")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|why| why.contains("«Edit Data» has nothing to open")),
+            "{said:?}"
+        );
+    }
+
+    /// A kind this writer has no plot for falls back, and says which one it
+    /// used. A pie, which it does have, states no axes at all — writing a
+    /// `c:catAx` for one is a part the schema rejects.
+    #[test]
+    fn a_generated_chart_of_an_unknown_kind_falls_back_and_says_so() {
+        let mut slide = typed_slide("Reparto", &[]);
+        slide.shapes.push(Shape::new(
+            1,
+            ShapeKind::Chart(docsai_model::presentation::ChartRef {
+                kind: Some("radarChart".into()),
+                categories: vec!["A".into(), "B".into()],
+                series: vec![docsai_model::presentation::ChartSeries {
+                    name: None,
+                    values: vec![Some(1.0), Some(2.0)],
+                    number_format: None,
+                }],
+                ..Default::default()
+            }),
+        ));
+        let document = typed_deck(vec![slide]);
+        let assets = MemoryAssetStore::new();
+        let mut out = Cursor::new(Vec::new());
+        let report = write_pptx(&document, &assets, &mut out).expect("writes the deck");
+        let written = out.into_inner();
+        assert!(text_of(&written, "ppt/charts/chart1.xml").contains("<c:barChart>"));
+        assert!(
+            report.warnings.iter().any(|warning| matches!(
+                warning,
+                Warning::Degraded { why, .. }
+                    if why.contains("radarChart") && why.contains("`barChart`")
+            )),
+            "{:?}",
+            report.warnings
+        );
+
+        let mut slide = typed_slide("Reparto", &[]);
+        slide.shapes.push(Shape::new(
+            1,
+            ShapeKind::Chart(docsai_model::presentation::ChartRef {
+                kind: Some("pieChart".into()),
+                categories: vec!["A".into(), "B".into()],
+                series: vec![docsai_model::presentation::ChartSeries {
+                    name: None,
+                    values: vec![Some(1.0), Some(2.0)],
+                    number_format: None,
+                }],
+                ..Default::default()
+            }),
+        ));
+        let pie = write_deck(&typed_deck(vec![slide]), &MemoryAssetStore::new());
+        let xml = text_of(&pie, "ppt/charts/chart1.xml");
+        assert!(xml.contains("<c:pieChart>"), "{xml}");
+        assert!(!xml.contains("c:axId") && !xml.contains("c:catAx"), "{xml}");
     }
 }

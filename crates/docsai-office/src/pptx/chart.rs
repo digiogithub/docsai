@@ -27,10 +27,10 @@ use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::sheet::{CellRef, CellValue, Workbook};
 use docsai_model::Document;
 
-use crate::package::Package;
+use crate::package::{Package, Relationships};
 use crate::xml::Element;
 
-use super::cascade::LevelStyles;
+use super::cascade::{LevelStyles, Theme};
 use super::text::{self, TextCtx};
 use super::{parse, raw, SlideCtx};
 
@@ -47,6 +47,80 @@ const MAX_POINTS: usize = 100_000;
 /// the comparison would cost more than the provenance is worth, and the caches
 /// — which are the IR — are unaffected either way.
 const MAX_COMPARED_CELLS: usize = 4_096;
+
+/// What one `c:chartSpace` **says**, in the units the model holds it in.
+///
+/// Everything of a [`ChartRef`] except the two fields that are the *package's*
+/// and not the part's: the embedded workbook and the raw payload. It exists
+/// because the writer (16-C) has to answer «did this chart change?» and the
+/// only honest way to answer it is to run this reader over the preserved part
+/// and compare `ChartRef` to `ChartRef` — never a rewritten string against the
+/// bytes that are there, which is the mistake `kb/73-phase-15-carried.md`
+/// records.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct ChartData {
+    pub kind: Option<String>,
+    pub title: Option<String>,
+    pub categories: Vec<String>,
+    pub series: Vec<ChartSeries>,
+}
+
+impl ChartData {
+    /// True when a [`ChartRef`] says exactly what this part says.
+    pub(super) fn matches(&self, chart: &ChartRef) -> bool {
+        self.kind == chart.kind
+            && self.title == chart.title
+            && self.categories == chart.categories
+            && self.series == chart.series
+    }
+}
+
+/// The 16-A reader over a parsed chart part, with no slide around it.
+///
+/// `rels` and `theme` are only reached for a `c:rich` title — a chart title is
+/// a DrawingML text body like any other — so a caller that has neither (the
+/// writer) passes the defaults and gets the same plain text out: the title is
+/// read as text, and no colour or font of it reaches the model.
+pub(super) fn read_space(
+    root: &Element,
+    part: &str,
+    rels: &Relationships,
+    theme: &Theme,
+    report: &mut ConversionReport,
+) -> ChartData {
+    space(root, part, rels, theme, report).0
+}
+
+/// [`read_space`], keeping the `c:f`/cache pairs the workbook is checked
+/// against. Only the reader needs those; the writer reads the formulas off the
+/// part it is splicing into.
+fn space(
+    root: &Element,
+    part: &str,
+    rels: &Relationships,
+    theme: &Theme,
+    report: &mut ConversionReport,
+) -> (ChartData, Vec<SourceRef>) {
+    // `c:barChart`, `c:lineChart`… the first plot in the plot area names the
+    // chart, and a combo chart is named by its first plot rather than by a
+    // guess at which one matters.
+    let kind = root.path(&["chart", "plotArea"]).and_then(|area| {
+        area.children()
+            .find(|child| child.name.ends_with("Chart"))
+            .map(|child| child.name.clone())
+    });
+    let title = read_title(root, rels, theme, report);
+    let plotted = read_plots(root, part, report);
+    (
+        ChartData {
+            kind,
+            title,
+            categories: plotted.categories,
+            series: plotted.series,
+        },
+        plotted.refs,
+    )
+}
 
 /// The chart a graphic frame holds: what kind it is, what it plots, and its
 /// markup.
@@ -74,32 +148,28 @@ pub(super) fn read(
             return None;
         }
     };
-    // `c:barChart`, `c:lineChart`… the first plot in the plot area names the
-    // chart, and a combo chart is named by its first plot rather than by a
-    // guess at which one matters.
-    let kind = root.path(&["chart", "plotArea"]).and_then(|area| {
-        area.children()
-            .find(|child| child.name.ends_with("Chart"))
-            .map(|child| child.name.clone())
-    });
-
-    let title = read_title(&root, ctx, report);
-    let plotted = read_plots(&root, &part, report);
+    let (data, refs) = space(
+        &root,
+        &part,
+        ctx.rels,
+        ctx.cascade.theme_of(ctx.layout),
+        report,
+    );
     let stored = read_workbook(&part, ctx, assets, report);
 
     // Provenance, not data: what the workbook says is compared against the
     // caches, and the caches win.
     if let Some((_, bytes)) = stored.as_ref() {
-        compare_with_workbook(&part, bytes, &plotted.refs, report);
+        compare_with_workbook(&part, bytes, &refs, report);
     }
     let workbook = stored.map(|(id, _)| id);
 
     Some(ChartRef {
-        kind,
-        title,
+        kind: data.kind,
+        title: data.title,
         workbook,
-        categories: plotted.categories,
-        series: plotted.series,
+        categories: data.categories,
+        series: data.series,
         raw: Some(sink.capture(&root, &part, source, report)),
     })
 }
@@ -110,16 +180,21 @@ pub(super) fn read(
 /// text box holds — so it is read with the reader the crate already has rather
 /// than a second walker. A title that comes from a cell (`c:strRef`) is taken
 /// from its cache, on the same rule as the series.
-fn read_title(root: &Element, ctx: &SlideCtx<'_>, report: &mut ConversionReport) -> Option<String> {
+fn read_title(
+    root: &Element,
+    rels: &Relationships,
+    theme: &Theme,
+    report: &mut ConversionReport,
+) -> Option<String> {
     let tx = root.path(&["chart", "title", "tx"])?;
 
     let text = if let Some(rich) = tx.child("rich") {
         let inherited = LevelStyles::default();
         let text_ctx = TextCtx {
-            rels: ctx.rels,
+            rels,
             // A chart title is one line, never a bulleted list.
             bulleted: false,
-            theme: ctx.cascade.theme_of(ctx.layout),
+            theme,
             inherited: &inherited,
         };
         let blocks = text::read_body(rich, &text_ctx, report);
@@ -278,7 +353,7 @@ fn read_name(tx: &Element) -> Option<String> {
 /// A reference (`c:strRef`, `c:numRef`) carries its cache as a child; a literal
 /// (`c:strLit`, `c:numLit`) *is* the cache and has no formula. Both hold `c:pt`
 /// the same way, which is why one function serves them.
-fn cache_of(holder: &Element) -> Option<&Element> {
+pub(super) fn cache_of(holder: &Element) -> Option<&Element> {
     for child in holder.children() {
         match child.name.as_str() {
             "strRef" | "numRef" => {
@@ -314,7 +389,7 @@ fn source_ref(holder: &Element, what: String, numeric: bool) -> Option<SourceRef
 /// written as two points with a hole between them. A reader that pushed the
 /// points it found would shift every value after the hole onto the wrong
 /// category.
-fn points(cache: &Element) -> Vec<Option<String>> {
+pub(super) fn points(cache: &Element) -> Vec<Option<String>> {
     let count = cache
         .child("ptCount")
         .and_then(|c| c.attr_i64("val"))

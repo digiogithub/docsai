@@ -138,6 +138,31 @@ def retitle(markdown):
     return "".join(out), touched
 
 
+def bump_chart_values(markdown):
+    """Add a digit to every number in a chart's data table (Phase 16-C).
+
+    The `edited` variant exists to make the writer *write*, and until this
+    increment nothing it did touched `ppt/charts/*`: the retitle above moves a
+    slide and no chart part is ever validated on the preserved-package path.
+    A chart's caches are spliced inside a part this gate would otherwise never
+    see, so the mutation reaches them."""
+    out, touched = [], 0
+    for line in markdown.splitlines(keepends=True):
+        cells = line.split("|")
+        # A GFM body row of a chart table: a leading pipe, and at least one cell
+        # that is nothing but a number.
+        if len(cells) > 2 and any(c.strip().replace(".", "", 1).isdigit()
+                                  for c in cells[2:]):
+            cells = [
+                (f" {c.strip()}1 " if c.strip().replace(".", "", 1).isdigit() else c)
+                for c in cells
+            ]
+            line = "|".join(cells)
+            touched += 1
+        out.append(line)
+    return "".join(out), touched
+
+
 def without_skeleton(markdown):
     return "".join(
         line
@@ -226,6 +251,7 @@ def package_for(binary, deck, workdir, variant):
     markdown, touched = retitle(markdown_path.read_text(encoding="utf-8"))
     if not touched:
         return None, "no slide heading to retype"
+    markdown, _ = bump_chart_values(markdown)
     if variant == "generated":
         markdown = without_skeleton(markdown)
     edited = workdir / "edited.dmk.md"
