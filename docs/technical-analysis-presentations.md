@@ -188,6 +188,18 @@ schemas describe — `mc:AlternateContent` (Part 3) is legal anywhere and unrepr
 the gate resolves it to its fallback first, as a consumer does. Its first run found two corpus
 fixtures that were not schema-valid.
 
+**Gate 2 is built** (Phase 15 increment 15-J, `kb/71-phase-15-render.md`): `corpus/render_gate.py`.
+Two corrections to the paragraph above it. First, «rendering to PNG» is rendering to **PDF and then
+rasterising**: `soffice --convert-to png` exports a single page from a presentation, so a gate built
+on it would render the first slide of every deck and call the rest measured. Second, the perceptual
+diff adds **no dependency at all** — the rasteriser is asked for PGM, which the Python standard
+library reads in fifteen lines, and the metric (RMSE over 8 × 8 pixel block means at 100 dpi,
+threshold 2.5, measured in the KB entry) is thirty lines of arithmetic. What the gate compares had to
+be given a meaning for the same reason as gate 1: a byte-identical round trip is reported as such and
+not rendered, and the package generated on the embedded template is held to the same page count and
+to no page rendering blank. And LibreOffice is still not the oracle here (§2.4 of spike P3): this
+gate catches gross visual regressions, and risk P2 closes with the human checklist of 15-K.
+
 ---
 
 ## 6. Context economics: what an agent actually pays

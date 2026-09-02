@@ -267,6 +267,8 @@ After both fixes and the Part 3 step: **34 packages, 322 parts, 0 invalid, 0 not
 
 ## Next
 
-15-J: CI gate 2 — headless LibreOffice renders the corpus to PNG before and after the round trip,
-with a perceptual diff over a threshold failing the build, and LibreOffice absent a clean skip
-rather than a green tick.
+15-J, done in [[71-phase-15-render]]: CI gate 2 — headless LibreOffice renders the corpus to PDF and
+`pdftoppm` rasterises it, a perceptual diff over a measured threshold of 2.5 fails the build naming
+the deck, the page and the score, and a renderer that is missing *or broken* is a skip with a banner
+and exit 3, a failure in CI. Like this gate it refuses to measure a byte-identical round trip and
+says so; unlike it, it has never run against a real render on this machine.

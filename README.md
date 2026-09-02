@@ -389,11 +389,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 python3 corpus/generate.py --check     # the corpus is generated, not hand-drawn
 python3 corpus/schema_gate.py          # the .pptx parts we write, against the ECMA-376 XSDs
+python3 corpus/render_gate.py          # how a deck looks, before and after the round trip
 ```
 
 The schema gate needs `xmllint` (Debian/Ubuntu `libxml2-utils`) and a built CLI. The schemas it
 validates against are vendored, unmodified, in [`schemas/`](schemas/) — see `schemas/README.md` for
 their provenance and licence. It is CI-only: nothing it uses is a dependency of any binary.
+
+The render gate needs headless LibreOffice and `pdftoppm` (`libreoffice-impress poppler-utils`) and
+the same CLI: it renders every corpus deck before and after the round trip and scores the pages with
+a perceptual diff, failing over a threshold and naming the deck, the page and the number. Without a
+working renderer it **skips** — a banner saying what was therefore not measured, and exit 3, never a
+green tick — while CI runs it with `--require-renderer`, where a missing renderer is a failure. Its
+comparator can be measured on its own, with no renderer at all, by
+`python3 corpus/render_gate.py --self-test`. It is CI-only too, and adds no image dependency
+anywhere.
 
 Golden files live next to the corpus (`corpus/docx/*.expected.dmk.md`). To update them:
 `DOCSAI_UPDATE_GOLDENS=1 cargo test -p docsai-convert --test goldens`, and **review the diff**.

@@ -144,7 +144,18 @@ ECMA-376 Part 3 step, not a reason to loosen anything.
 
 Headless LibreOffice renders the corpus to PNG before and after the round trip, perceptual diff
 over a threshold fails the build. LibreOffice absent is a skip with a clean message, never a
-green tick that measured nothing.
+green tick that measured nothing. Done, in [[71-phase-15-render]], where the last clause turned out
+to be the whole increment: LibreOffice is broken on the development machine, so the gate was written
+by someone who could not watch it render a slide. The renderer is `soffice --convert-to pdf` then
+`pdftoppm` — LibreOffice exports a *single* page to PNG, which would have rendered the first slide
+of every deck and called the rest measured — and the diff is thirty lines of stdlib arithmetic over
+the PGM the rasteriser writes, so **no image dependency is added anywhere**, which is the §7 rule 4
+answer in full. The threshold, 2.5 on 100 × RMSE over 8 × 8 block means, is measured: 0.0000 for the
+same file twice, 1.72 for anti-aliasing on against off, 3.55 for one text line of twelve gone. Like
+gate 1 it refuses to measure a byte-identical round trip and says so; the generated-on-template
+package is checked for the same page count and for no page that came out blank. A missing **or
+broken** renderer is a skip with a banner and exit 3, and a failure under `--require-renderer`, which
+is what CI passes.
 
 ### 15-K — the P2 gate and the phase close
 
@@ -159,11 +170,17 @@ status and the acceptance criteria checked here.
       ([[69-phase-15-roundtrip]]). All seventeen decks of `corpus/pptx`, `.pptm` included: the
       second DocMark pass is the first, every category of the per-category metric is 100 %, and
       each written package is byte for byte the package that was read.
-- [ ] Both CI gates green on the corpus. **Half true, and only half.** Gate 1, schema validation, is
-      green — 15-I ([[70-phase-15-xsd]]): 34 packages written from the seventeen corpus decks, 322
-      parts validated, 0 invalid, 0 unmeasured, wired into `.github/workflows/test.yml` as its own
-      job and runnable locally with `python3 corpus/schema_gate.py`. Gate 2 is the render diff and
-      is 15-J; this box closes there.
+- [ ] Both CI gates green on the corpus. **Still not tickable, and for a different reason now.**
+      Gate 1, schema validation, is green — 15-I ([[70-phase-15-xsd]]): 34 packages written from the
+      seventeen corpus decks, 322 parts validated, 0 invalid, 0 unmeasured. Gate 2 is **built and
+      wired** — 15-J ([[71-phase-15-render]]): `corpus/render_gate.py`, its own `render-gate` job in
+      `.github/workflows/test.yml`, its comparator measured on fourteen pairs and its threshold
+      chosen from those numbers, four negative controls red and named, and the skip path exercised on
+      this machine's real broken LibreOffice. What is missing is the only thing that would make this
+      box true: **no corpus slide has ever been rendered by LibreOffice here**, so gate 2 has never
+      been *green on the corpus* — it has been green on its comparator and on a stand-in renderer.
+      The first real numbers come from the first CI run, and the threshold may have to move when they
+      do. The box closes when that run is seen, and no earlier.
 - [ ] No repair dialog in PowerPoint or LibreOffice for any corpus output (checklist signed).
 - [x] A deck written from *attribute-free* Markdown opens correctly with a sensible layout —
       15-G ([[68-phase-15-template]]). **With one caveat, stated rather than hidden**: the layout is

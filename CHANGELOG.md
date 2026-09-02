@@ -51,6 +51,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI gate 2: the render diff, before and after the round trip** (plan v2 Phase 15, tenth
+  increment). `corpus/render_gate.py` has headless LibreOffice render each corpus deck to PDF and
+  `pdftoppm` rasterise every page to greyscale, then scores the pairs with a low-frequency
+  perceptual diff — the RMSE over 8 × 8 pixel block means at 100 dpi, which averages away
+  anti-aliasing and hinting while keeping anything that moves ink from one part of the slide to
+  another. A page over the threshold of **2.5** fails the build naming the deck, the page and the
+  number; a deck whose **page count changed** is a failure of its own kind, because pages that
+  cannot be paired have no score. The threshold is measured, not guessed: `--self-test` builds
+  fourteen pairs whose answer is known — 0.0000 for the same file rasterised twice, 1.72 for
+  anti-aliasing on against off, 3.55 for one text line of twelve gone — prints them all, and asserts
+  the ordering the threshold depends on, with no renderer needed. Like gate 1 it refuses to pretend
+  that a byte-identical round trip was measured by a render: it says so and counts it separately.
+  The path that does write new bytes — the whole package generated on the embedded template — is
+  held to what a render can honestly say about it: the same page count, and no page that came out
+  **blank**. A renderer that is missing *or installed and broken* is a **skip** with a banner naming
+  what was not measured and exit 3, never a green tick; in CI, which installs LibreOffice on the line
+  above, `--require-renderer` makes it a failure instead. Wired into `.github/workflows/test.yml` as
+  its own `render-gate` job. **CI-only and dependency-free**: no image library is added anywhere —
+  the rasteriser is asked for PGM, which the standard library can read in fifteen lines — and
+  `cargo tree` is unchanged (`AGENTS.md` §7 rule 4).
+
 - **CI gate 1: the `.pptx` parts we write, validated against the ECMA-376 XSDs** (plan v2 Phase 15,
   ninth increment; analysis §5.5). `corpus/schema_gate.py` round-trips every deck of `corpus/pptx`
   twice — once edited on its **preserved package**, once with the `skeleton:` line removed so the

@@ -320,8 +320,23 @@ OOXML — a `p:txBody` with no `a:p` at all, and a DrawingML table cell holding 
 byte-identity tests because the writer reproduced them faithfully. The third finding was an
 `mc:AlternateContent`, which is legal by ECMA-376 Part 3 and unrepresentable in the Part 4 schemas;
 the gate now does the compatibility processing a consumer does instead of loosening anything.
-Next is **15-J**: CI gate 2, headless LibreOffice rendering the corpus to PNG with a perceptual
-diff, and LibreOffice absent a clean skip rather than a green tick.
+The tenth is done: **CI gate 2, the render gate** — `corpus/render_gate.py` has headless LibreOffice
+render each deck to PDF, `pdftoppm` rasterise every page to greyscale, and a low-frequency
+perceptual diff (the RMSE over 8×8-pixel block means, at 100 dpi) score the pairs; a page over the
+threshold of 2.5 fails the build naming the deck, the page and the number, and a deck whose page
+count changed is a failure of its own kind, because there is no score for pages that cannot be
+paired. The threshold is measured rather than guessed: `--self-test` prints every pair behind it —
+0.0000 for the same file rasterised twice, 1.72 for anti-aliasing on against off, 3.55 for one text
+line of twelve gone — and runs with no renderer at all, so the comparator is measured even where
+LibreOffice is not. Like gate 1, it does not pretend to measure a byte-identical round trip: it says
+so and spends no renderer time on it, and the path that does produce new bytes — the whole package
+written on the embedded template — is checked for the two things a render can honestly say about it,
+the same page count and no page that came out blank. A missing **or broken** renderer is a skip with
+a banner and exit 3, and in CI, which installs LibreOffice deliberately, `--require-renderer` makes
+it a failure. LibreOffice on this machine is broken (`libreglo.so`), so the gate has never rendered a
+real slide here: the skip path and the comparator were exercised, the render path only against a
+stand-in renderer.
+Next is **15-K**: the P2 PowerPoint checklist, run by a human on three decks, and the phase close.
 
 ## 2. Documents you must read before implementing
 
@@ -386,10 +401,15 @@ cargo fmt --all -- --check
 cargo run -p docsai-cli -- convert corpus/docx/basic-styles.docx -o /tmp/out.dmk.md
 python3 corpus/generate.py --check     # the corpus is generated; CI checks it is up to date
 python3 corpus/schema_gate.py          # CI gate 1: the .pptx parts we write, against the ECMA-376 XSDs
+python3 corpus/render_gate.py          # CI gate 2: the render diff, before and after the round trip
+python3 corpus/render_gate.py --self-test   # its comparator alone, no renderer needed
 ```
 
 The schema gate needs `xmllint` (Debian/Ubuntu `libxml2-utils`) and a built CLI
 (`cargo build -p docsai-cli`). Its schemas are vendored in `schemas/`; see `schemas/README.md`.
+The render gate needs `soffice` and `pdftoppm` (`libreoffice-impress poppler-utils`) and the same
+CLI; without a working renderer it **skips** with a banner and exit 3 — never a green tick — and in
+CI it is run with `--require-renderer`, where a missing renderer is a failure.
 
 Updating a golden is a deliberate act, and its diff is reviewed by hand:
 

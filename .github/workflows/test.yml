@@ -65,6 +65,49 @@ jobs:
       - name: Schema gate
         run: python3 corpus/schema_gate.py
 
+  # CI gate 2 of Phase 15: what a corpus deck *looks like*, before and after the
+  # round trip. Headless LibreOffice renders each package to PDF, `pdftoppm`
+  # rasterises every page, and a low-frequency perceptual diff scores the pairs.
+  # Ubuntu only and once, for the same reason as the schema gate: the bytes the
+  # writer produces are the same on all three platforms.
+  #
+  # `--require-renderer` is the point of this job. A missing LibreOffice is a
+  # *skip* on a developer's machine — a clean message and exit 3, never a green
+  # tick — but here it is a **failure**: this runner installs LibreOffice
+  # deliberately, so «no renderer» means the install step broke, not that the
+  # gate is inapplicable. A CI job that silently measured nothing is exactly the
+  # failure this gate was written against.
+  render-gate:
+    name: pptx render diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Neither is a workspace dependency, and neither reaches a shipped binary
+      # (`AGENTS.md` §7 rule 4). `--no-install-recommends` keeps the LibreOffice
+      # install to the Impress filters and the fonts they need.
+      - name: Install LibreOffice and poppler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-impress poppler-utils fonts-liberation
+
+      - name: Build the CLI
+        run: cargo build -p docsai-cli
+
+      # The comparator itself, on synthetic pairs whose answer is known. It
+      # needs no LibreOffice, so it measures something even on a machine where
+      # the renderer is unavailable, and it is what pins the threshold.
+      - name: Comparator self-test
+        run: python3 corpus/render_gate.py --self-test
+
+      - name: Render gate
+        run: python3 corpus/render_gate.py --require-renderer
+
   lint:
     name: fmt + clippy
     runs-on: ubuntu-latest
