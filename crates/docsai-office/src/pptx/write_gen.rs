@@ -372,6 +372,22 @@ pub(super) fn slide_xml(
         }
     }
 
+    // Slide-level markup — `p:transition`, `p:timing` — hangs off `p:sld`
+    // beside the shape tree, so the loop above never sees it and a generated
+    // slide has nowhere to put it: the fragments say which part they came out
+    // of, and this is not that part. It is a real loss, and the one thing it
+    // must not be is a quiet one (16-D, `AGENTS.md` §7 rule 3). The splice path
+    // does not come through here, so this never fires on a preserved deck.
+    if !slide.raw.is_empty() {
+        kept.push(format!(
+            "{} subtree(s) beside its shape tree — a transition, an animation \
+             timeline — which only the original package holds: the slide was \
+             written from the model rather than spliced into a preserved one, \
+             and they are not in it",
+            slide.raw.len()
+        ));
+    }
+
     out.push_str("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>");
     Ok(out)
 }

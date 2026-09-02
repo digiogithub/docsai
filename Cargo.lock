@@ -504,6 +504,7 @@ version = "0.1.0"
 dependencies = [
  "calamine",
  "cfb",
+ "docsai-docmark",
  "docsai-model",
  "quick-xml 0.37.5",
  "thiserror",

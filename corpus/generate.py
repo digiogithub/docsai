@@ -3532,6 +3532,147 @@ def pptx_smartart_fallback() -> None:
     )
 
 
+# The `a:graphicData@uri` an embedded object arrives under. Its last segment is
+# what the reader names the stub from, exactly as `chart` and `diagram` are.
+OLE_URI = "http://schemas.openxmlformats.org/presentationml/2006/ole"
+
+
+def _ole_preview(ident: int, name: str, rel: str, frame: str) -> str:
+    """The picture an OLE object is *seen* as.
+
+    No consumer runs the embedded application to draw a slide: it draws the
+    snapshot the producer took when the object was last edited. So the picture
+    is not decoration — it is the only thing on the slide a renderer can show,
+    and a round trip that lost it would lose the object visually while keeping
+    its bytes."""
+    return (
+        "<p:pic>"
+        f'<p:nvPicPr><p:cNvPr id="{ident}" name="{name}"/>'
+        '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
+        f'<p:blipFill><a:blip r:embed="{rel}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+        f'<p:spPr>{frame}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        "</p:pic>"
+    )
+
+
+def pptx_ole_embedded() -> None:
+    """`p:oleObj`: the fixture `kb/72-phase-15-close.md` item 13 names as the
+    one the corpus never had, and the code path `kb/43-phase-13-raw.md` says was
+    written without a file to prove it on.
+
+    An embedded object reaches a slide two ways, and this deck carries both
+    because the reader has two branches for them:
+
+    * **slide 1**, the ECMA-376 spelling: a `p:graphicFrame` whose
+      `a:graphicData@uri` ends in `ole`, holding a `p:oleObj` with `p:embed`
+      and the preview picture. The stub kind comes from the uri.
+    * **slide 2**, the spelling PowerPoint actually writes: the same frame
+      inside an `mc:AlternateContent`, with a plain picture in the fallback for
+      a consumer that cannot activate the object. The uri is inside the
+      `mc:Choice`, so the stub kind comes from finding the `p:oleObj` element
+      itself — and neither branch is read, because choosing one is the
+      consumer's job.
+
+    The two payloads differ on purpose too: an embedded worksheet is a whole
+    OPC package reached through a `package` relationship, an embedded equation
+    is an OLE2 compound file reached through an `oleObject` one. Neither is
+    ever opened by this project; both must come back byte for byte."""
+    worksheet_frame = (
+        "<p:graphicFrame>"
+        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Hoja de cálculo 1"/>'
+        '<p:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/>'
+        "</p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>"
+        '<p:xfrm><a:off x="4400000" y="2000000"/><a:ext cx="3600000" cy="2700000"/></p:xfrm>'
+        f'<a:graphic><a:graphicData uri="{OLE_URI}">'
+        '<p:oleObj spid="_x0000_s1026" name="Hoja de cálculo" r:id="rIdOleWorkbook" '
+        'imgW="3600000" imgH="2700000" progId="Excel.Sheet.12">'
+        "<p:embed/>"
+        + _ole_preview(5, "Vista previa de la hoja", "rIdOleImage",
+                       xfrm(4400000, 2000000, 3600000, 2700000))
+        + "</p:oleObj>"
+        "</a:graphicData></a:graphic>"
+        "</p:graphicFrame>"
+    )
+    equation_frame = (
+        "<p:graphicFrame>"
+        '<p:nvGraphicFramePr><p:cNvPr id="4" name="Ecuación 1"/>'
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        '<p:xfrm><a:off x="4400000" y="2400000"/><a:ext cx="2400000" cy="1200000"/></p:xfrm>'
+        f'<a:graphic><a:graphicData uri="{OLE_URI}">'
+        '<p:oleObj spid="_x0000_s1027" name="Ecuación" r:id="rIdOleEquation" '
+        'imgW="2400000" imgH="1200000" progId="Equation.3">'
+        "<p:embed/>"
+        + _ole_preview(5, "Vista previa de la ecuación", "rIdOleImage",
+                       xfrm(4400000, 2400000, 2400000, 1200000))
+        + "</p:oleObj>"
+        "</a:graphicData></a:graphic>"
+        "</p:graphicFrame>"
+    )
+    alternate = (
+        '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+        '<mc:Choice xmlns:v="urn:schemas-microsoft-com:vml" Requires="v">'
+        f"{equation_frame}"
+        "</mc:Choice>"
+        "<mc:Fallback>"
+        + _ole_preview(6, "Ecuación (respaldo)", "rIdOleImage",
+                       xfrm(4400000, 2400000, 2400000, 1200000))
+        + "</mc:Fallback>"
+        "</mc:AlternateContent>"
+    )
+    build_pptx(
+        "ole-embedded.pptx",
+        [
+            slide(
+                shape(2, "Title 1", a_p("Presupuesto incrustado"), ph=ph("title"))
+                + shape(3, "Content Placeholder 2", "".join(a_p(line) for line in [
+                    "La hoja de cálculo viaja dentro del propio archivo.",
+                    "Quien la abre edita el original, no una copia enlazada.",
+                    "La diapositiva sólo muestra la instantánea que dejó el editor.",
+                    "El paquete incrustado tiene que volver byte a byte.",
+                ]), ph=ph("body", 1))
+                + worksheet_frame
+            ),
+            slide(
+                shape(2, "Title 1", a_p("Fórmula incrustada"), ph=ph("title"))
+                + shape(3, "Content Placeholder 2", "".join(a_p(line) for line in [
+                    "La ecuación llega envuelta en una alternativa de compatibilidad.",
+                    "La rama elegida es cosa de quien la dibuja, no de quien la lee.",
+                    "El respaldo es una imagen para quien no sabe activarla.",
+                    "Aquí se conservan las dos ramas y no se abre ninguna.",
+                ]), ph=ph("body", 1))
+                + alternate
+            ),
+        ],
+        media={"image1.png": BLUE_PNG},
+        slide_rels={
+            1: [
+                ("rIdOleWorkbook", "package", "../embeddings/workbook1.xlsx"),
+                ("rIdOleImage", "image", "../media/image1.png"),
+            ],
+            2: [
+                ("rIdOleEquation", "oleObject", "../embeddings/oleObject1.bin"),
+                ("rIdOleImage", "image", "../media/image1.png"),
+            ],
+        },
+        extra_parts={
+            "ppt/embeddings/workbook1.xlsx": embedded_workbook(),
+            # An OLE2 compound-file header and filler. Not a real equation: the
+            # reader must never look inside an embedded object, so a payload
+            # that could actually be activated would be a hazard with no test
+            # value — the same reasoning as the macro fixture's `vbaProject`.
+            "ppt/embeddings/oleObject1.bin": (
+                bytes.fromhex("d0cf11e0a1b11ae1") + b"\x00" * 1016
+            ),
+        },
+        extra_defaults={"bin": "application/vnd.openxmlformats-officedocument.oleObject"},
+        extra_overrides=[
+            ("/ppt/embeddings/workbook1.xlsx",
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ],
+        title="Objetos incrustados",
+    )
+
+
 def pptx_macro_enabled() -> None:
     """A `.pptm`: the same deck as `basic-slides`, plus a macro project and the
     macro-enabled main content type. Read as its macro-free equivalent — the
@@ -3820,6 +3961,7 @@ GENERATORS = [
     pptx_charts_stale_workbook,
     pptx_charts_multi_series,
     pptx_smartart_fallback,
+    pptx_ole_embedded,
     pptx_macro_enabled,
     pptx_forty_slides,
     office_default_template,

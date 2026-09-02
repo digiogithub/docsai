@@ -17,6 +17,14 @@ zip = { workspace = true }
 calamine = { workspace = true }
 cfb = { workspace = true }
 
+# `docsai-docmark` is a *test* dependency only, and only for the whole-loop
+# proof of Phase 16-D (`kb/80-phase-16-opaque.md`): pptx → DocMark → pptx has to
+# be asserted somewhere, and the crate that owns both ends of the package half
+# is this one. It adds no edge to the shipped graph — `docsai-docmark` depends
+# on `docsai-model` alone, so there is no cycle — and no third-party code.
+[dev-dependencies]
+docsai-docmark = { workspace = true }
+
 
 [package.metadata.dist]
 dist = false
