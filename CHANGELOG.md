@@ -76,6 +76,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Slide thumbnails: a picture of each slide, drawn by headless LibreOffice** (plan v2 Phase 16,
+  seventh increment). `docsai convert deck.pptx -o deck.dmk.md --thumbnails` writes one PNG per
+  slide into `<dir>/<name>-thumbnails/`, and the MCP server gains a `render_slides` tool that does
+  the same for an agent — with `output_dir` it answers with a receipt, without one with base64 up
+  to 2 MiB. Each raster carries its 1-based slide number **and** the slide's node id, so the
+  picture joins to what `outline_document` addresses; when the renderer's page count and the deck's
+  slide count disagree the ids are dropped and a note says why, because pairing them by position
+  after that would attach one slide's id to another slide's picture. Rendering is `soffice
+  --convert-to pdf` followed by `pdftoppm -png`, the two steps the render gate already uses,
+  because LibreOffice asked for a PNG directly exports only the first page. No image or PDF
+  dependency was added anywhere. `--thumbnails-dir` and `--thumbnails-dpi` (24..=300, default 96)
+  tune it.
+- Slide rendering, and the legacy `.doc` LibreOffice fallback with it, now decide whether
+  LibreOffice is available by **running** it and requiring it to identify itself, rather than by
+  finding an executable file. An installed-but-mis-linked LibreOffice is on `PATH`, is executable,
+  exits **0** and prints a dynamic-loader error instead of a version; the old check called that
+  machine able. When the plain invocation fails, the installation's own `program` directory — the
+  parent of the resolved `soffice`, derived, never hard-coded — is put on the child's
+  `LD_LIBRARY_PATH` and the invocation retried, which is what makes `.doc` conversion and slide
+  rendering work on such a machine at all. `DOCSAI_LIBREOFFICE_LIBPATH` overrides the derivation;
+  `DOCSAI_PDFTOPPM` names the rasteriser.
+
+### Changed
+
+- **Breaking (MCP): `include_images=thumbnails` is now `include_images=downscaled`**, and the
+  response fields it writes are `downscaled_base64`, `downscaled_content_type`,
+  `downscaled_width`, `downscaled_height` and `downscaled_note`. The rung has always meant
+  «downscaled copies of the pictures this document embeds»; with `render_slides` in the same tool
+  list, «thumbnail» would have named both that and a raster of a whole slide, in the one place an
+  agent cannot afford to guess. The old word is **refused** rather than aliased, with a message
+  naming both answers: a caller who wrote it may have meant either, and silently handing over one
+  of the two is the failure the rename exists to prevent.
+
 - **The PowerPoint gate, prepared and unrun — and Phase 15 closed with it open** (plan v2 Phase 15,
   eleventh increment). `docs/spikes/P2-powerpoint-gate.md` is the fill-in form for the one thing
   this project cannot test itself: whether **PowerPoint** opens a deck docsai wrote without offering

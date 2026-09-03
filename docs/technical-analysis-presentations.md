@@ -305,6 +305,9 @@ truth for everything non-editable, the Markdown can be far smaller without sacri
   `include_images=none|refs|thumbnails|full`. For pptx, `thumbnails` renders the whole slide to
   PNG via LibreOffice: for a vision model a slide thumbnail is worth more than forty serialized
   shapes and costs less.
+  *(Phase 16-G split this in two rather than overloading one rung: `include_images=downscaled`
+  serves the pictures a document embeds, and the separate `render_slides` tool draws the slide.
+  See `kb/81-phase-16-thumbnails.md`.)*
 - **Content-hash cache.** Still stateless at the protocol level, but an LRU keyed by content
   hash avoids re-parsing the same deck across the 8 calls of a single loop.
 

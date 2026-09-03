@@ -237,6 +237,7 @@ Tools exposed:
 | `outline_document` | `path`/`content_base64`, `depth` (**1** by default), `max_nodes`, `cursor`, `preview_chars`, `fidelity` | tree of addressable nodes with id, kind, preview, token cost, plus `outline-ratio`, `omitted` and `next-cursor` |
 | `search_document` | `path`/`content_base64`, `query`, `context`, `limit`, `fidelity` | hits: an address, a selector when there is one, and the words around each match |
 | `read_selection` | `path`/`content_base64`, `select`, `fidelity` | self-contained DocMark for those nodes, with etags (same shape as `read --select --json`) |
+| `render_slides` | `path`/`content_base64`, `output_dir`, `slides` (`2`, `1-4`, `1,3,7`), `dpi` (24..=300, default 96) | one PNG per slide, drawn by headless LibreOffice; with `output_dir` a receipt, without it base64 up to 2 MiB. Each row carries the slide number **and** the slide's node id. The one tool that needs a renderer: without one it errors, and says so |
 
 Decisions:
 - Dual **path/base64** mode: local MCP clients (Claude Desktop/Code) pass paths; remote
@@ -272,16 +273,23 @@ Decisions:
   that inflates the suite by more than 5 % is refused unless
   `DOCSAI_ACCEPT_TOKEN_INFLATION=1` is set, the same trade as the corpus token budget. Paths in
   the requests are relative so the numbers describe the loop and not the checkout directory.
-- `include_images` = `none|refs|thumbnails|full`, default **`refs`**. It changes the
+- `include_images` = `none|refs|downscaled|full`, default **`refs`**. It changes the
   *payload*, never the markdown: the body keeps its `assets/…` links at every rung, so no
   rung is a lossy conversion and a client can come back for `full` later. Every rung reports
   `image_count` and `image_bytes`, because "no images in the response" and "no images in the
-  document" must not look alike.
+  document" must not look alike. The third rung was `thumbnails` until Phase 16-G, when
+  `render_slides` arrived and the word came to mean two different pictures: `include_images`
+  serves the pictures a document **embeds**, `render_slides` a raster of a **whole slide**. The
+  old word is refused with both answers named rather than aliased to one of them.
 
 ## 7. Cross-platform and distribution
 
 - No system dependencies on the main path (pure Rust). `soffice` is searched at runtime
-  in standard locations per OS only for `.doc`.
+  in standard locations per OS only for `.doc` and for slide rendering (`--thumbnails`,
+  `render_slides`), which also needs `pdftoppm`. Both are off the main path: absent, they
+  cost a warning and nothing else. Availability is decided by **running** the tool, not by
+  finding the file — an installed LibreOffice whose loader cannot find its own libraries
+  exits 0 and prints an error instead of a version.
 - CI: GitHub Actions, ubuntu/windows/macos matrix; release artifacts with `cargo-dist`
   (tar.gz/zip + shell/powershell installers; optional: Homebrew tap, Scoop/winget, cargo-binstall).
 - Targets: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`,
@@ -510,8 +518,10 @@ docsai convert … --fidelity full|standard|plain|agent [--raw inline|sidecar]
 | `search_document` | ids + context for a query |
 | `apply_edits` | transactional patch operations against ids, with `dry_run`, etag preconditions, and the applied diff + new etags in the response |
 | `validate_docmark` | typed errors with node id and suggested fix |
+| `render_slides` | one PNG per slide through headless LibreOffice — the slide as a consumer sees it |
 
-Plus: `include_images=none|refs|thumbnails|full` (default moves from `inline-base64` to `refs`),
+Plus: `include_images=none|refs|downscaled|full` (default moves from `inline-base64` to `refs`),
+`render_slides` for a raster of a whole slide,
 a contextual DocMark cheat-sheet exposed as an MCP resource, and a content-hash LRU cache in
 `docsai-convert`.
 

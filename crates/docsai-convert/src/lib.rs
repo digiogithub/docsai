@@ -13,6 +13,7 @@ pub mod inspect;
 pub mod loffice;
 pub mod outline;
 mod pipeline;
+pub mod render;
 pub mod search;
 pub mod select;
 pub mod service;
@@ -31,6 +32,10 @@ pub use pipeline::{
     convert_bytes, convert_file, is_stdin_path, is_stdout_path, read_document,
     read_document_with_options, read_path, read_path_with_options, roundtrip_file, ConvertOptions,
     Outcome, RoundtripOutcome,
+};
+pub use render::{
+    probe_renderer, render_document_slides, render_slides, slide_ids, RenderOptions, Renderer,
+    RendererUnavailable, SlideThumbnail, SlideThumbnails,
 };
 pub use search::{
     search, search_input, search_path, Hit, Location, Query, QueryError, SearchResults, Snippet,
@@ -88,6 +93,14 @@ pub enum ConvertError {
     /// LibreOffice was required or failed while converting a legacy format.
     #[error("LibreOffice fallback: {message}")]
     Loffice { message: String },
+
+    /// The external renderer could not draw what was asked of it (Phase 16-G).
+    ///
+    /// Distinct from [`ConvertError::Loffice`] on purpose: that one is a
+    /// *conversion* falling back to LibreOffice, this one is a page being drawn
+    /// by it, and the two fail for different reasons and are fixed differently.
+    #[error("slide render: {message}")]
+    Renderer { message: String },
 }
 
 /// One row of the support matrix shown by `docsai formats`.

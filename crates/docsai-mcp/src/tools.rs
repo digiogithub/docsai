@@ -83,7 +83,8 @@ pub struct ConvertToMarkdownArgs {
     /// Media directory. Defaults to `assets/` next to the output.
     #[serde(default)]
     pub assets_dir: Option<String>,
-    /// Image payload: `none`, `refs` (default), `thumbnails`, `full`.
+    /// Embedded pictures: `none`, `refs` (default), `downscaled`, `full`.
+    /// A picture of a whole slide is `render_slides` instead.
     #[serde(default)]
     pub include_images: Option<String>,
 }
@@ -195,6 +196,29 @@ pub struct DocumentArgs {
     /// Name hint for `content_base64`.
     #[serde(default)]
     pub filename: Option<String>,
+}
+
+/// Arguments for `render_slides`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct RenderSlidesArgs {
+    /// Presentation path.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Source bytes, base64; needs `filename`.
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    /// Name hint for `content_base64`.
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Directory for the PNGs. Preferred: keeps them out of the context.
+    #[serde(default)]
+    pub output_dir: Option<String>,
+    /// 1-based: `2`, `1-4`, `1,3,7`. All of them by default.
+    #[serde(default)]
+    pub slides: Option<String>,
+    /// 24..=300, default 96 (a 10x7.5 in slide becomes 960x720).
+    #[serde(default)]
+    pub dpi: Option<u32>,
 }
 
 /// Default nodes an outline response carries before it truncates itself.
@@ -801,6 +825,242 @@ pub fn tool_estimate_tokens(
     Ok(ToolOutput::rendered(to_value(&budget)?, text))
 }
 
+/// Largest payload of rendered slides a response will carry inline.
+///
+/// A slide at 96 dpi is tens of kilobytes and base64 adds a third; a
+/// forty-slide deck inline is megabytes of context for something the caller
+/// almost certainly wanted as files. Over this the call is refused with the
+/// argument that fixes it, exactly as `convert_to_markdown` refuses a document
+/// over its token ceiling.
+const MAX_INLINE_RENDER_BYTES: usize = 2 * 1024 * 1024;
+
+/// Runs `render_slides`: a picture of each slide, drawn by LibreOffice.
+///
+/// This is the *other* kind of image an agent can ask this server for, and the
+/// distinction is the whole reason `include_images=thumbnails` was renamed in
+/// 16-G. `include_images` serves the pictures a document **embeds**, out of the
+/// package. This serves a raster of a **whole slide** — background, placeholder
+/// text, tables, the chart as drawn — which exists nowhere in the package and
+/// has to be rendered.
+pub fn tool_render_slides(
+    args: &RenderSlidesArgs,
+    config: &McpConfig,
+) -> Result<ToolOutput, ConvertError> {
+    let input = resolve_document_input(
+        args.path.as_deref(),
+        args.content_base64.as_deref(),
+        args.filename.as_deref(),
+        config,
+    )?;
+    let mut render = docsai_convert::RenderOptions::default();
+    if let Some(dpi) = args.dpi {
+        render = render.with_dpi(dpi)?;
+    }
+    let wanted = args.slides.as_deref().map(parse_slide_range).transpose()?;
+
+    let renderer = docsai_convert::probe_renderer().map_err(|why| ConvertError::Renderer {
+        message: format!(
+            "{why}. Nothing was rendered; every other tool on this server works without a \
+             renderer, so read the deck with outline_document or read_selection instead"
+        ),
+    })?;
+
+    // Base64 input has no path for LibreOffice to open, so it becomes a file
+    // in a temporary directory that dies with the call.
+    let scratch;
+    let source: &Path = match &input {
+        ResolvedInput::Path(path) => path.as_path(),
+        ResolvedInput::Bytes { data, filename } => {
+            scratch = write_scratch(data, filename)?;
+            scratch.path()
+        }
+    };
+
+    let rendered = docsai_convert::render_document_slides(
+        &renderer,
+        source,
+        &config.convert_options(),
+        &render,
+    )?;
+    let selected: Vec<&docsai_convert::SlideThumbnail> = rendered
+        .slides
+        .iter()
+        .filter(|slide| {
+            wanted
+                .as_ref()
+                .is_none_or(|w| w.contains(&slide.slide_number))
+        })
+        .collect();
+    if selected.is_empty() {
+        return Err(ConvertError::Invalid(format!(
+            "`slides` selected nothing; this deck rendered {} page(s)",
+            rendered.slides.len()
+        )));
+    }
+
+    if let Some(dir) = args.output_dir.as_deref() {
+        return render_to_files(&rendered, &selected, dir);
+    }
+
+    let total: usize = selected.iter().map(|slide| slide.data.len()).sum();
+    if total > MAX_INLINE_RENDER_BYTES {
+        return Err(ConvertError::Invalid(format!(
+            "{} slide(s) at {} dpi are {total} bytes of PNG, over the inline ceiling of \
+             {MAX_INLINE_RENDER_BYTES}: pass `output_dir` to write them as files, narrow \
+             `slides`, or lower `dpi`",
+            selected.len(),
+            rendered.dpi
+        )));
+    }
+    let slides: Vec<Value> = selected
+        .iter()
+        .map(|slide| {
+            let mut row = slide_row(slide);
+            row["content_base64"] = Value::String(encode_base64(&slide.data));
+            row
+        })
+        .collect();
+    Ok(ToolOutput::json(json!({
+        "renderer": rendered.renderer,
+        "dpi": rendered.dpi,
+        "slide_count": rendered.slides.len(),
+        "slides": slides,
+        "notes": rendered.notes,
+    })))
+}
+
+/// The `output_dir` branch: write the PNGs, answer with a receipt.
+fn render_to_files(
+    rendered: &docsai_convert::SlideThumbnails,
+    selected: &[&docsai_convert::SlideThumbnail],
+    dir: &str,
+) -> Result<ToolOutput, ConvertError> {
+    let dir = PathBuf::from(dir);
+    validate_output_path(&dir)?;
+    std::fs::create_dir_all(&dir).map_err(|source| ConvertError::Io {
+        path: dir.display().to_string(),
+        source,
+    })?;
+    let mut rows = Vec::with_capacity(selected.len());
+    let mut written = 0usize;
+    for slide in selected {
+        let path = dir.join(&slide.file_name);
+        std::fs::write(&path, &slide.data).map_err(|source| ConvertError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+        written += slide.data.len();
+        let mut row = slide_row(slide);
+        row["path"] = Value::String(path.display().to_string());
+        rows.push(row);
+    }
+    let value = json!({
+        "renderer": rendered.renderer,
+        "dpi": rendered.dpi,
+        "slide_count": rendered.slides.len(),
+        "output_dir": dir.display().to_string(),
+        "bytes_written": written,
+        "slides": rows,
+        "notes": rendered.notes,
+    });
+    let mut text = format!(
+        "wrote {} PNG(s) to {} ({written} bytes at {} dpi, {})\n",
+        rows.len(),
+        dir.display(),
+        rendered.dpi,
+        rendered.renderer
+    );
+    for note in &rendered.notes {
+        text.push_str(&format!("note: {note}\n"));
+    }
+    Ok(ToolOutput::rendered(value, text))
+}
+
+fn slide_row(slide: &docsai_convert::SlideThumbnail) -> Value {
+    json!({
+        "slide": slide.slide_number,
+        "node_id": slide.node_id.as_ref().map(|id| id.0.clone()),
+        "file_name": slide.file_name,
+        "content_type": slide.content_type,
+        "width": slide.width,
+        "height": slide.height,
+        "byte_len": slide.data.len(),
+    })
+}
+
+fn write_scratch(data: &[u8], filename: &str) -> Result<ScratchFile, ConvertError> {
+    let dir = tempfile::Builder::new()
+        .prefix("docsai-mcp-render-")
+        .tempdir()
+        .map_err(|source| ConvertError::Io {
+            path: "temporary directory".into(),
+            source,
+        })?;
+    let path = dir.path().join(filename);
+    std::fs::write(&path, data).map_err(|source| ConvertError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    Ok(ScratchFile { _dir: dir, path })
+}
+
+/// A document written to a temporary directory so an external renderer can open
+/// it; both go away when this is dropped.
+struct ScratchFile {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+}
+
+impl ScratchFile {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// `2`, `1-4`, `1,3,7-9` as a set of 1-based slide numbers.
+///
+/// Deliberately not the DocMark selector syntax: those address *nodes* (`s4`,
+/// `#n7`) and a rendered page is addressed by its position in what the renderer
+/// produced, which is the only thing the renderer can be held to.
+fn parse_slide_range(spec: &str) -> Result<Vec<usize>, ConvertError> {
+    let mut out = Vec::new();
+    for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let bounds: Vec<&str> = part.splitn(2, '-').map(str::trim).collect();
+        let number = |value: &str| -> Result<usize, ConvertError> {
+            value
+                .parse::<usize>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| {
+                    ConvertError::Invalid(format!(
+                    "`{spec}` is not a slide range; slides are 1-based, as in `2`, `1-4` or `1,3,7`"
+                ))
+                })
+        };
+        match bounds.as_slice() {
+            [single] => out.push(number(single)?),
+            [from, to] => {
+                let (from, to) = (number(from)?, number(to)?);
+                if from > to {
+                    return Err(ConvertError::Invalid(format!(
+                        "`{part}` runs backwards; a range is written low-high"
+                    )));
+                }
+                out.extend(from..=to);
+            }
+            _ => unreachable!("splitn(2) yields one or two parts"),
+        }
+    }
+    if out.is_empty() {
+        return Err(ConvertError::Invalid(
+            "`slides` is empty; leave it out to render every slide".into(),
+        ));
+    }
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
+}
+
 /// Runs `list_supported_formats`.
 pub fn tool_list_supported_formats() -> ToolOutput {
     let formats: Vec<FormatRow> = SUPPORT.iter().map(FormatRow::from).collect();
@@ -1113,13 +1373,85 @@ mod tests {
             .is_empty());
     }
 
+    fn deck(name: &str) -> String {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus/pptx")
+            .join(name)
+            .display()
+            .to_string()
+    }
+
     #[test]
-    fn a_thumbnail_never_costs_more_than_the_image_it_stands_for() {
-        // The corpus images are already smaller than a thumbnail box, which is
-        // exactly the case where re-encoding would *cost* bytes: the invariant
-        // has to hold there too, so it is stated as `<=` and the strict
-        // reduction is measured on a big image in `images::tests`.
-        let thumbs = to_markdown(Some("thumbnails"), None);
+    fn a_slide_range_is_1_based_and_says_so_when_it_is_not() {
+        assert_eq!(parse_slide_range("2").unwrap(), vec![2]);
+        assert_eq!(parse_slide_range("1-4").unwrap(), vec![1, 2, 3, 4]);
+        assert_eq!(parse_slide_range("3,1,3").unwrap(), vec![1, 3]);
+        assert!(parse_slide_range("0").is_err(), "slides start at one");
+        assert!(parse_slide_range("4-2").is_err(), "a range runs low-high");
+        assert!(parse_slide_range("first").is_err());
+        assert!(parse_slide_range("").is_err());
+    }
+
+    /// Like the renderer's own test: which half runs is the machine's to decide,
+    /// and both halves are real coverage.
+    #[test]
+    fn render_slides_draws_the_deck_or_says_why_it_cannot() {
+        let out = tempfile::tempdir().expect("tempdir");
+        let args = RenderSlidesArgs {
+            path: Some(deck("basic-slides.pptx")),
+            output_dir: Some(out.path().display().to_string()),
+            ..Default::default()
+        };
+        match tool_render_slides(&args, &cfg()) {
+            Ok(output) => {
+                assert_eq!(output.value["slide_count"], 2);
+                let rows = output.value["slides"].as_array().expect("rows");
+                assert_eq!(rows.len(), 2);
+                for (index, row) in rows.iter().enumerate() {
+                    assert_eq!(row["slide"], index + 1);
+                    assert_eq!(row["content_type"], "image/png");
+                    assert!(row["node_id"].is_string(), "{row}");
+                    let path = PathBuf::from(row["path"].as_str().expect("a path"));
+                    assert!(path.is_file(), "{} was not written", path.display());
+                }
+                // The receipt, not the bytes: nothing base64 goes back when the
+                // caller named a directory.
+                assert!(rows[0].get("content_base64").is_none());
+                assert!(!output.text.contains("base64"));
+            }
+            Err(error) => {
+                let message = error.to_string();
+                assert!(message.contains("slide render"), "{message}");
+                assert!(message.len() > 30, "a refusal owes the caller a reason");
+            }
+        }
+    }
+
+    #[test]
+    fn a_document_with_no_slides_is_refused_rather_than_answered_with_pages() {
+        // Whatever the machine can render: a report has pages, not slides, and
+        // the two are not addressed the same way. Skipped where there is no
+        // renderer, because the refusal is only reachable past the probe.
+        if docsai_convert::probe_renderer().is_err() {
+            return;
+        }
+        let args = RenderSlidesArgs {
+            path: Some(corpus("basic-text.docx")),
+            ..Default::default()
+        };
+        let error = tool_render_slides(&args, &cfg())
+            .expect_err("a report is not a deck")
+            .to_string();
+        assert!(error.contains("not a presentation"), "{error}");
+    }
+
+    #[test]
+    fn a_downscaled_image_never_costs_more_than_the_image_it_stands_for() {
+        // The corpus images are already smaller than the downscale box, which
+        // is exactly the case where re-encoding would *cost* bytes: the
+        // invariant has to hold there too, so it is stated as `<=` and the
+        // strict reduction is measured on a big image in `images::tests`.
+        let small = to_markdown(Some("downscaled"), None);
         let full = to_markdown(Some("full"), None);
         let weigh = |value: &Value| -> usize {
             value["assets"]
@@ -1127,18 +1459,18 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter_map(|row| {
-                    row.get("thumbnail_base64")
+                    row.get("downscaled_base64")
                         .or_else(|| row.get("content_base64"))
                         .and_then(Value::as_str)
                 })
                 .map(str::len)
                 .sum()
         };
-        assert!(weigh(&thumbs) > 0, "something has to be decodable");
+        assert!(weigh(&small) > 0, "something has to be decodable");
         assert!(
-            weigh(&thumbs) <= weigh(&full),
-            "thumbnails {} bytes, originals {} bytes",
-            weigh(&thumbs),
+            weigh(&small) <= weigh(&full),
+            "downscaled {} bytes, originals {} bytes",
+            weigh(&small),
             weigh(&full)
         );
     }

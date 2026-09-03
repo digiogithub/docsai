@@ -24,11 +24,13 @@ pub use server::DocsaiServer;
 
 /// Names of the tools the server exposes (architecture §6).
 ///
-/// The last four are what an agent should reach for first: `estimate_tokens`
-/// says what a document costs, `outline_document` says what is in it,
-/// `search_document` says where it says something, and `read_selection` hands
-/// over just that part. The two converters move whole documents, and with the
-/// E2/E3 pass they move them **between files**, not through the response.
+/// `estimate_tokens`, `outline_document`, `search_document` and
+/// `read_selection` are what an agent should reach for first: what a document
+/// costs, what is in it, where it says something, and just that part. The two
+/// converters move whole documents, and with the E2/E3 pass they move them
+/// **between files**, not through the response. `render_slides` (Phase 16-G)
+/// is the one tool that needs something this build does not ship: an installed
+/// LibreOffice.
 pub const TOOLS: &[&str] = &[
     "convert_to_markdown",
     "convert_from_markdown",
@@ -38,6 +40,7 @@ pub const TOOLS: &[&str] = &[
     "outline_document",
     "search_document",
     "read_selection",
+    "render_slides",
 ];
 
 /// Runs the MCP server on stdio until the client disconnects.
@@ -109,8 +112,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_tool_set_is_the_four_converters_plus_the_four_primitives() {
-        assert_eq!(TOOLS.len(), 8);
+    fn the_tool_set_is_the_converters_the_primitives_and_the_renderer() {
+        assert_eq!(TOOLS.len(), 9);
         for expected in [
             "convert_to_markdown",
             "convert_from_markdown",
@@ -120,6 +123,7 @@ mod tests {
             "outline_document",
             "search_document",
             "read_selection",
+            "render_slides",
         ] {
             assert!(TOOLS.contains(&expected), "missing {expected}");
         }

@@ -103,7 +103,7 @@ fn standard_locations() -> Vec<PathBuf> {
     out
 }
 
-fn search_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn search_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(name);
@@ -119,7 +119,7 @@ fn search_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn is_executable(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
@@ -155,7 +155,20 @@ pub fn convert_to_docx(
     let _ = std::fs::create_dir_all(&profile);
     let profile_uri = path_to_file_uri(&profile);
 
-    let status = Command::new(soffice)
+    // An installed LibreOffice whose loader cannot find its own libraries runs
+    // and fails; the same resolution the slide renderer uses (Phase 16-G) makes
+    // it run here too, and costs one `--version` when it was never needed.
+    let library_path = match crate::render::resolve_soffice(soffice) {
+        Ok((_, library_path)) => library_path,
+        Err(why) => {
+            return Err(ConvertError::Loffice {
+                message: format!("`{}` does not run: {why}", soffice.display()),
+            })
+        }
+    };
+
+    let mut command = Command::new(soffice);
+    command
         .arg("--headless")
         .arg("--nologo")
         .arg("--nolockcheck")
@@ -166,11 +179,11 @@ pub fn convert_to_docx(
         .arg("docx")
         .arg("--outdir")
         .arg(out_dir)
-        .arg(input)
-        .output()
-        .map_err(|source| ConvertError::Loffice {
-            message: format!("failed to spawn `{}`: {source}", soffice.display()),
-        })?;
+        .arg(input);
+    crate::render::apply_library_path(&mut command, library_path.as_deref());
+    let status = command.output().map_err(|source| ConvertError::Loffice {
+        message: format!("failed to spawn `{}`: {source}", soffice.display()),
+    })?;
 
     if !status.status.success() {
         let stderr = String::from_utf8_lossy(&status.stderr);
@@ -209,7 +222,7 @@ pub fn convert_to_docx(
     })
 }
 
-fn path_to_file_uri(path: &Path) -> String {
+pub(crate) fn path_to_file_uri(path: &Path) -> String {
     // LibreOffice expects a file:// URI for UserInstallation.
     let abs = if path.is_absolute() {
         path.to_path_buf()

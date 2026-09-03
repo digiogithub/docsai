@@ -92,6 +92,19 @@ enum Command {
         /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
+        /// Also draw one PNG per slide of every presentation converted, through
+        /// headless LibreOffice. This is a picture of the whole slide, not a
+        /// copy of the pictures inside it. Skipped with a warning when no
+        /// renderer is installed.
+        #[arg(long)]
+        thumbnails: bool,
+        /// Where the slide PNGs go: `<DIR>/<name>-thumbnails/slide-NN.png`.
+        /// Defaults to the directory the converted document goes to.
+        #[arg(long, value_name = "DIR")]
+        thumbnails_dir: Option<PathBuf>,
+        /// Resolution of the slide PNGs, in dots per inch.
+        #[arg(long, value_name = "N", default_value_t = docsai_convert::render::DEFAULT_DPI)]
+        thumbnails_dpi: u32,
     },
     /// Show document structure without converting (metadata, styles, sheets, media).
     Inspect {
@@ -390,6 +403,9 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             json,
             strict,
             use_loffice,
+            thumbnails,
+            thumbnails_dir,
+            thumbnails_dpi,
         } => run_convert(
             inputs,
             output.as_ref(),
@@ -405,6 +421,11 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             *json,
             *strict,
             use_loffice,
+            ThumbnailArgs {
+                enabled: *thumbnails,
+                dir: thumbnails_dir.clone(),
+                dpi: *thumbnails_dpi,
+            },
             cli.verbose,
         ),
     }
@@ -794,6 +815,7 @@ fn run_convert(
     json: bool,
     strict: bool,
     use_loffice: &str,
+    thumbnails: ThumbnailArgs,
     verbose: bool,
 ) -> anyhow::Result<u8> {
     let fidelity = parse_fidelity(fidelity)?;
@@ -876,7 +898,19 @@ fn run_convert(
                 }
             }
         }
-        return Ok(outcome.exit_code(strict));
+        let mut code = outcome.exit_code(strict);
+        let converted: Vec<PathBuf> = outcome
+            .items
+            .iter()
+            .filter(|item| item.result.is_ok())
+            .map(|item| item.input.clone())
+            .collect();
+        if draw_thumbnails(&converted, Some(out_dir), None, &thumbnails, &options)?
+            && code == EXIT_OK
+        {
+            code = EXIT_WARNINGS;
+        }
+        return Ok(code);
     }
 
     let input = inputs
@@ -897,8 +931,120 @@ fn run_convert(
         report_to_stderr(&outcome, verbose);
     }
 
-    let lost = outcome.report.has_severe() || (strict && !outcome.report.warnings.is_empty());
+    let degraded = draw_thumbnails(
+        std::slice::from_ref(input),
+        None,
+        outcome.output_path.as_deref(),
+        &thumbnails,
+        &options,
+    )?;
+
+    let lost =
+        degraded || outcome.report.has_severe() || (strict && !outcome.report.warnings.is_empty());
     Ok(if lost { EXIT_WARNINGS } else { EXIT_OK })
+}
+
+/// What `--thumbnails`, `--thumbnails-dir` and `--thumbnails-dpi` asked for.
+struct ThumbnailArgs {
+    enabled: bool,
+    dir: Option<PathBuf>,
+    dpi: u32,
+}
+
+/// Draws one PNG per slide for every presentation among `inputs`.
+///
+/// Returns whether the run was degraded — no renderer, or a deck that could not
+/// be drawn — so the caller can exit `1` rather than pretend the request was
+/// served. Nothing here ever fails the conversion itself: the DocMark is
+/// already written and is not made wrong by a missing rasteriser.
+///
+/// **The skip is a measurement.** `probe_renderer` runs both tools before it
+/// says either is there, because an installed-and-broken LibreOffice exits `0`
+/// and prints a loader error instead of a version; a probe that trusted `which`
+/// would print "LibreOffice is not installed" on a machine where it is, which
+/// is a false warning and no better than a silent loss.
+fn draw_thumbnails(
+    inputs: &[PathBuf],
+    out_dir: Option<&Path>,
+    output: Option<&Path>,
+    args: &ThumbnailArgs,
+    options: &ConvertOptions,
+) -> anyhow::Result<bool> {
+    if !args.enabled {
+        return Ok(false);
+    }
+    let render = docsai_convert::RenderOptions::default().with_dpi(args.dpi)?;
+    let base = match (&args.dir, out_dir, output.and_then(Path::parent)) {
+        (Some(dir), _, _) => dir.clone(),
+        (None, Some(dir), _) => dir.to_path_buf(),
+        (None, None, Some(dir)) => dir.to_path_buf(),
+        (None, None, None) => anyhow::bail!(
+            "--thumbnails writes files, so it needs somewhere to write them: pass              --thumbnails-dir <dir>, or convert to a file with --output / --out-dir"
+        ),
+    };
+
+    let renderer = match docsai_convert::probe_renderer() {
+        Ok(renderer) => renderer,
+        Err(why) => {
+            eprintln!("docsai: slide thumbnails skipped — {why}");
+            return Ok(true);
+        }
+    };
+
+    let decks: Vec<&PathBuf> = inputs
+        .iter()
+        .filter(|input| {
+            input
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(Format::parse)
+                .is_some_and(Format::is_presentation)
+        })
+        .collect();
+    if decks.is_empty() {
+        eprintln!(
+            "docsai: slide thumbnails skipped — a thumbnail is a raster of a slide, and none of \
+             the {} input(s) is a presentation",
+            inputs.len()
+        );
+        return Ok(true);
+    }
+
+    let mut degraded = false;
+    for input in decks {
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("document");
+        let dir = base.join(format!("{stem}-thumbnails"));
+        match docsai_convert::render_document_slides(&renderer, input, options, &render) {
+            Ok(rendered) => {
+                std::fs::create_dir_all(&dir)?;
+                for slide in &rendered.slides {
+                    std::fs::write(dir.join(&slide.file_name), &slide.data)?;
+                }
+                for note in &rendered.notes {
+                    degraded = true;
+                    eprintln!("docsai: {} — {note}", input.display());
+                }
+                eprintln!(
+                    "docsai: {} slide thumbnail(s) → {} ({} dpi, {})",
+                    rendered.slides.len(),
+                    dir.display(),
+                    rendered.dpi,
+                    rendered.renderer
+                );
+            }
+            Err(error) => {
+                degraded = true;
+                eprintln!(
+                    "docsai: slide thumbnails failed for {} — {error}",
+                    input.display()
+                );
+            }
+        }
+    }
+    Ok(degraded)
 }
 
 fn report_to_stderr(outcome: &docsai_convert::Outcome, verbose: bool) {

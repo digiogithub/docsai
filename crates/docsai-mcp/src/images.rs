@@ -14,8 +14,21 @@
 //! |---|---|---|
 //! | `none` | nothing but the count and the byte total | 0 |
 //! | `refs` (**default**) | name, MIME type and size of each image | a few tokens each |
-//! | `thumbnails` | the above plus a downscaled PNG it can actually look at | ~1 kB each |
+//! | `downscaled` | the above plus a downscaled PNG it can actually look at | ~1 kB each |
 //! | `full` | the original bytes, as before | the whole document's media |
+//!
+//! The third rung was called `thumbnails` until Phase 16-G, and the word was
+//! wrong twice over. It is a *downscaled copy of a picture the document
+//! embeds*, extracted from the package and reproducible from it — while a
+//! **thumbnail**, everywhere else in this project and in every consumer an
+//! agent has met, is a raster of a *whole page or slide* drawn by a renderer.
+//! When 16-G added the second thing (`docsai_convert::render`), one word named
+//! both, and a tool description is exactly where an agent cannot afford to
+//! guess which. So the rung says what it does — `downscaled` — and the word
+//! «thumbnail» is left to mean the picture of a slide. `thumbnails` is no
+//! longer accepted: it is refused with a sentence naming both answers, because
+//! a caller who meant the other one would otherwise be handed the wrong
+//! pictures and never learn it. See `kb/81-phase-16-thumbnails.md`.
 //!
 //! Two rules hold at every rung. The **markdown never changes**: the body
 //! always carries `![](assets/img-….png)`, so no rung is a lossy conversion and
@@ -29,19 +42,19 @@ use base64::Engine;
 use docsai_convert::{AssetBytes, ConvertError};
 use serde_json::{json, Value};
 
-/// Longest side of a thumbnail, in pixels.
+/// Longest side of a downscaled image, in pixels.
 ///
 /// Small enough that a page of them costs less than one original, large enough
 /// that a chart is still readable.
-const THUMBNAIL_MAX_SIDE: u32 = 256;
+const DOWNSCALED_MAX_SIDE: u32 = 256;
 
 /// Ceiling on a decoded image, in bytes.
 ///
 /// A decompression bomb — a few kilobytes of PNG declaring 60 000 × 60 000
 /// pixels — is a denial of service against a server that decodes whatever a
-/// client points it at. The limit is what makes `thumbnails` safe on untrusted
+/// client points it at. The limit is what makes `downscaled` safe on untrusted
 /// input; over it, the image degrades to a ref with the reason attached.
-const THUMBNAIL_MAX_ALLOC: u64 = 64 * 1024 * 1024;
+const DOWNSCALED_MAX_ALLOC: u64 = 64 * 1024 * 1024;
 
 /// How much of an image the response carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -51,8 +64,9 @@ pub enum ImagePolicy {
     /// Name, type and size — the default since plan v2 Phase 11.
     #[default]
     Refs,
-    /// A downscaled PNG the client can look at.
-    Thumbnails,
+    /// A downscaled PNG of an embedded picture the client can look at. **Not**
+    /// a picture of a page: `render_slides` is that.
+    Downscaled,
     /// The original bytes, base64.
     Full,
 }
@@ -63,10 +77,20 @@ impl ImagePolicy {
         match value.trim() {
             "none" => Ok(ImagePolicy::None),
             "refs" => Ok(ImagePolicy::Refs),
-            "thumbnails" => Ok(ImagePolicy::Thumbnails),
+            "downscaled" => Ok(ImagePolicy::Downscaled),
+            // Refused rather than aliased. A caller who wrote `thumbnails`
+            // after Phase 16-G may have meant either rung, and handing them one
+            // of the two in silence is the failure this rename exists to
+            // prevent — so both are named and the caller chooses.
+            "thumbnails" => Err(ConvertError::Invalid(
+                "`include_images=thumbnails` was renamed in Phase 16-G because it named two \
+                 different things. For downscaled copies of the pictures this document embeds, \
+                 pass `downscaled`. For a raster of a whole slide, call the `render_slides` tool"
+                    .into(),
+            )),
             "full" => Ok(ImagePolicy::Full),
             other => Err(ConvertError::Invalid(format!(
-                "unknown include_images `{other}`; expected none, refs, thumbnails or full"
+                "unknown include_images `{other}`; expected none, refs, downscaled or full"
             ))),
         }
     }
@@ -75,7 +99,7 @@ impl ImagePolicy {
         match self {
             ImagePolicy::None => "none",
             ImagePolicy::Refs => "refs",
-            ImagePolicy::Thumbnails => "thumbnails",
+            ImagePolicy::Downscaled => "downscaled",
             ImagePolicy::Full => "full",
         }
     }
@@ -99,22 +123,22 @@ pub fn image_payloads(assets: &[AssetBytes], policy: ImagePolicy) -> Vec<Value> 
                 ImagePolicy::Full => {
                     object.insert("content_base64".into(), Value::String(encode(&asset.data)));
                 }
-                ImagePolicy::Thumbnails => match thumbnail(&asset.data, &asset.content_type) {
-                    Ok(thumb) => {
+                ImagePolicy::Downscaled => match downscale(&asset.data, &asset.content_type) {
+                    Ok(small) => {
                         object.insert(
-                            "thumbnail_base64".into(),
-                            Value::String(encode(&thumb.bytes)),
+                            "downscaled_base64".into(),
+                            Value::String(encode(&small.bytes)),
                         );
-                        object.insert("thumbnail_content_type".into(), json!(thumb.content_type));
-                        object.insert("thumbnail_width".into(), json!(thumb.width));
-                        object.insert("thumbnail_height".into(), json!(thumb.height));
+                        object.insert("downscaled_content_type".into(), json!(small.content_type));
+                        object.insert("downscaled_width".into(), json!(small.width));
+                        object.insert("downscaled_height".into(), json!(small.height));
                     }
                     // Never silently: a client that asked to see the image is
                     // told which one it cannot see and why, and still has the
                     // name to ask for it at `full`.
                     Err(reason) => {
-                        object.insert("thumbnail_base64".into(), Value::Null);
-                        object.insert("thumbnail_note".into(), Value::String(reason));
+                        object.insert("downscaled_base64".into(), Value::Null);
+                        object.insert("downscaled_note".into(), Value::String(reason));
                     }
                 },
                 ImagePolicy::None | ImagePolicy::Refs => {}
@@ -125,33 +149,33 @@ pub fn image_payloads(assets: &[AssetBytes], policy: ImagePolicy) -> Vec<Value> 
 }
 
 /// What the client gets to look at, and what it turned out to be.
-struct Thumbnail {
+struct Downscaled {
     bytes: Vec<u8>,
     content_type: String,
     width: u32,
     height: u32,
 }
 
-/// Decodes `data`, fits it inside [`THUMBNAIL_MAX_SIDE`] and re-encodes as PNG
+/// Decodes `data`, fits it inside [`DOWNSCALED_MAX_SIDE`] and re-encodes as PNG
 /// — unless doing so would cost more than sending the image itself.
 ///
-/// A document is full of icons and logos already smaller than a thumbnail, and
+/// A document is full of icons and logos already smaller than the box, and
 /// re-encoding one of those produces a *larger* PNG than the original: the rung
 /// would then charge the client more for less. So the invariant is the one the
-/// name promises — **a thumbnail never costs more than the image it stands
-/// for** — and when downscaling does not pay, the original is what gets sent,
+/// name promises — **a downscaled image never costs more than the image it
+/// stands for** — and when downscaling does not pay, the original is what gets sent,
 /// with its own type and dimensions declared.
 ///
 /// The error is a sentence for the client, not a type: every failure here has
 /// the same handling — say so on the row and carry on — and the formats that
 /// reach it (EMF, WMF, TIFF, SVG) are the ones no pure-Rust decoder in the
 /// dependency budget reads.
-fn thumbnail(data: &[u8], content_type: &str) -> Result<Thumbnail, String> {
+fn downscale(data: &[u8], content_type: &str) -> Result<Downscaled, String> {
     let mut reader = image::ImageReader::new(std::io::Cursor::new(data))
         .with_guessed_format()
         .map_err(|e| format!("could not read the image header: {e}"))?;
     let mut limits = image::Limits::default();
-    limits.max_alloc = Some(THUMBNAIL_MAX_ALLOC);
+    limits.max_alloc = Some(DOWNSCALED_MAX_ALLOC);
     reader.limits(limits);
     let format = reader
         .format()
@@ -160,23 +184,23 @@ fn thumbnail(data: &[u8], content_type: &str) -> Result<Thumbnail, String> {
         .decode()
         .map_err(|e| format!("{format:?} could not be decoded: {e}"))?;
 
-    let thumb = image.thumbnail(THUMBNAIL_MAX_SIDE, THUMBNAIL_MAX_SIDE);
+    let small = image.thumbnail(DOWNSCALED_MAX_SIDE, DOWNSCALED_MAX_SIDE);
     let mut png = Vec::new();
-    thumb
+    small
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .map_err(|e| format!("thumbnail could not be encoded: {e}"))?;
+        .map_err(|e| format!("the downscaled copy could not be encoded: {e}"))?;
 
     if png.len() >= data.len() {
-        return Ok(Thumbnail {
+        return Ok(Downscaled {
             bytes: data.to_vec(),
             content_type: content_type.to_string(),
             width: image.width(),
             height: image.height(),
         });
     }
-    Ok(Thumbnail {
-        width: thumb.width(),
-        height: thumb.height(),
+    Ok(Downscaled {
+        width: small.width(),
+        height: small.height(),
         bytes: png,
         content_type: "image/png".into(),
     })
@@ -216,7 +240,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert!(rows[0]["byte_len"].as_u64().unwrap() > 0);
         assert!(rows[0].get("content_base64").is_none());
-        assert!(rows[0].get("thumbnail_base64").is_none());
+        assert!(rows[0].get("downscaled_base64").is_none());
     }
 
     #[test]
@@ -227,17 +251,19 @@ mod tests {
     }
 
     #[test]
-    fn a_thumbnail_is_smaller_than_the_image_it_stands_for() {
+    fn a_downscaled_image_is_smaller_than_the_image_it_stands_for() {
         let original = png(1024, 768);
-        let rows = image_payloads(&[asset(original.clone())], ImagePolicy::Thumbnails);
-        let thumb = rows[0]["thumbnail_base64"].as_str().expect("a thumbnail");
-        assert_eq!(rows[0]["thumbnail_width"], 256);
-        assert_eq!(rows[0]["thumbnail_height"], 192);
-        assert_eq!(rows[0]["thumbnail_content_type"], "image/png");
+        let rows = image_payloads(&[asset(original.clone())], ImagePolicy::Downscaled);
+        let small = rows[0]["downscaled_base64"]
+            .as_str()
+            .expect("a downscaled copy");
+        assert_eq!(rows[0]["downscaled_width"], 256);
+        assert_eq!(rows[0]["downscaled_height"], 192);
+        assert_eq!(rows[0]["downscaled_content_type"], "image/png");
         assert!(
-            thumb.len() < original.len(),
-            "thumbnail {} bytes, original {} bytes",
-            thumb.len(),
+            small.len() < original.len(),
+            "downscaled {} bytes, original {} bytes",
+            small.len(),
             original.len()
         );
         // The rung is a payload choice, not a conversion: the original is still
@@ -253,24 +279,26 @@ mod tests {
                 content_type: "image/x-emf".into(),
                 data: b"\x01\x00\x00\x00 not an image".to_vec(),
             }],
-            ImagePolicy::Thumbnails,
+            ImagePolicy::Downscaled,
         );
-        assert!(rows[0]["thumbnail_base64"].is_null());
-        assert!(!rows[0]["thumbnail_note"].as_str().unwrap().is_empty());
+        assert!(rows[0]["downscaled_base64"].is_null());
+        assert!(!rows[0]["downscaled_note"].as_str().unwrap().is_empty());
         assert_eq!(rows[0]["file_name"], "drawing.emf");
     }
 
     #[test]
-    fn an_image_already_smaller_than_a_thumbnail_is_sent_as_it_is() {
+    fn an_image_already_smaller_than_the_box_is_sent_as_it_is() {
         // Icons and logos: re-encoding them costs more than sending them, and
         // the rung exists to save the client bytes, not to spend them.
         let original = png(12, 9);
-        let rows = image_payloads(&[asset(original.clone())], ImagePolicy::Thumbnails);
-        let thumb = rows[0]["thumbnail_base64"].as_str().expect("a thumbnail");
-        assert!(thumb.len() <= original.len() * 2, "base64 of the original");
-        assert_eq!(rows[0]["thumbnail_width"], 12);
-        assert_eq!(rows[0]["thumbnail_height"], 9);
-        assert_eq!(rows[0]["thumbnail_content_type"], "image/png");
+        let rows = image_payloads(&[asset(original.clone())], ImagePolicy::Downscaled);
+        let small = rows[0]["downscaled_base64"]
+            .as_str()
+            .expect("a downscaled copy");
+        assert!(small.len() <= original.len() * 2, "base64 of the original");
+        assert_eq!(rows[0]["downscaled_width"], 12);
+        assert_eq!(rows[0]["downscaled_height"], 9);
+        assert_eq!(rows[0]["downscaled_content_type"], "image/png");
     }
 
     #[test]
@@ -282,6 +310,15 @@ mod tests {
     #[test]
     fn an_unknown_rung_is_refused_with_the_list() {
         let err = ImagePolicy::parse("some").unwrap_err().to_string();
-        assert!(err.contains("none, refs, thumbnails or full"), "{err}");
+        assert!(err.contains("none, refs, downscaled or full"), "{err}");
+    }
+
+    #[test]
+    fn the_old_word_is_refused_with_both_answers_rather_than_aliased() {
+        // The whole point of the rename: a caller who wrote `thumbnails` may
+        // have meant either thing, so neither is guessed for them.
+        let err = ImagePolicy::parse("thumbnails").unwrap_err().to_string();
+        assert!(err.contains("downscaled"), "{err}");
+        assert!(err.contains("render_slides"), "{err}");
     }
 }

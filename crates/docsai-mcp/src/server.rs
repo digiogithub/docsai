@@ -22,7 +22,7 @@ use crate::config::McpConfig;
 use crate::schema::slim;
 use crate::tools::{
     self, ConvertFromMarkdownArgs, ConvertToMarkdownArgs, DocumentArgs, OutlineDocumentArgs,
-    ReadSelectionArgs, SearchDocumentArgs, ToolOutput,
+    ReadSelectionArgs, RenderSlidesArgs, SearchDocumentArgs, ToolOutput,
 };
 
 /// The docsai MCP server (architecture §6).
@@ -137,6 +137,19 @@ impl DocsaiServer {
     }
 
     #[tool(
+        name = "render_slides",
+        description = "A PNG of each whole slide of a deck, drawn by headless LibreOffice: the slide as a consumer sees it, which no picture stored inside the file is (those are `include_images`). `output_dir` answers with a receipt. Needs LibreOffice; no other tool here does."
+    )]
+    async fn render_slides(
+        &self,
+        Parameters(args): Parameters<RenderSlidesArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_tool(move || tools::tool_render_slides(&args, &config))
+            .await
+    }
+
+    #[tool(
         name = "read_selection",
         description = "Part of a document as self-contained DocMark: the exact bytes it would write for those nodes, plus the front matter to write them back (next-id, partial, per-node etag). Selectors: s4, s7-s9, #n7, type:heading, text:foo."
     )]
@@ -241,8 +254,9 @@ impl ServerHandler for DocsaiServer {
                  primitives, which accept the written `.dmk.md` as readily as the original: \
                  estimate_tokens for what it costs, outline_document for what is in it, \
                  search_document for where it says something, read_selection for just that \
-                 part as self-contained DocMark. Images default to include_images=refs \
-                 (names and sizes, no bytes). Also: inspect_document, \
+                 part as self-contained DocMark. The pictures a document embeds default to \
+                 include_images=refs (names and sizes, no bytes); a picture of a whole slide \
+                 is a different thing and comes from render_slides. Also: inspect_document, \
                  list_supported_formats. Prefer path mode on local machines; use \
                  content_base64 + filename when the client cannot share a filesystem path. \
                  Logs always go to stderr; stdout is reserved for MCP JSON-RPC.",
