@@ -436,6 +436,7 @@ dependencies = [
 name = "docsai-convert"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cfb",
  "comrak",
  "docsai-docmark",

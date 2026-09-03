@@ -488,6 +488,17 @@ impl Comment {
             _ => &[],
         }
     }
+
+    /// The anchored content, mutably. `None` when the comment is not anchored
+    /// over text: a point anchor and an unanchored comment have no sequence to
+    /// edit, and inventing an empty one would let a caller «edit» content the
+    /// document does not have.
+    pub fn covered_mut(&mut self) -> Option<&mut Vec<Inline>> {
+        match &mut self.anchor {
+            CommentAnchor::Span(content) => Some(content),
+            _ => None,
+        }
+    }
 }
 
 /// The three shapes a comment's anchor takes, and there is no fourth.

@@ -24,12 +24,15 @@
 //! a paragraph does not churn its etag. Phase 17-B settled the scope and argues
 //! it in [`target`]; [`target::check_if_match`] is the precondition itself.
 
+pub mod mutate;
 pub mod target;
 pub mod walk;
 
+pub use mutate::{with_place_mut, with_seq_mut, PlaceMut, SeqKind, SeqMut};
 pub use target::{
-    check_if_match, etag_of, resolve, resolve_checked, resolve_str, MalformedReason, Place,
-    PreconditionError, Target, TargetError, TargetRoot, DOC_ROOT,
+    check_if_match, etag_of, ids_in_document_order, resolve, resolve_checked, resolve_path,
+    resolve_str, MalformedReason, Place, PreconditionError, Step, Target, TargetError, TargetRoot,
+    DOC_ROOT,
 };
 pub use walk::{
     assign_ids, clear_ids, comment_without_ids, for_each_addressable, implicit_shapes,

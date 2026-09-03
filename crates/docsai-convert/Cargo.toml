@@ -9,6 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 docsai-docmark = { workspace = true }
 docsai-model = { workspace = true }
 docsai-odf = { workspace = true }

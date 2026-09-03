@@ -8,7 +8,9 @@ it is wrong, and changing it is a specification decision with a version bump att
 to make a test pass.
 
 Implementation began with 17-B (target resolution and the etag precondition,
-[`kb/87-phase-17-etags.md`](../kb/87-phase-17-etags.md)); no operation applies anything yet.
+[`kb/87-phase-17-etags.md`](../kb/87-phase-17-etags.md)) and every operation applies as of 17-C
+and 17-D ([`kb/89-phase-17-transaction.md`](../kb/89-phase-17-transaction.md)), which added the
+transaction, `dry_run` and the change report. What is left is the doors (17-E).
 Phase 17-A was the specification half of task 1 on purpose — the
 same discipline that produced §11.3 before a line of comment code, and that let Phase 14 write a
 parser that worked on the first run. The increments that implement it are 17-B (etags and the
@@ -150,7 +152,7 @@ than about the whole test matrix.
   "path": "deck.pptx",          // the document to edit
   "ops": 1,                     // optional: the operation-set version the caller wrote against
   "operations": [ /* … */ ],    // in order; see §4
-  "dry_run": false              // reserved for 17-D
+  "dry_run": false              // everything except the write; §5.6 and 17-D
 }
 ```
 
@@ -182,7 +184,10 @@ that does not exist, a wrong kind, a writer refusal) by rolling the whole reques
 early pass exists because a request with a typo in it should cost nothing and should say so
 before it has half-edited anything, even in a world where the rollback works perfectly.
 
-**All-or-nothing** is 17-C's to implement and prove. What this document fixes is the consequence
+**All-or-nothing** was 17-C's to implement and prove, and is
+([`kb/89-phase-17-transaction.md`](../kb/89-phase-17-transaction.md)): the operations apply to an
+in-memory document, the result is written to a temporary file in the destination's own directory,
+and the original is replaced by rename. What this document fixes is the consequence
 for the operation set: there is no partial success and therefore no per-operation status in the
 response. Either every operation applied or none did.
 
@@ -849,9 +854,17 @@ Each names the increment that owns it.
   subtree, §7.
 - **Whether a writer can request recalculation** after `set_cell` writes a formula, and the
   warning if it cannot. **17-E**, §6.7.
-- **The full response shape**, of which §5.6 fixes only the id-bearing part. **17-D**.
-- **`dry_run`'s diff**: what «the applied diff» is, and whether it is DocMark or a structured
-  list. **17-D**.
+- ~~**The full response shape**, of which §5.6 fixes only the id-bearing part.~~ Decided in
+  **17-D**: §5.6's four lists and nothing else. `changed` names **the target in canonical form**,
+  which for a node that carries an id is that id — and for a paragraph of ordinary prose, which
+  Phase 10 deliberately gives no id, is the index path the caller wrote. §6.1's «returns
+  `changed: [target]`» read literally.
+- ~~**`dry_run`'s diff**: what «the applied diff» is, and whether it is DocMark or a structured
+  list.~~ Decided in **17-D**: a structured list, and only of *identity and new state* — created
+  ids with their kinds, deleted targets, changed targets with their new etags. Not the new
+  content, which the caller wrote, and not a textual diff, whose size is a function of the
+  document rather than of the request. Measured: a two-operation batch's report is **31 tokens**
+  (`crates/docsai-convert/tests/edit_transaction.rs::the_report_for_a_realistic_batch_is_small_enough_to_be_free`).
 - **The `apply_edits` tool schema**, written for size from the first line: 16-G spent the
   wire-cost gate's 5 % inflation allowance once already, and a new tool costs preamble tokens
   before it costs anything else. **17-E**.

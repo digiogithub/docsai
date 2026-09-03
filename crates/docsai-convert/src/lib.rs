@@ -8,6 +8,7 @@
 pub mod assets;
 pub mod batch;
 pub mod cache;
+pub mod edit;
 pub mod fidelity;
 pub mod inspect;
 pub mod loffice;
@@ -24,6 +25,10 @@ pub use assets::DirAssetStore;
 pub use batch::{convert_batch, BatchOutcome, BatchReport};
 pub use cache::{CacheStats, ConvertCache, DEFAULT_CAPACITY_BYTES, DEFAULT_MAX_ENTRIES};
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
+pub use edit::{
+    apply_edits_in_memory, edit_path, ChangedNode, CreatedNode, EditError, EditOptions,
+    EditOutcome, EditReport, EditRequest, Operation, Refusal, Refused, Scalar, OPS_VERSION,
+};
 pub use fidelity::CategoryFidelity;
 pub use inspect::{inspect_path, InspectReport};
 pub use loffice::UseLoffice;

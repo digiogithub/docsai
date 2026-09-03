@@ -260,14 +260,70 @@ impl std::str::FromStr for Target {
     }
 }
 
+/// One hop from a place to one of its children, in terms of the IR's own
+/// fields rather than of a display order.
+///
+/// A [`Target`] resolves to a borrowed [`Place`], and a borrow cannot be used
+/// to write. 17-C's answer is this type: resolution *also* records the route it
+/// took, and [`crate::addressing::mutate`] replays that route mutably. The
+/// resolution rules — which id, which sequence, what `doc` means — therefore
+/// stay in exactly one implementation, the one 17-B wrote and pinned by test,
+/// and the mutable half is a mechanical walk with no policy in it.
+///
+/// A few variants fuse two hops (`HeaderBlock`, `NotesBlock`) because the
+/// middle of the pair — a `HeaderFooter`, a slide's `Option<Vec<Block>>` — is
+/// not a [`Place`] and would otherwise need a cursor variant that nothing ever
+/// resolves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// `TextDocument::sections[i]`.
+    Section(usize),
+    /// `Section::headers[j].blocks[k]`.
+    HeaderBlock(usize, usize),
+    /// `Section::footers[j].blocks[k]`.
+    FooterBlock(usize, usize),
+    /// Element `k` of whatever block sequence the cursor holds.
+    Block(usize),
+    /// `List::items[k]`.
+    ListItem(usize),
+    /// `Table::rows[k]`.
+    Row(usize),
+    /// `TableRow::cells[k]`.
+    Cell(usize),
+    /// `Workbook::sheets[i]`.
+    Sheet(usize),
+    /// `Sheet::images[k]`.
+    SheetImage(usize),
+    /// `Presentation::slides[i]`.
+    Slide(usize),
+    /// `Slide::notes`'s block `k`.
+    NotesBlock(usize),
+    /// A shape of a slide, or a child of a group shape.
+    Shape(usize),
+    /// The `ImageRef` inside a `ShapeKind::Picture`.
+    PictureImage,
+    /// A slide's comment, or a comment's reply.
+    Comment(usize),
+    /// Inline `k` of a comment's `CommentAnchor::Span`.
+    CommentCovered(usize),
+    /// Inline `k` of a paragraph's content, or of a nested styled/link run.
+    Inline(usize),
+    /// From an `Inline::Footnote` to the footnote itself.
+    IntoFootnote,
+    /// From an `Inline::Comment` to the comment itself.
+    IntoComment,
+    /// From an `Inline::Image` to the image itself.
+    IntoImage,
+}
+
 /// One place in the IR: a node, a sequence element, or the document root.
 ///
 /// A place is *where an operation happens*. It is broader than an addressable
 /// node because §5.1's index paths reach things that carry no id — a table
 /// cell, a list item, the body of a text box — and §6.1 depends on that
 /// (`a table or row is refused; the cell's paragraph is the target, reached by
-/// path`). It is borrowed, and it is read-only: 17-B resolves and checks,
-/// 17-C is the increment that mutates.
+/// path`). It is borrowed, and it is read-only: 17-B resolves and checks, and
+/// 17-C writes through the [`Step`] path that resolution records beside it.
 #[derive(Debug, Clone, Copy)]
 pub enum Place<'a> {
     /// The reserved `doc` root.
@@ -389,6 +445,22 @@ impl<'a> Place<'a> {
     /// positional order over a `BTreeMap` would give `sheet/3` a meaning that
     /// changes when an unrelated cell is filled in.
     pub fn children(&self) -> Vec<Place<'a>> {
+        self.child_places()
+            .into_iter()
+            .map(|(_, place)| place)
+            .collect()
+    }
+
+    /// [`Place::children`], each child paired with the route that reaches it.
+    ///
+    /// The route is a `Vec` and not a single [`Step`] because of one case: a
+    /// single-section text document, where `doc/3` is the third *block* and the
+    /// section it lives in is transparent (§5.1). That child is two hops away
+    /// and every other is one.
+    pub fn child_places(&self) -> Vec<(Vec<Step>, Place<'a>)> {
+        fn one<'a>(step: Step, place: Place<'a>) -> (Vec<Step>, Place<'a>) {
+            (vec![step], place)
+        }
         match self {
             Place::Doc(doc) => match doc {
                 // A section is addressable only in a multi-section document
@@ -398,35 +470,122 @@ impl<'a> Place<'a> {
                 // a multi-section document's own top-level sequence is its
                 // sections.
                 Document::Text(text) => match text.sections.as_slice() {
-                    [only] => only.blocks.iter().map(Place::Block).collect(),
-                    sections => sections.iter().map(Place::Section).collect(),
+                    [only] => only
+                        .blocks
+                        .iter()
+                        .enumerate()
+                        .map(|(k, b)| (vec![Step::Section(0), Step::Block(k)], Place::Block(b)))
+                        .collect(),
+                    sections => sections
+                        .iter()
+                        .enumerate()
+                        .map(|(i, s)| one(Step::Section(i), Place::Section(s)))
+                        .collect(),
                 },
-                Document::Workbook(book) => book.sheets.iter().map(Place::Sheet).collect(),
-                Document::Presentation(deck) => deck.slides.iter().map(Place::Slide).collect(),
+                Document::Workbook(book) => book
+                    .sheets
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| one(Step::Sheet(i), Place::Sheet(s)))
+                    .collect(),
+                Document::Presentation(deck) => deck
+                    .slides
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| one(Step::Slide(i), Place::Slide(s)))
+                    .collect(),
             },
-            Place::Section(section) => section.blocks.iter().map(Place::Block).collect(),
+            Place::Section(section) => section
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                .collect(),
             Place::Block(block) => match block {
-                Block::List(list) => list.items.iter().map(Place::ListItem).collect(),
-                Block::Table(table) => table.rows.iter().map(Place::Row).collect(),
-                Block::TextBox(text_box) => text_box.blocks.iter().map(Place::Block).collect(),
+                Block::List(list) => list
+                    .items
+                    .iter()
+                    .enumerate()
+                    .map(|(k, i)| one(Step::ListItem(k), Place::ListItem(i)))
+                    .collect(),
+                Block::Table(table) => table
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(k, r)| one(Step::Row(k), Place::Row(r)))
+                    .collect(),
+                Block::TextBox(text_box) => text_box
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                    .collect(),
                 Block::Paragraph(_) | Block::Heading(_) | Block::Image(_) | Block::Raw(_) => {
                     Vec::new()
                 }
             },
-            Place::ListItem(item) => item.blocks.iter().map(Place::Block).collect(),
-            Place::Row(row) => row.cells.iter().map(Place::Cell).collect(),
-            Place::Cell(cell) => cell.blocks.iter().map(Place::Block).collect(),
+            Place::ListItem(item) => item
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                .collect(),
+            Place::Row(row) => row
+                .cells
+                .iter()
+                .enumerate()
+                .map(|(k, c)| one(Step::Cell(k), Place::Cell(c)))
+                .collect(),
+            Place::Cell(cell) => cell
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                .collect(),
             Place::Sheet(_) | Place::Image(_) => Vec::new(),
-            Place::Slide(slide) => slide.shapes.iter().map(Place::Shape).collect(),
+            Place::Slide(slide) => slide
+                .shapes
+                .iter()
+                .enumerate()
+                .map(|(k, s)| one(Step::Shape(k), Place::Shape(s)))
+                .collect(),
             Place::Shape(shape) => match &shape.kind {
-                ShapeKind::Placeholder(ph) => ph.body.iter().map(Place::Block).collect(),
-                ShapeKind::TextBox { body } => body.iter().map(Place::Block).collect(),
-                ShapeKind::Table(table) => table.rows.iter().map(Place::Row).collect(),
-                ShapeKind::Group(children) => children.iter().map(Place::Shape).collect(),
+                ShapeKind::Placeholder(ph) => ph
+                    .body
+                    .iter()
+                    .enumerate()
+                    .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                    .collect(),
+                ShapeKind::TextBox { body } => body
+                    .iter()
+                    .enumerate()
+                    .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                    .collect(),
+                ShapeKind::Table(table) => table
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(k, r)| one(Step::Row(k), Place::Row(r)))
+                    .collect(),
+                ShapeKind::Group(children) => children
+                    .iter()
+                    .enumerate()
+                    .map(|(k, s)| one(Step::Shape(k), Place::Shape(s)))
+                    .collect(),
                 ShapeKind::Picture(_) | ShapeKind::Chart(_) | ShapeKind::Raw(_) => Vec::new(),
             },
-            Place::Footnote(note) => note.blocks.iter().map(Place::Block).collect(),
-            Place::Comment(comment) => comment.blocks.iter().map(Place::Block).collect(),
+            Place::Footnote(note) => note
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                .collect(),
+            Place::Comment(comment) => comment
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(k, b)| one(Step::Block(k), Place::Block(b)))
+                .collect(),
         }
     }
 }
@@ -442,14 +601,28 @@ pub fn resolve_str<'a>(doc: &'a Document, target: &str) -> Result<Place<'a>, Tar
 /// Total: every input either yields one [`Place`] or a [`TargetError`] naming
 /// what it got and what it expected.
 pub fn resolve<'a>(doc: &'a Document, target: &Target) -> Result<Place<'a>, TargetError> {
+    resolve_path(doc, target).map(|(place, _)| place)
+}
+
+/// [`resolve`], plus the route it took from the document root.
+///
+/// The route is what makes an edit possible: a [`Place`] is a shared borrow and
+/// cannot be written through, so 17-C replays the [`Step`] path mutably
+/// ([`crate::addressing::mutate`]) instead of resolving a second time with a
+/// different set of rules.
+pub fn resolve_path<'a>(
+    doc: &'a Document,
+    target: &Target,
+) -> Result<(Place<'a>, Vec<Step>), TargetError> {
     let canonical = target.canonical();
+    let mut path: Vec<Step> = Vec::new();
     let mut place = match &target.root {
         TargetRoot::Doc => {
             // `doc` is reserved, so a node holding it as an id would make the
             // root ambiguous. Refused, never shadowed: an edit that went to the
             // wrong one of two things called `doc` is the same class of failure
             // as a reused id.
-            if let Some(found) = find_by_id(doc, &NodeId::new(DOC_ROOT)).first() {
+            if let Some((found, _)) = find_by_id(doc, &NodeId::new(DOC_ROOT)).first() {
                 return Err(TargetError::ReservedId {
                     kind: found.describe(),
                 });
@@ -465,7 +638,11 @@ pub fn resolve<'a>(doc: &'a Document, target: &Target) -> Result<Place<'a>, Targ
                         id: id.clone(),
                     })
                 }
-                1 => found[0],
+                1 => {
+                    let (place, route) = found.into_iter().next().expect("one match");
+                    path = route;
+                    place
+                }
                 count => {
                     return Err(TargetError::AmbiguousId {
                         target: canonical,
@@ -478,7 +655,7 @@ pub fn resolve<'a>(doc: &'a Document, target: &Target) -> Result<Place<'a>, Targ
     };
 
     for (depth, index) in target.indices.iter().enumerate() {
-        let children = place.children();
+        let children = place.child_places();
         if children.is_empty() {
             return Err(TargetError::NotIndexable {
                 target: canonical,
@@ -489,20 +666,27 @@ pub fn resolve<'a>(doc: &'a Document, target: &Target) -> Result<Place<'a>, Targ
         // Parsing guarantees `index >= 1`, so the subtraction is the 1-based
         // to 0-based step and nothing else.
         let position = usize::try_from(*index).unwrap_or(usize::MAX);
-        match position.checked_sub(1).and_then(|at| children.get(at)) {
-            Some(child) => place = *child,
+        let len = children.len();
+        match position
+            .checked_sub(1)
+            .and_then(|at| children.into_iter().nth(at))
+        {
+            Some((route, child)) => {
+                path.extend(route);
+                place = child;
+            }
             None => {
                 return Err(TargetError::IndexOutOfRange {
                     target: canonical,
                     at: target.prefix(depth),
                     kind: place.describe(),
                     index: *index,
-                    len: children.len(),
+                    len,
                 })
             }
         }
     }
-    Ok(place)
+    Ok((place, path))
 }
 
 /// The etag of whatever `target` names.
@@ -590,132 +774,214 @@ pub fn resolve_checked<'a>(
 /// section, a simple table's row. Assignment policy decides who is *given* an
 /// id; a lookup has to find whoever *has* one, or a document that came in with
 /// one would have an unreachable node.
-fn find_by_id<'a>(doc: &'a Document, id: &NodeId) -> Vec<Place<'a>> {
+/// Every id the document carries, in document order, with the kind that holds
+/// it.
+///
+/// Not [`crate::addressing::node_ids`]: that one walks the *assignment* order
+/// and skips the nodes DocMark could not write an id for. An edit has to see
+/// every id that exists — §5.5 refuses a caller's `{#n9}` when the document
+/// already uses it, and «already uses it» cannot depend on which walker asks.
+pub fn ids_in_document_order(doc: &Document) -> Vec<(NodeId, NodeKind)> {
+    let mut out = Vec::new();
+    for_each_place(doc, &mut |place, _| {
+        if let (Some(id), Some(kind)) = (place.id(), place.kind()) {
+            out.push((id.clone(), kind));
+        }
+    });
+    out
+}
+
+fn find_by_id<'a>(doc: &'a Document, id: &NodeId) -> Vec<(Place<'a>, Vec<Step>)> {
     let mut found = Vec::new();
-    for_each_place(doc, &mut |place| {
+    for_each_place(doc, &mut |place, path| {
         if place.id() == Some(id) {
-            found.push(place);
+            found.push((place, path.to_vec()));
         }
     });
     found
 }
 
-/// Walks every id-carrying place of the document in document order.
-fn for_each_place<'a>(doc: &'a Document, f: &mut dyn FnMut(Place<'a>)) {
+/// The callback of the lookup walk: a place, and the route that reaches it.
+type PlaceVisitor<'a, 'f> = dyn FnMut(Place<'a>, &[Step]) + 'f;
+
+/// Walks every id-carrying place of the document in document order, carrying
+/// the [`Step`] route to each.
+///
+/// The route is recorded here rather than derived afterwards because there is
+/// no way to derive it: a `Place` is a bare borrow with no back-pointer, and
+/// reconstructing «where did this come from» by comparing addresses is exactly
+/// the kind of cleverness that goes wrong on the day two identical nodes share
+/// a location.
+fn for_each_place<'a>(doc: &'a Document, f: &mut PlaceVisitor<'a, '_>) {
+    let mut path = Vec::new();
     match doc {
         Document::Text(text) => {
-            for section in &text.sections {
-                f(Place::Section(section));
-                for header in &section.headers {
-                    each_blocks(&header.blocks, f);
+            for (i, section) in text.sections.iter().enumerate() {
+                path.push(Step::Section(i));
+                f(Place::Section(section), &path);
+                for (j, header) in section.headers.iter().enumerate() {
+                    each_blocks(&header.blocks, &mut path, &|k| Step::HeaderBlock(j, k), f);
                 }
-                for footer in &section.footers {
-                    each_blocks(&footer.blocks, f);
+                for (j, footer) in section.footers.iter().enumerate() {
+                    each_blocks(&footer.blocks, &mut path, &|k| Step::FooterBlock(j, k), f);
                 }
-                each_blocks(&section.blocks, f);
+                each_blocks(&section.blocks, &mut path, &Step::Block, f);
+                path.pop();
             }
         }
         Document::Workbook(book) => {
-            for sheet in &book.sheets {
-                f(Place::Sheet(sheet));
-                for image in &sheet.images {
-                    f(Place::Image(image));
+            for (i, sheet) in book.sheets.iter().enumerate() {
+                path.push(Step::Sheet(i));
+                f(Place::Sheet(sheet), &path);
+                for (k, image) in sheet.images.iter().enumerate() {
+                    path.push(Step::SheetImage(k));
+                    f(Place::Image(image), &path);
+                    path.pop();
                 }
+                path.pop();
             }
         }
         Document::Presentation(deck) => {
-            for slide in &deck.slides {
-                f(Place::Slide(slide));
-                for shape in &slide.shapes {
-                    each_shape(shape, f);
+            for (i, slide) in deck.slides.iter().enumerate() {
+                path.push(Step::Slide(i));
+                f(Place::Slide(slide), &path);
+                for (k, shape) in slide.shapes.iter().enumerate() {
+                    path.push(Step::Shape(k));
+                    each_shape(shape, &mut path, f);
+                    path.pop();
                 }
                 if let Some(notes) = &slide.notes {
-                    each_blocks(notes, f);
+                    each_blocks(notes, &mut path, &Step::NotesBlock, f);
                 }
-                for comment in &slide.comments {
-                    each_comment(comment, f);
+                for (k, comment) in slide.comments.iter().enumerate() {
+                    path.push(Step::Comment(k));
+                    each_comment(comment, &mut path, f);
+                    path.pop();
                 }
+                path.pop();
             }
         }
     }
 }
 
-fn each_shape<'a>(shape: &'a Shape, f: &mut dyn FnMut(Place<'a>)) {
-    f(Place::Shape(shape));
+fn each_shape<'a>(shape: &'a Shape, path: &mut Vec<Step>, f: &mut PlaceVisitor<'a, '_>) {
+    f(Place::Shape(shape), path);
     match &shape.kind {
-        ShapeKind::Placeholder(ph) => each_blocks(&ph.body, f),
-        ShapeKind::TextBox { body } => each_blocks(body, f),
-        ShapeKind::Picture(image) => f(Place::Image(image)),
-        ShapeKind::Table(table) => each_table(table, f),
+        ShapeKind::Placeholder(ph) => each_blocks(&ph.body, path, &Step::Block, f),
+        ShapeKind::TextBox { body } => each_blocks(body, path, &Step::Block, f),
+        ShapeKind::Picture(image) => {
+            path.push(Step::PictureImage);
+            f(Place::Image(image), path);
+            path.pop();
+        }
+        ShapeKind::Table(table) => each_table(table, path, f),
         ShapeKind::Group(children) => {
-            for child in children {
-                each_shape(child, f);
+            for (k, child) in children.iter().enumerate() {
+                path.push(Step::Shape(k));
+                each_shape(child, path, f);
+                path.pop();
             }
         }
         ShapeKind::Chart(_) | ShapeKind::Raw(_) => {}
     }
 }
 
-fn each_table<'a>(table: &'a crate::text::Table, f: &mut dyn FnMut(Place<'a>)) {
-    for row in &table.rows {
-        f(Place::Row(row));
-        for cell in &row.cells {
-            each_blocks(&cell.blocks, f);
+fn each_table<'a>(
+    table: &'a crate::text::Table,
+    path: &mut Vec<Step>,
+    f: &mut PlaceVisitor<'a, '_>,
+) {
+    for (r, row) in table.rows.iter().enumerate() {
+        path.push(Step::Row(r));
+        f(Place::Row(row), path);
+        for (c, cell) in row.cells.iter().enumerate() {
+            path.push(Step::Cell(c));
+            each_blocks(&cell.blocks, path, &Step::Block, f);
+            path.pop();
         }
+        path.pop();
     }
 }
 
-fn each_blocks<'a>(blocks: &'a [Block], f: &mut dyn FnMut(Place<'a>)) {
-    for block in blocks {
+fn each_blocks<'a>(
+    blocks: &'a [Block],
+    path: &mut Vec<Step>,
+    step: &dyn Fn(usize) -> Step,
+    f: &mut PlaceVisitor<'a, '_>,
+) {
+    for (k, block) in blocks.iter().enumerate() {
+        path.push(step(k));
         match block {
             Block::Paragraph(p) => {
-                f(Place::Block(block));
-                each_inlines(&p.content, f);
+                f(Place::Block(block), path);
+                each_inlines(&p.content, path, &Step::Inline, f);
             }
             Block::Heading(h) => {
-                f(Place::Block(block));
-                each_inlines(&h.paragraph.content, f);
+                f(Place::Block(block), path);
+                each_inlines(&h.paragraph.content, path, &Step::Inline, f);
             }
             Block::List(list) => {
-                f(Place::Block(block));
-                for item in &list.items {
-                    each_blocks(&item.blocks, f);
+                f(Place::Block(block), path);
+                for (i, item) in list.items.iter().enumerate() {
+                    path.push(Step::ListItem(i));
+                    each_blocks(&item.blocks, path, &Step::Block, f);
+                    path.pop();
                 }
             }
             Block::Table(table) => {
-                f(Place::Block(block));
-                each_table(table, f);
+                f(Place::Block(block), path);
+                each_table(table, path, f);
             }
-            Block::Image(_) => f(Place::Block(block)),
-            Block::TextBox(text_box) => each_blocks(&text_box.blocks, f),
+            Block::Image(_) => f(Place::Block(block), path),
+            Block::TextBox(text_box) => each_blocks(&text_box.blocks, path, &Step::Block, f),
             Block::Raw(_) => {}
         }
+        path.pop();
     }
 }
 
-fn each_inlines<'a>(inlines: &'a [Inline], f: &mut dyn FnMut(Place<'a>)) {
-    for inline in inlines {
+fn each_inlines<'a>(
+    inlines: &'a [Inline],
+    path: &mut Vec<Step>,
+    step: &dyn Fn(usize) -> Step,
+    f: &mut PlaceVisitor<'a, '_>,
+) {
+    for (k, inline) in inlines.iter().enumerate() {
+        path.push(step(k));
         match inline {
             Inline::Styled { content, .. } | Inline::Link { content, .. } => {
-                each_inlines(content, f)
+                each_inlines(content, path, &Step::Inline, f)
             }
             Inline::Footnote(note) => {
-                f(Place::Footnote(note));
-                each_blocks(&note.blocks, f);
+                path.push(Step::IntoFootnote);
+                f(Place::Footnote(note), path);
+                each_blocks(&note.blocks, path, &Step::Block, f);
+                path.pop();
             }
-            Inline::Comment(comment) => each_comment(comment, f),
-            Inline::Image(image) => f(Place::Image(image.as_ref())),
+            Inline::Comment(comment) => {
+                path.push(Step::IntoComment);
+                each_comment(comment, path, f);
+                path.pop();
+            }
+            Inline::Image(image) => {
+                path.push(Step::IntoImage);
+                f(Place::Image(image.as_ref()), path);
+                path.pop();
+            }
             _ => {}
         }
+        path.pop();
     }
 }
 
-fn each_comment<'a>(comment: &'a Comment, f: &mut dyn FnMut(Place<'a>)) {
-    f(Place::Comment(comment));
-    each_blocks(&comment.blocks, f);
-    each_inlines(comment.covered(), f);
-    for reply in &comment.replies {
-        each_comment(reply, f);
+fn each_comment<'a>(comment: &'a Comment, path: &mut Vec<Step>, f: &mut PlaceVisitor<'a, '_>) {
+    f(Place::Comment(comment), path);
+    each_blocks(&comment.blocks, path, &Step::Block, f);
+    each_inlines(comment.covered(), path, &Step::CommentCovered, f);
+    for (k, reply) in comment.replies.iter().enumerate() {
+        path.push(Step::Comment(k));
+        each_comment(reply, path, f);
+        path.pop();
     }
 }
 

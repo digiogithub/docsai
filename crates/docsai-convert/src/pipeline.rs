@@ -418,7 +418,7 @@ pub fn convert_bytes(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_document(
+pub(crate) fn write_document(
     document: Document,
     source_format: Format,
     target: Format,
