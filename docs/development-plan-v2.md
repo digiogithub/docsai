@@ -343,12 +343,37 @@ Tasks:
    features the document at hand actually uses.
 
 Acceptance criteria:
-- [ ] Every operation has a round-trip test on all four document classes it applies to.
-- [ ] Editing a node never perturbs a sibling node's serialization (byte-level test).
-- [ ] Failure injected mid-transaction leaves the original file untouched.
-- [ ] A scripted realistic agent loop ("retitle slide 4, add a bullet, bold it, verify") costs
-      **≤ 3 tool calls and ≤ 2k tokens** on a 40-slide deck. This number is the phase's reason to
-      exist; if it is not met, the phase is not done.
+- [x] Every operation has a round-trip test on all four document classes it applies to.
+      `docs/edit-operations.md` §11's matrix is a constant in
+      `crates/docsai-convert/tests/edit_matrix.rs`, walked cell by cell with the walk asserting its
+      own size: **72 cells** — ten operations over four classes, with both packages for text
+      (`.docx`, `.odt`) and workbook (`.xlsx`, `.ods`) and one `.dmk.md` per IR root. Every `✔`
+      applies **and** survives a round trip through the document's own DocMark; every `—` is a
+      typed refusal that leaves the file byte-identical.
+- [x] Editing a node never perturbs a sibling node's serialization (byte-level test). On a deck:
+      fifteen package members before and after, exactly one differing, and inside it exactly one of
+      three `<a:p>` elements changed with the paragraph's run properties intact. On the four
+      families that rebuild their parts from the model, the baseline is an empty batch (the
+      preserved skeleton is a pptx property): one `w:p` of five differs in the part all five share.
+      `an_edit_leaves_every_sibling_byte_identical_inside_the_part_it_changed` covers all five.
+- [x] Failure injected mid-transaction leaves the original file untouched. `EditOptions::fault`
+      forces a failure after the operations applied and after the complete edited file is on disk
+      under a temporary name but before the rename; on all five families the original's hash is
+      unchanged, the temporary file's parent is the destination's own parent, and no leftover
+      survives. An ordinary refused batch is the same property from the caller's side.
+- [x] A scripted realistic agent loop ("retitle slide 4, add a bullet, bold it, verify") costs
+      **≤ 3 tool calls and ≤ 2k tokens** on a 40-slide deck. Measured on the framed JSON-RPC that
+      crossed the transport: **2 tool calls and 804 tokens** (242 in, 562 out) on
+      `corpus/pptx/forty-slides.pptx`. Two calls rather than three because the change report is the
+      verification. The session preamble is reported beside it at **2 481 tokens** and is not part
+      of this budget — the reading fixed in `kb/85-phase-17-plan.md` before any measurement existed.
+      `LOOP_MAX_CALLS` and `LOOP_MAX_TOKENS` in `crates/docsai-mcp/tests/wire_cost.rs` assert it
+      **before the golden is consulted**, so no regeneration can make the loop affordable.
+
+**Phase 17 is closed** (`kb/93-phase-17-close.md`). The wire-cost suite ended the phase below where
+it started (5 239 → 5 186 tokens) and the inflation hatch, authorised for 17-H, was not used. Risk
+**P2** is still open and is now more expensive: every operation reaches a package as a splice into a
+preserved part, which is exactly the construction `docs/spikes/P2-powerpoint-gate.md` asks about.
 
 ## Phase 18 — ODP ⇄ DocMark (3–4 weeks) — *parallelizable with Phase 19*
 

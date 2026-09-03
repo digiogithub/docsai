@@ -327,7 +327,7 @@ document handles.
 | # | Risk | Prob. | Impact | Mitigation |
 |---|---|---|---|---|
 | P1 | The slide→layout→master→theme cascade costs more than docx's | High | High | Spike (Phase 12); v1 resolves colour/font/size and leaves the rest to the layout reference |
-| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **STILL OPEN after Phase 16** — see §7.1 for exactly what is and is not proven. Phase 16 was directed to start with the form unsigned and kept byte-identity in every increment, so the form is re-runnable on any commit of it. The gate that closes it is prepared and unrun: [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md) |
+| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **STILL OPEN after Phase 17, and now more expensive** — see §7.1 for exactly what is and is not proven. Phases 16 and 17 were each directed to start with the form unsigned and each kept byte-identity in every increment, so the form is re-runnable on any commit of either. Phase 17's `apply_edits` raises the exposure rather than the evidence: **every operation of the set reaches a package as a splice into a preserved part**, which is precisely the construction this risk asks about, and an agent now performs that splice in batches without a person ever seeing the package. The gate that closes it is prepared and unrun: [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md) |
 | P3 | Freeform shapes / SmartArt / animations fragment the effort | High | Medium | Aggressive raw-block from day one; only model what has a Markdown representation |
 | P4 | DocMark-P becomes unreadable (stops being Markdown, becomes XML with `:::`) | Medium | High | Golden rule: `--fidelity standard` must be hand-editable by a human; if it is not, the design failed |
 | P5 | Text overflow after an agent edit | High | Medium | Explicit `Warning::AutofitStale`; no measurement in v1 |
@@ -336,7 +336,7 @@ document handles.
 | P8 | `apply_edits` surface grows without bound (one op per IR feature) | High | Medium | Closed op set in v2, versioned; anything not covered is done by `read --select` + rewrite of that node |
 | P9 | The skeleton blob makes `.dmk.md` packages heavy on disk | Medium | Low | Content-hash dedupe (already in `AssetStore`) + `--no-skeleton` for plain/standard fidelity |
 
-### 7.1 P2 at the end of Phase 16 — the state of the evidence
+### 7.1 P2 at the end of Phase 17 — the state of the evidence
 
 Phase 15 built the writer and both CI gates and **did not close P2**, because the only instrument
 that can close it is a person in front of PowerPoint and this project has never had one. Phase 16
@@ -385,6 +385,17 @@ the two green gates as an answer to a question they do not ask.
 - Whether **PowerPoint** opens the package docsai authors end to end, on the embedded template,
   from attribute-free Markdown. LibreOffice now does, silently and completely (above) — and
   LibreOffice accepting a package is precisely the evidence this section warns is not enough.
+
+**What Phase 17 changed, which is the exposure and not the evidence.** `apply_edits` added no
+check and no fixture; it added ten ways to produce new bytes. Every one of them reaches a package
+as a *splice into a preserved part* — a run's text, a run's properties, a chart's numbers, a
+comment's removal, a slide's notes, a picture's bytes — under exactly the rule 15-B established,
+that nothing is written unless it differs from what the part already says. Before this phase that
+splice happened once per conversion, initiated by a person converting a whole document. It is now
+initiated by an agent, in batches, and the document it edits is one nobody opened. The corpus did
+not grow this phase, the two gates measure the same 21 decks they measured at Phase 16's close, and
+the list above is unchanged word for word. That is the whole point of writing this paragraph: the
+surface P2 covers grew and the evidence did not.
 
 **What would close it**: the checklist of [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md),
 run by a human on the three decks that document builds — a spliced preserved deck, a raw

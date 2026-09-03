@@ -9,7 +9,7 @@
 > `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
 > Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
 > and `cargo-dist` release packaging. Phase 7 adds the MCP stdio server
-> (`docsai mcp`), now with eight tools. That plan
+> (`docsai mcp`), now with eleven tools and one resource. That plan
 > ([`docs/development-plan.md`](docs/development-plan.md)) is **delivered and superseded**.
 >
 > **Next: [development plan v2](docs/development-plan-v2.md)** — agent-native docsai
@@ -120,6 +120,8 @@ docsai search report.docx "riesgo" --json --limit 5 # machine-readable, capped
 docsai edit deck.pptx --ops @ops.json              # apply the operation set, all-or-nothing
 docsai edit deck.pptx --ops @ops.json --dry-run    # same report, the file untouched
 docsai edit deck.pptx --ops @ops.json -o out.pptx  # write elsewhere, leave the input alone
+docsai validate draft.dmk.md                       # every problem in the DocMark, not the first
+docsai validate draft.dmk.md --json                # same, machine-readable
 docsai tokens report.docx                          # what the document costs an LLM
 docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary
@@ -285,10 +287,52 @@ Registration in an MCP client (e.g. Claude Desktop / Claude Code / MCP Inspector
 ```
 
 Tools: `estimate_tokens`, `outline_document`, `search_document`,
-`read_selection`, `convert_to_markdown`, `convert_from_markdown`,
-`inspect_document`, `list_supported_formats`. Each accepts a filesystem `path`
-**or** `content_base64` + `filename`. Logs always go to **stderr**; stdout is the
+`read_selection`, `apply_edits`, `validate_docmark`, `convert_to_markdown`,
+`convert_from_markdown`, `inspect_document`, `render_slides`,
+`list_supported_formats`. Each accepts a filesystem `path` **or**
+`content_base64` + `filename`. Logs always go to **stderr**; stdout is the
 JSON-RPC channel only.
+
+**Patch editing.** `apply_edits` — and its CLI door, `docsai edit` — changes a
+document **without rewriting it**. Ten operations (`replace_text`, `set_props`,
+`insert_after`, `insert_before`, `delete`, `move`, `duplicate_slide`,
+`set_cell`, `set_notes`, `replace_image`), addressed by node id or index path,
+applied in order and **all-or-nothing**, with an etag as an optional
+precondition. The normative set is
+[`docs/edit-operations.md`](docs/edit-operations.md); anything outside it is
+still done with `read --select` and a rewrite.
+
+```text
+apply_edits { path: "deck.pptx", operations: [
+  {"op":"replace_text","target":"n4/1","text":"Resultados del Q3","if_match":"74e8ca"},
+  {"op":"insert_after","target":"n4/1","content":"- Ingresos al alza\n"},
+  {"op":"set_props","target":"n121","props":{"bold":true}} ] }
+→ {"changed":[{"id":"n4/1","etag":"00505d"},{"id":"n7","etag":"e39d88"}],
+   "created":[{"id":"n121","kind":"list"}]}
+```
+
+The answer carries the ids of what was created and the **new etags** of what
+changed, so **no confirmation read is needed** — the next edit guards itself
+with what this one returned. A stale etag is a typed refusal carrying both
+values and is never an overwrite; `dry_run` returns the same report without
+touching the file; the write is a temporary file in the destination's own
+directory renamed over the original, so a failure at any point leaves the
+original byte-identical.
+
+`apply_edits` is the one tool that **writes over a document**, and its reach is
+deliberately small: it reads `path` (plus the picture a `replace_image` names),
+writes exactly one file — `output_path`, or `path` itself — and creates a
+`.docsai-edit-*.tmp` beside that destination for the length of the transaction.
+It never creates a directory, walks a glob, edits a batch of files, or converts
+between formats: `docsai edit report.docx -o out.pptx` is refused, because
+writing docx bytes under a `.pptx` name is a silent degradation.
+
+`validate_docmark` (CLI: `docsai validate`) answers with **every** problem in a
+piece of DocMark at once rather than the first — each with a line, a stable code
+(`container/unclosed`, `id/duplicate`, …), the node id in force there, the
+specification rule it breaks, and a fix where one can be made honestly. The
+parser is the only authority: an *error* is text it refuses, a *warning* is text
+it accepts and reads as something other than what it looks like.
 
 One **resource** is served beside them: `docmark://cheatsheet/{path}` answers
 with the DocMark syntax that document actually uses — front matter and node ids,
@@ -331,12 +375,21 @@ convert_from_markdown { markdown_path: "report.dmk.md", target_format: "docx", p
 [`crates/docsai-mcp/tests/goldens/wire-cost.md`](crates/docsai-mcp/tests/goldens/wire-cost.md)
 records the bytes and tokens of the framed JSON-RPC that actually crossed the
 transport for each canonical agent task, handshake included, and CI fails on a
-regression. Today: fixing a typo in a 30-page report and writing the docx back
-costs **998 tokens**; adding a row to a sheet, **837**; locating and reading one
-slide of a 40-slide deck, **1 217**. The tool listing every session opens with
-costs 1 770 — more than any single task, which is why the schemas published by
-`tools/list` are trimmed of everything a caller cannot act on (6 470 bytes, down
-from 9 403).
+regression. Today: the full edit loop on a 40-slide deck — locate slide 4,
+retitle it, add a bullet, bold it, verify — costs **804 tokens in 2 tool
+calls**; fixing a typo in a 30-page report and writing the docx back, **1 031**;
+adding a row to a sheet, **870**. The tool listing every session opens with
+costs 2 481, which is more than any single task and is why the schemas published
+by `tools/list` are written for size: `apply_edits` publishes `operations` as an
+array of anything with its ten shapes in one line of prose, because the derived
+schema for the same enum is over a thousand tokens.
+
+That deck loop is plan v2 Phase 17's acceptance criterion — «≤ 3 tool calls and
+≤ 2 000 tokens» — and it is a **hard gate**, not a golden: `LOOP_MAX_CALLS` and
+`LOOP_MAX_TOKENS` are asserted before the golden file is consulted at all, so
+regenerating a golden can never make the loop affordable. The session handshake
+is reported beside it and is not part of that budget: it is what a session pays
+once, whatever it then does.
 
 Without an `output_path`, `convert_to_markdown` still returns the DocMark
 inline — up to `DOCSAI_MCP_MAX_INLINE_TOKENS`, past which it refuses and names
@@ -418,10 +471,10 @@ comparator can be measured on its own, with no renderer at all, by
 `python3 corpus/render_gate.py --self-test`. It is CI-only too, and adds no image dependency
 anywhere.
 
-What the render gate reports today, run over the whole corpus with a real renderer: *17 decks, 17
-round trips identical by bytes, 0 rendered, 61 pages compared, 0 failures, 0 not measured*. The
+What the render gate reports today, run over the whole corpus with a real renderer: *21 decks, 21
+round trips identical by bytes, 0 rendered, 67 pages compared, 0 failures, 0 not measured*. The
 round trips are byte-identical packages, which the gate treats as strictly stronger than a render
-and does not spend renderer time on; the 61 rendered pages are the packages written on the embedded
+and does not spend renderer time on; the 67 rendered pages are the packages written on the embedded
 template, and they are reported rather than scored — the template's canvas differs from the corpus
 deck's, so the pages cannot be paired pixel for pixel and only the «did anything come out blank»
 check applies. So the gate has shown that every generated package loads and renders, and it has

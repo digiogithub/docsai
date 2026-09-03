@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`set_props` was a silent no-op on `.docx` and `.pptx`.** A font property was written only to the
+  paragraph's `run_direct` — which is the *paragraph mark's* run properties. ODF puts that where it
+  reaches the text; WordprocessingML puts it in `w:pPr/w:rPr` and PresentationML in `a:endParaRPr`,
+  neither of which formats anything a reader sees. So `set_props {"bold": true}` returned a change
+  report with a new etag and left the document reading exactly as before, on two of the three
+  families — a change reported for an edit that did not happen, which is the one thing the operation
+  set is built to make impossible. The property is now set on every run of the paragraph as well,
+  and still on the paragraph mark, because that is what text typed at the end of the paragraph
+  inherits. The fix is in the edit layer, not in the writers, so no conversion's bytes moved.
+  Found by requiring a round trip rather than a non-empty report.
+- **`highlight` was typed as a colour and accepted as anything.** `docs/edit-operations.md` §6.2
+  typed it `RRGGBB` by analogy with `color`, and validation took any string and wrote it verbatim
+  into `w:highlight/@val` — which is the `ST_HighlightColor` **enumeration**, not a colour, so
+  `highlight: "FFFF00"` produced markup Word does not honour: another silent no-op reported as a
+  change. Now validated against the seventeen names and refused by name, listing them; the normative
+  table is corrected.
+- **The ODS writer dropped a picture's name and description on every write-back.** The reader takes
+  a picture's description from `svg:desc` and falls back to `draw:name`; the writer emitted neither,
+  so a plain `.ods → DocMark → .ods` conversion lost the name **and** the alt text of every picture,
+  silently and with no warning. It now writes `draw:name` and the `svg:title`/`svg:desc` children,
+  mirroring what the `.odt` writer has always done. Like the `Err:510` defect below, it survived in
+  the tree because there is no render gate for spreadsheets and the ODS tests compare DocMark.
 - **Every formula in every `.ods` this project wrote read as `Err:510`.** The ODS writer emits
   formulas as `table:formula="of:=…"` but never declared the `of:` (OpenFormula) namespace on
   `office:document-content`, and an undeclared prefix inside that attribute is not a formula at all.
@@ -121,6 +143,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from.
 
 ### Added
+
+- **Patch editing: `docsai` changes a document without rewriting it** (plan v2 **Phase 17**, closed;
+  `kb/93-phase-17-close.md`). Until now the only way to change a document with this tool was to
+  convert the whole of it to DocMark, edit the text, and convert the whole of it back — correct, and
+  the foundation of every fidelity property here, but it costs an agent the entire document twice
+  for a one-word change. There is now a second door beside it, and the first is untouched.
+
+  **A closed, versioned set of ten operations** — `replace_text`, `set_props`, `insert_after`,
+  `insert_before`, `delete`, `move`, `duplicate_slide`, `set_cell`, `set_notes`, `replace_image` —
+  specified in the normative [`docs/edit-operations.md`](docs/edit-operations.md) **before any of
+  them was written**, and defined against the intermediate model rather than against text or
+  markup. Each is addressed by **node id** (`n7`) or by an index path (`doc/3`, `n7/2`), never by a
+  selector; anything outside the set is still done with `read --select` and a rewrite. An unknown
+  operation, an unknown field, a missing one and a mistyped one are each a **typed refusal naming
+  both sides**, never an ignored key: a call that silently did nothing and reported a change is the
+  failure the whole set exists to prevent. Two things are refused on principle rather than on
+  difficulty — nothing **creates or edits a comment** (a comment asserts that a named person said
+  something, and there is no person on the other end of an API call; deleting one is different in
+  kind and is allowed), and nothing **touches a chart** (a chart's numbers are edited by retyping
+  its DocMark table, which has worked since Phase 16).
+
+  **Etags as preconditions.** Every read already hands out an etag per addressable node; `if_match`
+  spends one. An etag covers **the node and its whole subtree**, so an edit made inside a subtree
+  between your read and your `delete` of it is detected rather than destroyed. A mismatch is
+  `StaleEtag` carrying **both** values and is **never** an overwrite. The one thing an etag
+  deliberately does not cover is appearance, because the `agent` fidelity level drops appearance by
+  design and a value whose meaning depended on the level it was read at would refuse edits nobody
+  conflicted with.
+
+  **All-or-nothing, and the original is never half-written.** The operations apply to an in-memory
+  document; a refusal at operation *k* drops it, so there is no rollback to get wrong. The result is
+  written to a temporary file **in the destination's own directory**, `fsync`ed, and renamed over
+  the original — a rename across filesystems is a copy and an unlink, which is the failure the
+  construction exists to prevent. Where the guarantee ends is written down rather than implied: a
+  crash never leaves you reading half a document, but durability on a filesystem that reorders the
+  directory entry is not claimed, Windows refuses the replacement outright if the file is open in
+  another application, and **no atomicity at all is claimed on NFS or SMB**. Proven by injection, not
+  by argument: a fault forced *after* the operations applied and a fault forced *after the complete
+  edited file is on disk but before the rename* both leave the original byte-identical, on all five
+  package families, with no temporary file left behind.
+
+  **`--dry-run` / `dry_run`** runs everything except that rename — including writing the document
+  out, because a writer's own refusals are not knowable any other way — and returns a report
+  **equal**, field for field, to the one the real call would return. The price is stated: a dry run
+  needs write permission on the destination's directory, because a dry run that passed where the
+  real call would fail would be a dry run that lied.
+
+  **The report is the verification.** It carries the ids of what was created with their kind, the
+  targets deleted, the targets changed **with their new etags**, and the warnings — and nothing
+  else. Not the new content, not a textual diff: what a caller genuinely does not know after a
+  successful call is exactly the new ids and the new etags, and both are there. A two-target report
+  is **31 tokens**.
+
+  **The number this phase existed for.** The plan budgeted a realistic scripted agent loop —
+  «retitle slide 4, add a bullet, bold it, verify» on a 40-slide deck — at **≤ 3 tool calls and
+  ≤ 2 000 tokens**, and said that if the number is not met the phase is not done. Measured on the
+  wire, on the framed JSON-RPC that actually crossed the transport: **2 tool calls and 804 tokens**
+  (242 in, 562 out). Two calls rather than three because the report *is* the verification — there is
+  no confirmation read. The session handshake is reported beside it at 2 481 tokens and is not part
+  of that budget: it is what a session pays once, whatever it then does. Both numbers are in
+  [`crates/docsai-mcp/tests/goldens/wire-cost.md`](crates/docsai-mcp/tests/goldens/wire-cost.md),
+  and the budget is now asserted **before that golden is consulted**, outside the golden-update
+  mechanism entirely — a golden is a record of what something costs, and regenerating one must never
+  be able to make the loop affordable.
+
+  Completing the loop made the whole measured suite **cheaper**: 5 239 → **5 186** tokens across the
+  phase, a net fall, despite two new tools and a new resource, because measuring the return leg is
+  what let the read half stop converting the whole deck to a file first. The gate's inflation escape
+  hatch was authorised for the final increment and **not used**, at any point in the phase.
+
+- **A contextual DocMark cheat-sheet, as an MCP resource** (plan v2 Phase 17, increment G):
+  `docmark://cheatsheet/{path}` answers with the DocMark syntax **the document at that path actually
+  uses** — the front matter it would carry, node ids, and one entry per construct present, each with
+  a working example. A plain report is told about paragraphs, empty lines and manual breaks and is
+  told nothing about slides, charts, comments, sheets, footnotes or tables: **221 tokens** for
+  `corpus/docx/basic-text.docx` against **914** for a deck with charts, a table, an image, a stub,
+  speaker notes and a comment. Four times the sheet for four times the document — a cheat-sheet that
+  were the same size whatever it described would have failed its only reason to exist. It is a
+  *resource* rather than a tool on purpose: a tool's schema is published to every session before any
+  work happens, and a feature whose entire purpose is a smaller token bill has no business inflating
+  the one response nobody can decline. It costs a session **4 tokens** of declared capability and is
+  fetched only on request. Three tests keep it honest as the specification grows: every example is
+  parsed as real DocMark, every heading of the specification must be claimed by a feature or
+  excluded with a written reason, and every feature must be produced by a real document.
 
 - **`docsai edit <in> --ops <json>` and the `apply_edits` MCP tool** (plan v2 Phase 17, increment
   E): the closed operation set of `docs/edit-operations.md`, applied in order and all-or-nothing,

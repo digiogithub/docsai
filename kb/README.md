@@ -105,6 +105,7 @@ Practical difference between the two folders:
 | [90 — Phase 17 E](90-phase-17-doors.md) | One implementation, two doors: `docsai edit --ops` and `apply_edits` over one function in `docsai-mcp::edit`, with the equality asserted against the real binary and a real server rather than intended; the schema written for size — `operations` as an array of anything and ten shapes in one line of prose — **246 tokens**, +4.9 % of the gate's 5 % and no hatch; recalculation settled (xlsx `fullCalcOnLoad`, ods needs none, measured), so the false warning goes; the ODS `of:` namespace bug that made every formula this project wrote read as `Err:510` |
 | [91 — Phase 17 G](91-phase-17-cheatsheet.md) | The contextual cheat-sheet as the MCP resource `docmark://cheatsheet/{path}`: the DocMark syntax a document actually uses, derived by walking the IR — **221 tokens** for a plain report against **914** for a deck with charts, a table, notes and a comment; a resource rather than a tool because a tool is published to every session, measured at **+4 preamble tokens** (2 477 → 2 481, suite +0.3 %); kept honest by three tests — every example parses, every specification heading is claimed or excluded with a reason, every entry is produced by a real document |
 | [92 — Phase 17 H](92-phase-17-loop.md) | The loop, measured: `deck-retitle` completed and the acceptance number spent — **2 tool calls, 804 tokens** against 3 and 2 000, preamble **2 481** beside it, suite total 5 632 → 5 186 (**−7.9 %**), so the inflation hatch was authorised and **not needed**; §11's matrix walked as a constant, **72 cells**, every `—` a typed refusal that leaves the file byte-identical; the sibling criterion taken inside the changed part on all five families and the injected fault run on all five; three defects found by asking for the round trip the criterion asks for — `set_props` a silent no-op on docx and pptx (`run_direct` is the paragraph *mark*), `highlight` typed as a colour when the IR holds an enumeration, the ODS writer dropping a picture's `draw:name` and `svg:desc` on every write-back; ids on a package re-read settled as a property and written into §5.4.1 |
+| [93 — Phase 17 close](93-phase-17-close.md) | The four criteria answered with re-run evidence — §11's matrix at **72 cells**, one member and one element changing in a deck, one `w:p` of five in a docx against the empty-batch baseline, the injected fault on all five families, and the number the phase existed for: **2 tool calls, 804 tokens** against 3 and 2 000, with the preamble reported beside it at **2 481** and the reading of the budget fixed in the plan before anyone could be losing; the wire-cost suite ending **below** where it started (5 239 → 5 186) with the inflation hatch authorised and unused; the loop's budget made a **hard gate** asserted before the golden; what `apply_edits` can and cannot reach on a filesystem; risk P2 still open and now more expensive; and the **thirty-nine** things carried forward |
 | [89 — Phase 17 C+D](89-phase-17-transaction.md) | Every operation applies: resolution records the route it walked and a policy-free walk replays it mutably, so there is one resolver and not two; all-or-nothing by ownership rather than rollback, a temporary file in the destination's own directory and an honest map of where `rename` is not atomic; `dry_run` stops one step short and returns a report equal byte for byte; the diff is identity and new etags, 31 tokens |
 
 ## Status in one line
@@ -179,6 +180,24 @@ indistinguishable from a miss. Twenty-one decks round-trip byte for byte; the sc
 363 parts of 42 packages with 0 invalid; the render gate compares 67 pages with 0 failures. What
 stays open is in [`84-phase-16-close.md`](84-phase-16-close.md), thirty items, the unsigned P2 form
 first among them.
+
+**Phase 17 is closed — docsai is a document tool, not only a converter.** A closed, versioned set of
+**ten operations** (`docs/edit-operations.md`, version 1), specified before any of them was written,
+defined against the IR, addressed by node id, guarded by **etags that cover a node and its whole
+subtree**, applied **all-or-nothing** through a temporary file in the destination's own directory
+renamed over the original — proven by *injecting* a fault after the operations applied and after the
+complete file is on disk but before the rename, on all five package families. `dry_run` returns a
+report equal to the real one; the report carries the created ids and the **new etags**, so no
+confirmation read is needed. `docsai edit --ops` and the `apply_edits` MCP tool are two doors over
+one function, asserted against the real binary and a real server. Beside them, `validate_docmark`
+(`docsai validate`) answers with every problem in a piece of DocMark at once, with the parser as the
+only authority, and the MCP resource `docmark://cheatsheet/{path}` carries only the syntax the
+document at hand uses. The number the phase existed for: the scripted loop on a 40-slide deck costs
+**2 tool calls and 804 tokens** against a budget of 3 and 2 000, and that budget is now a hard gate
+asserted before the golden is consulted. The wire-cost suite ended the phase *cheaper* than it
+started it (5 239 → 5 186) with the inflation hatch authorised and unused. What stays open is in
+[`93-phase-17-close.md`](93-phase-17-close.md), thirty-nine items — the unsigned P2 form still first,
+and now more expensive, because every operation reaches a package as a splice into a preserved part.
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives

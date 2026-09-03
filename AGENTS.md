@@ -410,7 +410,64 @@ of any kind but LibreOffice has opened any of it — and `kb/84-phase-16-close.m
 the thirty things it carries forward, and the question the wire-cost measurement raises for Phase 17:
 the MCP session preamble now costs **2 124 tokens** where Phase 17's criterion budgets 2 000 for a
 whole agent loop, and whether the two are the same budget is Phase 17's to decide.
-Next is **Phase 17**: `apply_edits`, patch editing — and, first, the P2 form.
+**Phase 17 is closed**: patch editing — the change that moves docsai from converter to document
+tool. Until this phase the only way to change a document was to convert the whole of it to DocMark,
+edit the text and convert the whole of it back; that path is untouched and every fidelity property
+still rests on it, but there is a **second door** beside it now. `docs/edit-operations.md` is
+normative **version 1** of a closed set of **ten operations** — `replace_text`, `set_props`,
+`insert_after`, `insert_before`, `delete`, `move`, `duplicate_slide`, `set_cell`, `set_notes`,
+`replace_image` — specified in full **before any of them was written**, defined against the IR
+rather than against text or markup, and addressed by **node id** or index path, never by a
+selector. An unknown operation, an unknown field, a missing one and a mistyped one are each a typed
+refusal naming both sides; nothing creates or edits a **comment** (a comment asserts that a named
+person said something, and there is no person on the other end of an API call — deleting one is
+different in kind and is allowed) and nothing touches a **chart** (its numbers are edited by
+retyping its DocMark table, which is Phase 16's path). An **etag** covers a node **and its whole
+subtree**, so an edit made inside a subtree between a read and a `delete` of it is detected rather
+than destroyed, and a mismatch is `StaleEtag` carrying both values and never an overwrite; what an
+etag deliberately does not cover is appearance, because `--fidelity agent` drops appearance by
+design. The transaction is **ownership rather than rollback** — the operations apply to an in-memory
+document a refusal simply drops — and the write is a temporary file in the destination's **own**
+directory, `fsync`ed and renamed over the original, with the edges of that guarantee written down
+(a crash never leaves half a document; durability under a reordering filesystem is not claimed;
+Windows refuses when the file is open elsewhere; **no atomicity is claimed on NFS or SMB**). It is
+proven by **injecting** a fault after the operations applied and after the complete edited file is
+on disk but before the rename, on all five package families. `dry_run` runs everything except that
+rename and returns a report **equal** to the real one. The report carries the ids created with
+their kind, the targets deleted and the targets changed **with their new etags** — 31 tokens for a
+two-target batch — which is what makes «no confirmation read is needed» a property rather than a
+claim. `docsai edit <in> --ops <json>` and the `apply_edits` MCP tool are **two doors over one
+function**, asserted against the real binary and a real server on a transport rather than intended.
+Beside them: **`validate_docmark`** (and `docsai validate`) answers with *every* problem in a piece
+of DocMark at once — line, stable code, node id, the specification rule and a fix — with the parser
+as the only authority, so an error is text it refuses and a warning is text it accepts and reads as
+something else; and the **contextual cheat-sheet**, the MCP resource `docmark://cheatsheet/{path}`,
+carries only the DocMark syntax the document at hand actually uses (**221 tokens** for a plain
+report against **914** for a deck with charts, a table, notes and a comment), as a resource rather
+than a tool because a tool's schema is published to every session whether it is wanted or not.
+**The phase's four acceptance criteria are met and measured**: §11's matrix walked as a constant
+over **72 cells** (every `✔` a round trip, every `—` a typed refusal that leaves the file
+byte-identical); an edit leaving every sibling byte-identical **inside the part it changed** on all
+five families; the injected mid-transaction failure on all five; and the number the phase existed
+for — a scripted «retitle slide 4, add a bullet, bold it, verify» loop on a 40-slide deck at
+**2 tool calls and 804 tokens** against a budget of 3 and 2 000, with the session preamble reported
+beside it at 2 481 and explicitly **not** part of that budget, the reading fixed in the phase plan
+before any measurement existed. That budget is now a **hard gate**: `LOOP_MAX_CALLS` and
+`LOOP_MAX_TOKENS` in `crates/docsai-mcp/tests/wire_cost.rs` are asserted *before* the golden is
+consulted, so no golden regeneration and no environment variable can make the loop affordable. The
+wire-cost suite ended the phase **cheaper** than it started it — 5 239 → **5 186** tokens, a net
+fall, despite two new tools and a resource — and the inflation hatch, authorised for the last
+increment, was **not used**. Four defects were found by asking for the round trip the criterion asks
+for: `set_props` was a silent no-op on docx and pptx, `highlight` was typed as a colour when the IR
+holds an enumeration, the ODS writer dropped a picture's name and description on every write-back,
+and the ODS writer had never declared the `of:` namespace, so **every formula in every `.ods` this
+project wrote read as `Err:510`** — all fixed. **Risk P2 is still OPEN and is now more expensive**:
+every operation in the set reaches a package as a *splice into a preserved part*, which is exactly
+the construction `docs/spikes/P2-powerpoint-gate.md` asks about, and the form is still unsigned
+after two phases. `kb/93-phase-17-close.md` records the close, the criteria with re-run evidence,
+where every budget stands, what `apply_edits` can and cannot reach on a filesystem, and the
+**thirty-nine** things carried forward.
+Next is **Phase 18**: `.odp` ⇄ DocMark — and, first, the P2 form.
 
 ## 2. Documents you must read before implementing
 

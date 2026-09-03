@@ -202,8 +202,8 @@ pub struct ConversionReport {
 
 ## 5. CLI (`docsai-cli`)
 
-> Plan v2 adds `outline`, `read --select`, `search`, `tokens` and `edit`, plus the
-> `--fidelity agent` level. See §9.
+> Plan v2 adds `outline`, `read --select`, `search`, `tokens`, `edit` and `validate`,
+> plus the `--fidelity agent` level — all shipped as of Phase 17. See §9.5.
 
 ```
 docsai convert <in> [-o <out>] [--to <fmt>] [--fidelity full|standard|plain]
@@ -518,7 +518,8 @@ docsai outline <in> [--depth N] [--json]
 docsai read <in> --select <selector>          # s4 | s7-s9 | #id | type:notes | text:foo
 docsai search <in> <query> [--json]
 docsai tokens <in> [--fidelity …] [--json]
-docsai edit <in> --ops <ops.json> [--dry-run]
+docsai edit <in> --ops <ops.json|@file> [--dry-run] [--output <out>] [--fidelity full|agent] [--json]
+docsai validate <file> [--json]               # every problem in a DocMark document, not the first
 docsai convert … --fidelity full|standard|plain|agent [--raw inline|sidecar]
                  [--ids assign|preserve|never] [--thumbnails]
 ```
