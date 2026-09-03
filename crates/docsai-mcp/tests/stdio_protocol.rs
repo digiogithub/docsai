@@ -408,3 +408,71 @@ async fn estimate_tokens_prices_the_document_for_almost_nothing() -> anyhow::Res
     let _ = server.await;
     Ok(())
 }
+
+#[tokio::test]
+async fn the_cheat_sheet_is_a_resource_and_it_tracks_the_document() -> anyhow::Result<()> {
+    let (client, server) = connect_duplex().await;
+
+    // Discovery: one template, no static resources. A cheat-sheet without a
+    // document does not exist, so there is nothing to list.
+    let templates = client.list_resource_templates(None).await?;
+    assert_eq!(templates.resource_templates.len(), 1);
+    assert_eq!(
+        templates.resource_templates[0].uri_template,
+        "docmark://cheatsheet/{path}"
+    );
+    assert!(client.list_resources(None).await?.resources.is_empty());
+
+    let read = |uri: String| {
+        let client = &client;
+        async move {
+            let result = client
+                .read_resource(rmcp::model::ReadResourceRequestParams::new(uri))
+                .await?;
+            let rmcp::model::ResourceContents::TextResourceContents { text, .. } =
+                &result.contents[0]
+            else {
+                panic!("a cheat-sheet is text");
+            };
+            anyhow::Ok(text.clone())
+        }
+    };
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus");
+    let uri = |relative: &str| {
+        format!(
+            "docmark://cheatsheet/{}",
+            root.join(relative).to_string_lossy()
+        )
+    };
+    let plain = read(uri("docx/basic-text.docx")).await?;
+    let deck = read(uri("pptx/charts-multi-series.pptx")).await?;
+
+    // Contextual, and that is the whole feature: a plain report is not told
+    // about charts or slides, and it is materially cheaper for it.
+    assert!(!plain.contains(".slide"), "{plain}");
+    assert!(!plain.contains(".chart"), "{plain}");
+    assert!(deck.contains(".slide") && deck.contains(".chart"), "{deck}");
+    assert!(
+        docsai_convert::tokens::count(&deck) > docsai_convert::tokens::count(&plain),
+        "plain {} tokens, deck {}",
+        docsai_convert::tokens::count(&plain),
+        docsai_convert::tokens::count(&deck)
+    );
+
+    // A URI this server does not serve is a refusal that names what it does.
+    let refused = client
+        .read_resource(rmcp::model::ReadResourceRequestParams::new(
+            uri("docx/basic-text.docx").replace("cheatsheet", "outline"),
+        ))
+        .await;
+    let error = refused.expect_err("an unknown resource is refused");
+    assert!(
+        error.to_string().contains("docmark://cheatsheet/{path}"),
+        "{error}"
+    );
+
+    client.cancel().await?;
+    let _ = server.await;
+    Ok(())
+}

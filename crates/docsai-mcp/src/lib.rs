@@ -12,6 +12,7 @@ mod config;
 pub mod edit;
 mod images;
 mod input;
+mod resources;
 mod schema;
 mod server;
 pub mod tools;

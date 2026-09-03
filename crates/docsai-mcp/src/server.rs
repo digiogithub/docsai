@@ -11,8 +11,10 @@ use docsai_convert::ConvertError;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
-        CallToolResult, ContentBlock, Implementation, ListToolsResult, PaginatedRequestParams,
-        ResultType, ServerCapabilities, ServerInfo,
+        CallToolResult, ContentBlock, Implementation, ListResourceTemplatesResult, ListToolsResult,
+        PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+        ReadResourceResult, ResourceContents, ResourceTemplate, ResultType, ServerCapabilities,
+        ServerInfo,
     },
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
@@ -21,6 +23,7 @@ use serde_json::Value;
 
 use crate::config::McpConfig;
 use crate::edit::{EditCall, EditFailure};
+use crate::resources::{cheatsheet, template_description, CHEATSHEET_PREFIX, CHEATSHEET_TEMPLATE};
 use crate::schema::slim;
 use crate::tools::{
     self, ApplyEditsArgs, ConvertFromMarkdownArgs, ConvertToMarkdownArgs, DocumentArgs,
@@ -327,8 +330,59 @@ impl ServerHandler for DocsaiServer {
         })
     }
 
+    /// The cheat-sheet template, and nothing else.
+    ///
+    /// `resources/list` stays empty on purpose: there is no cheat-sheet
+    /// without a document, and a static entry would either be the whole
+    /// specification — which is what this increment exists not to send — or a
+    /// name for a document this server has not been given.
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(ListResourceTemplatesResult::with_all_items(vec![
+            ResourceTemplate::new(CHEATSHEET_TEMPLATE, "docmark_cheatsheet")
+                .with_description(template_description())
+                .with_mime_type("text/markdown"),
+        ]))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        let config = Arc::clone(&self.config);
+        let uri = request.uri.clone();
+        let work = move || cheatsheet(&uri, &config);
+        let joined = tokio::task::spawn_blocking(work).await.map_err(|error| {
+            McpError::internal_error(format!("resource task failed: {error}"), None)
+        })?;
+        match joined {
+            Ok(text) => {
+                Ok(ReadResourceResult::new(vec![
+                    ResourceContents::text(text, request.uri).with_mime_type("text/markdown")
+                ])
+                .into())
+            }
+            // A URI this server does not serve is `resource_not_found`, which
+            // is what the protocol has for it; anything else went wrong while
+            // reading a document the caller did name.
+            Err(error) if !request.uri.starts_with(CHEATSHEET_PREFIX) => {
+                Err(McpError::resource_not_found(error.to_string(), None))
+            }
+            Err(error) => Err(McpError::invalid_params(error.to_string(), None)),
+        }
+    }
+
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
             .with_server_info(Implementation::new("docsai", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Bidirectional converter between Office/LibreOffice documents and DocMark. \

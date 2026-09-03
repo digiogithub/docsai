@@ -241,7 +241,19 @@ Tools exposed:
 | `apply_edits` | `path`, `operations` (the closed set of `docs/edit-operations.md`), `output_path`, `dry_run`, `fidelity` | the change report: ids created with their kind, targets deleted, targets changed **with their new etag**, warnings — so no confirmation read is needed. All-or-nothing: the file is replaced by rename only when every operation applied. A refusal is typed (`{"refusal":"StaleEtag","expected":…,"actual":…}`), never a sentence alone. The one tool that writes over a document, and it writes exactly one file: `output_path`, or `path` itself |
 | `render_slides` | `path`/`content_base64`, `output_dir`, `slides` (`2`, `1-4`, `1,3,7`), `dpi` (24..=300, default 96) | one PNG per slide, drawn by headless LibreOffice; with `output_dir` a receipt, without it base64 up to 2 MiB. Each row carries the slide number **and** the slide's node id. The one tool that needs a renderer: without one it errors, and says so |
 
+Resources exposed:
+
+| Resource | URI | Content |
+|---|---|---|
+| the contextual cheat-sheet | `docmark://cheatsheet/{path}` (template) | the DocMark syntax the document at that path **actually uses**, derived by walking the IR: front matter and node ids, plus one entry per construct present, each an example and one line of prose. A report with no charts and no comments is not told their syntax and does not pay for it. `text/markdown`. `resources/list` is empty on purpose: there is no cheat-sheet without a document (Phase 17-G) |
+
 Decisions:
+- **The cheat-sheet is a resource, not a tool.** A tool costs every session — its schema and
+  prose are published in `tools/list` before any work is done — and this one exists to make a
+  session cheaper. A resource costs a session the 15 bytes of `"resources":{}` in the
+  `initialize` capabilities and nothing more: `resources/templates/list` and `resources/read`
+  are fetched by a client that wants them. Measured: `tests/wire_cost.rs` session preamble
+  2 477 → 2 481 tokens.
 - Dual **path/base64** mode: local MCP clients (Claude Desktop/Code) pass paths; remote
   ones can pass embedded content. Size limit configurable via environment variable.
 - Large responses: DocMark as `text content`; binaries as base64 resource with correct MIME.
@@ -524,8 +536,8 @@ docsai convert … --fidelity full|standard|plain|agent [--raw inline|sidecar]
 
 Plus: `include_images=none|refs|downscaled|full` (default moves from `inline-base64` to `refs`),
 `render_slides` for a raster of a whole slide,
-a contextual DocMark cheat-sheet exposed as an MCP resource, and a content-hash LRU cache in
-`docsai-convert`.
+the contextual DocMark cheat-sheet exposed as the MCP resource `docmark://cheatsheet/{path}`
+(Phase 17-G), and a content-hash LRU cache in `docsai-convert`.
 
 The protocol stays **stateless**: ids live inside the document, not in server-side state, and
 the cache is a pure optimisation that can be disabled without changing any output. No sessions,

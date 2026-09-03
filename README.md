@@ -290,6 +290,16 @@ Tools: `estimate_tokens`, `outline_document`, `search_document`,
 **or** `content_base64` + `filename`. Logs always go to **stderr**; stdout is the
 JSON-RPC channel only.
 
+One **resource** is served beside them: `docmark://cheatsheet/{path}` answers
+with the DocMark syntax that document actually uses — front matter and node ids,
+plus one entry per construct present, each with an example. It is derived by
+walking the document, so a plain report is never told about slides, charts or
+comments and never pays for their syntax: 221 tokens for
+`corpus/docx/basic-text.docx` against 914 for a deck with charts, a table, an
+image, a stub, speaker notes and a comment. It is a resource rather than a tool
+because a tool is published to every session whether it is wanted or not; this
+costs a session 4 tokens of declared capability and is fetched only on request.
+
 The first four are the ones to reach for. They are the MCP face of `docsai
 tokens`, `docsai outline`, `docsai search` and `docsai read --select`, and
 together they answer "change the third heading of this report" without ever

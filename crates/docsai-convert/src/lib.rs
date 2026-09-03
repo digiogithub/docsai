@@ -8,6 +8,7 @@
 pub mod assets;
 pub mod batch;
 pub mod cache;
+pub mod cheatsheet;
 pub mod edit;
 pub mod fidelity;
 pub mod inspect;
@@ -24,6 +25,7 @@ pub mod tokens;
 pub use assets::DirAssetStore;
 pub use batch::{convert_batch, BatchOutcome, BatchReport};
 pub use cache::{CacheStats, ConvertCache, DEFAULT_CAPACITY_BYTES, DEFAULT_MAX_ENTRIES};
+pub use cheatsheet::{cheatsheet_input, features, render as render_cheatsheet, Feature, FEATURES};
 pub use docsai_docmark::{Fidelity, Options as DocMarkOptions, RawPolicy};
 pub use edit::{
     apply_edits_in_memory, edit_path, ChangedNode, CreatedNode, EditError, EditOptions,
