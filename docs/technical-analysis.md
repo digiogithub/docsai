@@ -195,7 +195,8 @@ ecosystem (PDF via LaTeX, HTML, EPUB…).
 | **`docx-rust`** | Alternative `.docx` reading | Less activity | More direct XML mapping; keep as reference |
 | **`spreadsheet-ods`** | Read+write `.ods` | Maintained | Covers ODS styles and formulas; avoids writing a custom ODF-spreadsheet writer |
 | **(none)** | `.odt` | — | No mature crate for ODT with styles: **custom parser/writer** on `zip` + `quick-xml` (ODF is regular; bounded effort) |
-| **`cfb`** | OLE2 container for legacy `.doc`/`.xls` | Stable | Base of the degraded `.doc` extractor |
+| **`cfb`** | OLE2 container for legacy `.doc`/`.xls`/`.ppt` | Stable | Base of the degraded `.doc` extractor, and of the degraded `.ppt` extractor from plan v2 Phase 19 — see §4.6 |
+| **`office_oxide`** | Candidate reader for legacy `.ppt` (plan v2 Phase 19) | Maintained (0.1.9, September 2026) | **Evaluated and not adopted** — cheap to link but silent on both refusal fixtures, and its `.ppt` model is text-only. Full argument in §4.6 and `kb/99-phase-19-parser-choice.md` |
 
 ### 4.2 Markdown (inverse path)
 
@@ -280,6 +281,51 @@ Cost accepted, and bounded: decoding attacker-supplied images is a denial-of-ser
 (a few kB of PNG can declare 60 000 × 60 000 pixels), so the decoder runs under
 `image::Limits` with a 64 MB allocation ceiling and any failure — bomb, corruption,
 unsupported format — degrades that one image to a ref instead of failing the call.
+
+### 4.6 Legacy `.ppt` parser (plan v2, Phase 19)
+
+Phase 19 applies the `.doc` strategy of §1.3 to legacy `.ppt`, **read-only**: a LibreOffice route
+for fidelity, and a degraded native route for machines without it. The plan requires the
+`office_oxide` crate to be weighed before it is adopted, under §7.4 of `AGENTS.md`. It was, in a
+probe crate outside the repository, against the four `corpus/ppt/` fixtures.
+
+| Option | What it costs | Verdict |
+|---|---|---|
+| **`cfb` + our own [MS-PPT] atom walk** | **No new crate** — `cfb` 0.14 already carries the `.doc` reader. ~1 000–1 400 lines of Rust, the same order as the `.doc` reader (~1 004) and as `office_oxide`'s own `.ppt` module (902) | **Chosen** |
+| `office_oxide` 0.1.9 | **+98 KB** stripped and **+30 s** clean release build (measured, LTO, `ppt` module only); six new crates, a **fourth** `quick-xml` (0.41 beside 0.37 and calamine's) and a **second** `zip` (8.6 beside 2); a second OLE2 implementation beside `cfb` | Rejected — on behaviour, not on cost |
+| LibreOffice as the only route | No Rust dependency | Rejected: it is the *fidelity* route (Phase 19 task 1), but architecture §7 keeps the main path free of a system dependency, so a native fallback is required |
+
+**Decision: not adopted.** The cost is genuinely small — unlike `ooxmlsdk` in
+`docs/spikes/P1-pptx-strategy.md`, which cost +28.7 MB — so the rejection rests entirely on what
+the crate does with the corpus:
+
+- **`corpus/ppt/encrypted.ppt` reads back as two ordinary slides.** `CurrentUserAtom.headerToken`
+  (`0xF3D1C4DF`, [MS-PPT] 2.3.2) is never consulted anywhere in the crate; upstream issue #119 is
+  an open feature request for exactly this. Phase 19's third acceptance criterion —
+  encrypted/protected `.ppt` **rejected with a clear error** — is therefore unreachable through
+  it, and not something a caller can add from outside.
+- **`corpus/ppt/truncated.ppt` returns `Ok` with one slide of master placeholder prompt text.**
+  When `offsetToCurrentEdit` does not resolve, the crate falls back to scanning for the
+  highest-offset `UserEditAtom`; on a deck missing half its stream that finds the master slide,
+  and the caller cannot tell the result from a real presentation. That is `AGENTS.md` §7 rule 3,
+  *never degrade fidelity silently*, on the fixture built to test it. It does not panic — memory
+  safety is not the objection.
+- **Its `.ppt` model is text-only and not extensible.** `TextRun` is `{ text_type, text }`: no
+  indent level (`StyleTextPropAtom` is a constant it never parses), no shape identity or
+  geometry, and a slide's paragraphs `\r`-joined into one string. docsai converts into
+  `Presentation → Slide → Shape`, and the losses at that seam could not even be *warned* about
+  accurately, because from outside the crate there is no way to know whether a given deck had a
+  second bullet level to lose.
+
+What the crate is good at is recorded rather than dismissed: it is MIT/Apache-2.0, actively
+released, pure Rust, MSRV 1.88 (this workspace's floor), and its persist-directory walk is the
+[MS-PPT] 2.1.2 algorithm done properly — bounds-checked, cycle-guarded, no panic on any fixture.
+It is kept as a **cross-check on record layout**, the role `ooxmlsdk` was left in by spike P1, and
+no code is derived from it. The decision is re-openable if upstream adds encryption detection and
+a richer model; the four fixtures are the re-test.
+
+Full evaluation, with the measurements and the verbatim probe output:
+`kb/99-phase-19-parser-choice.md`.
 
 ---
 
