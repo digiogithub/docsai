@@ -136,7 +136,9 @@ pub fn parse_with_base(
     Ok((doc, report))
 }
 
-fn split_front_matter(markdown: &str) -> Result<(Option<&str>, &str, usize), ParseError> {
+pub(crate) fn split_front_matter(
+    markdown: &str,
+) -> Result<(Option<&str>, &str, usize), ParseError> {
     let text = markdown;
     if !text.starts_with("---") {
         return Ok((None, text, 1));

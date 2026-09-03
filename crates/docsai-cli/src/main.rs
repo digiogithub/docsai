@@ -211,6 +211,20 @@ enum Command {
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
+    /// Check a DocMark file and list every problem in it, with a fix.
+    ///
+    /// The same answer the `validate_docmark` MCP tool gives, through the same
+    /// function. An *error* means the file will not parse; a *warning* means it
+    /// parses into something other than what it appears to say. Exit code 1
+    /// when there is any error.
+    Validate {
+        /// The `.dmk.md` file to check. Media and sidecars are resolved
+        /// relative to its own directory.
+        input: PathBuf,
+        /// Print the problems as JSON on stdout.
+        #[arg(long)]
+        json: bool,
+    },
     /// Show which formats this build can read and write.
     Formats {
         /// Print the matrix as JSON.
@@ -270,6 +284,7 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             docsai_mcp::run()?;
             Ok(EXIT_OK)
         }
+        Command::Validate { input, json } => run_validate(input, *json),
         Command::Formats { json } => {
             print_formats(*json);
             Ok(EXIT_OK)
@@ -445,6 +460,28 @@ fn run_inspect(input: &Path, json: bool, use_loffice: &str, verbose: bool) -> an
         EXIT_WARNINGS
     } else {
         EXIT_OK
+    })
+}
+
+/// Runs `docsai validate`: the CLI door onto `docsai_docmark::validate`.
+///
+/// The rendering — text and JSON alike — comes from
+/// [`docsai_mcp::validation_output`], the same function the MCP tool answers
+/// with, so the two doors cannot drift into saying different things about the
+/// same file.
+fn run_validate(input: &Path, json: bool) -> anyhow::Result<u8> {
+    let report = docsai_docmark::validate_file(input)
+        .map_err(|source| anyhow::anyhow!("{}: {source}", input.display()))?;
+    let output = docsai_mcp::validation_output(&report);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&output.value)?);
+    } else {
+        println!("{}", output.text);
+    }
+    Ok(if report.parses() {
+        EXIT_OK
+    } else {
+        EXIT_WARNINGS
     })
 }
 

@@ -12,6 +12,7 @@ authors.workspace = true
 anyhow = { workspace = true }
 base64 = { workspace = true }
 docsai-convert = { workspace = true }
+docsai-docmark = { workspace = true }
 docsai-model = { workspace = true }
 image = { workspace = true }
 rmcp = { workspace = true }

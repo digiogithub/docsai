@@ -22,7 +22,7 @@ use crate::config::McpConfig;
 use crate::schema::slim;
 use crate::tools::{
     self, ConvertFromMarkdownArgs, ConvertToMarkdownArgs, DocumentArgs, OutlineDocumentArgs,
-    ReadSelectionArgs, RenderSlidesArgs, SearchDocumentArgs, ToolOutput,
+    ReadSelectionArgs, RenderSlidesArgs, SearchDocumentArgs, ToolOutput, ValidateDocmarkArgs,
 };
 
 /// The docsai MCP server (architecture §6).
@@ -150,6 +150,19 @@ impl DocsaiServer {
     }
 
     #[tool(
+        name = "validate_docmark",
+        description = "Check DocMark before convert_from_markdown refuses it: every problem at once, each with line, code, node id, spec rule and a fix. Errors will not parse; warnings parse but mean something else."
+    )]
+    async fn validate_docmark(
+        &self,
+        Parameters(args): Parameters<ValidateDocmarkArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_tool(move || tools::tool_validate_docmark(&args, &config))
+            .await
+    }
+
+    #[tool(
         name = "read_selection",
         description = "Part of a document as self-contained DocMark: the exact bytes it would write for those nodes, plus the front matter to write them back (next-id, partial, per-node etag). Selectors: s4, s7-s9, #n7, type:heading, text:foo."
     )]
@@ -256,8 +269,8 @@ impl ServerHandler for DocsaiServer {
                  search_document for where it says something, read_selection for just that \
                  part as self-contained DocMark. The pictures a document embeds default to \
                  include_images=refs (names and sizes, no bytes); a picture of a whole slide \
-                 is a different thing and comes from render_slides. Also: inspect_document, \
-                 list_supported_formats. Prefer path mode on local machines; use \
+                 is a different thing and comes from render_slides. Also: validate_docmark, \
+                 inspect_document, list_supported_formats. Prefer path mode on local machines; use \
                  content_base64 + filename when the client cannot share a filesystem path. \
                  Logs always go to stderr; stdout is reserved for MCP JSON-RPC.",
             )

@@ -13,7 +13,7 @@ mod images;
 mod input;
 mod schema;
 mod server;
-mod tools;
+pub mod tools;
 
 pub use config::{
     McpConfig, DEFAULT_MAX_INLINE_TOKENS, DEFAULT_MAX_INPUT_BYTES, DEFAULT_TIMEOUT_SECS,
@@ -21,6 +21,7 @@ pub use config::{
 };
 pub use images::ImagePolicy;
 pub use server::DocsaiServer;
+pub use tools::{validation_output, ToolOutput};
 
 /// Names of the tools the server exposes (architecture §6).
 ///
@@ -41,6 +42,7 @@ pub const TOOLS: &[&str] = &[
     "search_document",
     "read_selection",
     "render_slides",
+    "validate_docmark",
 ];
 
 /// Runs the MCP server on stdio until the client disconnects.
@@ -113,7 +115,7 @@ mod tests {
 
     #[test]
     fn the_tool_set_is_the_converters_the_primitives_and_the_renderer() {
-        assert_eq!(TOOLS.len(), 9);
+        assert_eq!(TOOLS.len(), 10);
         for expected in [
             "convert_to_markdown",
             "convert_from_markdown",
@@ -124,6 +126,7 @@ mod tests {
             "search_document",
             "read_selection",
             "render_slides",
+            "validate_docmark",
         ] {
             assert!(TOOLS.contains(&expected), "missing {expected}");
         }

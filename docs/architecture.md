@@ -237,6 +237,7 @@ Tools exposed:
 | `outline_document` | `path`/`content_base64`, `depth` (**1** by default), `max_nodes`, `cursor`, `preview_chars`, `fidelity` | tree of addressable nodes with id, kind, preview, token cost, plus `outline-ratio`, `omitted` and `next-cursor` |
 | `search_document` | `path`/`content_base64`, `query`, `context`, `limit`, `fidelity` | hits: an address, a selector when there is one, and the words around each match |
 | `read_selection` | `path`/`content_base64`, `select`, `fidelity` | self-contained DocMark for those nodes, with etags (same shape as `read --select --json`) |
+| `validate_docmark` | `markdown` **or** `path` | every problem in the DocMark at once: severity, stable code, line and column, node id where the construct has one, the specification rule and a fix. An **error** is text the parser refuses; a **warning** is text it accepts and reads as something else. The parser is the authority for both — see `docsai_docmark::validate` |
 | `render_slides` | `path`/`content_base64`, `output_dir`, `slides` (`2`, `1-4`, `1,3,7`), `dpi` (24..=300, default 96) | one PNG per slide, drawn by headless LibreOffice; with `output_dir` a receipt, without it base64 up to 2 MiB. Each row carries the slide number **and** the slide's node id. The one tool that needs a renderer: without one it errors, and says so |
 
 Decisions:
@@ -517,7 +518,7 @@ docsai convert … --fidelity full|standard|plain|agent [--raw inline|sidecar]
 | `read_selection` | valid self-contained DocMark for a selector, not the whole document |
 | `search_document` | ids + context for a query |
 | `apply_edits` | transactional patch operations against ids, with `dry_run`, etag preconditions, and the applied diff + new etags in the response |
-| `validate_docmark` | typed errors with node id and suggested fix |
+| `validate_docmark` | typed problems with a line, a node id, the spec rule and a suggested fix; a list, not the first failure (Phase 17-F) |
 | `render_slides` | one PNG per slide through headless LibreOffice — the slide as a consumer sees it |
 
 Plus: `include_images=none|refs|downscaled|full` (default moves from `inline-base64` to `refs`),

@@ -13,6 +13,7 @@ use docsai_convert::{
     SelectorError, SUPPORT,
 };
 use docsai_convert::{outline::OutlineNode, tokens::count};
+use docsai_docmark::validate::{validate, validate_file, Validation};
 use docsai_model::Format;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
@@ -219,6 +220,23 @@ pub struct RenderSlidesArgs {
     /// 24..=300, default 96 (a 10x7.5 in slide becomes 960x720).
     #[serde(default)]
     pub dpi: Option<u32>,
+}
+
+/// Arguments for `validate_docmark`.
+///
+/// Two fields, and no more: the schema of every tool is in the preamble every
+/// session pays for before it has done any work, and this one earns its place
+/// only if it is small. There is no profile switch because there is nothing to
+/// switch — the validator detects the profile exactly as the parser does, and
+/// says which one it read.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct ValidateDocmarkArgs {
+    /// DocMark text to check.
+    #[serde(default)]
+    pub markdown: Option<String>,
+    /// `.dmk.md` file to check instead; media resolved beside it.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// Default nodes an outline response carries before it truncates itself.
@@ -1061,6 +1079,77 @@ fn parse_slide_range(spec: &str) -> Result<Vec<usize>, ConvertError> {
     Ok(out)
 }
 
+/// Runs `validate_docmark`: every problem in a DocMark document at once.
+///
+/// The answer an agent wanted when `convert_from_markdown` refused its text:
+/// not one `ParseError` but the list, each item with a place, a rule from the
+/// specification and — where one can honestly be given — the fix. The parser is
+/// the authority for every word of it (see [`docsai_docmark::validate`]).
+pub fn tool_validate_docmark(
+    args: &ValidateDocmarkArgs,
+    config: &McpConfig,
+) -> Result<ToolOutput, ConvertError> {
+    let report = match (args.markdown.as_deref(), args.path.as_deref()) {
+        (Some(markdown), None) => validate(markdown),
+        (None, Some(path)) => {
+            let path = PathBuf::from(path);
+            let meta = std::fs::metadata(&path).map_err(|source| ConvertError::Io {
+                path: path.display().to_string(),
+                source,
+            })?;
+            if meta.len() > config.max_input_bytes {
+                return Err(ConvertError::Invalid(format!(
+                    "`{}` is {} bytes, which exceeds DOCSAI_MCP_MAX_INPUT_BYTES ({})",
+                    path.display(),
+                    meta.len(),
+                    config.max_input_bytes
+                )));
+            }
+            validate_file(&path).map_err(|source| ConvertError::Io {
+                path: path.display().to_string(),
+                source,
+            })?
+        }
+        (Some(_), Some(_)) => {
+            return Err(ConvertError::Invalid(
+                "provide either markdown or path, not both".into(),
+            ))
+        }
+        (None, None) => return Err(ConvertError::Invalid("provide markdown or path".into())),
+    };
+    Ok(validation_output(&report))
+}
+
+/// The one rendering of a validation, shared by the MCP tool and `docsai
+/// validate` so neither door can drift from the other.
+///
+/// The text form is the one that crosses the wire, and it is deliberately not
+/// the JSON: one line per problem is what an agent reads, and it costs roughly
+/// half of what the object costs to say the same thing.
+pub fn validation_output(report: &Validation) -> ToolOutput {
+    let value = json!({
+        "profile": report.profile.as_str(),
+        "parses": report.parses(),
+        "errors": report.errors(),
+        "warnings": report.warnings(),
+        "problems": report
+            .diagnostics
+            .iter()
+            .map(|d| json!({
+                "severity": d.severity.as_str(),
+                "code": d.code,
+                "line": d.line,
+                "column": d.column,
+                "node": d.node,
+                "message": d.message,
+                "rule": d.rule,
+                "fix": d.fix,
+            }))
+            .collect::<Vec<_>>(),
+    });
+    ToolOutput::rendered(value, report.render())
+}
+
 /// Runs `list_supported_formats`.
 pub fn tool_list_supported_formats() -> ToolOutput {
     let formats: Vec<FormatRow> = SUPPORT.iter().map(FormatRow::from).collect();
@@ -1661,6 +1750,53 @@ mod tests {
         let stats = cache.stats();
         assert_eq!(stats.misses, 1, "one read for four tool calls");
         assert_eq!(stats.hits, 3);
+    }
+
+    #[test]
+    fn validate_docmark_lists_every_problem_and_says_how_to_fix_each() {
+        let args = ValidateDocmarkArgs {
+            markdown: Some(
+                "---\ndocmark: \"1.1\"\nsource-format: docx\nnext-id: 3\n---\n\n                 ![a](x.png){#n7}\n\n::: {.sidebar}\n\nA\n\n:::\n"
+                    .into(),
+            ),
+            path: None,
+        };
+        let out = tool_validate_docmark(&args, &cfg()).expect("validates");
+        let codes: Vec<&str> = out.value["problems"]
+            .as_array()
+            .expect("problems")
+            .iter()
+            .map(|p| p["code"].as_str().unwrap_or_default())
+            .collect();
+        assert!(codes.contains(&"id/above-next-id"), "{codes:?}");
+        assert!(codes.contains(&"container/unknown-class"), "{codes:?}");
+        assert_eq!(out.value["parses"], json!(true));
+        assert_eq!(out.value["profile"], json!("text"));
+        for problem in out.value["problems"].as_array().expect("problems") {
+            assert!(problem["line"].as_u64().unwrap_or(0) > 0, "{problem}");
+            assert!(!problem["fix"].is_null(), "{problem}");
+        }
+    }
+
+    #[test]
+    fn validate_docmark_reads_a_file_and_calls_a_golden_clean() {
+        let args = ValidateDocmarkArgs {
+            markdown: None,
+            path: Some(corpus("basic-text.expected.dmk.md")),
+        };
+        let out = tool_validate_docmark(&args, &cfg()).expect("validates");
+        assert_eq!(out.value["errors"], json!(0), "{}", out.text);
+        assert!(out.text.starts_with("clean"), "{}", out.text);
+    }
+
+    #[test]
+    fn validate_docmark_needs_exactly_one_of_markdown_and_path() {
+        assert!(tool_validate_docmark(&ValidateDocmarkArgs::default(), &cfg()).is_err());
+        let both = ValidateDocmarkArgs {
+            markdown: Some("x".into()),
+            path: Some("y".into()),
+        };
+        assert!(tool_validate_docmark(&both, &cfg()).is_err());
     }
 
     #[test]

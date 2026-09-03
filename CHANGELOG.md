@@ -115,6 +115,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`validate_docmark`: every problem in a DocMark document at once** (plan v2 Phase 17, increment
+  F), with `docsai validate <file> [--json]` as its CLI door. An agent that handed bad DocMark to
+  `convert_from_markdown` used to get one `ParseError` and had to fix-and-retry; it now gets the
+  list, each problem carrying a line and column, a stable code (`container/unclosed`,
+  `id/duplicate`, `front-matter/unsupported-version`…), the node id in force at that place, the rule
+  it breaks cited by its section of the DocMark specification, and — where one can be made honestly
+  — a fix concrete enough to apply. **The parser is the only authority**: an *error* is text
+  `parse` refused, a *warning* is text it accepted and read as something other than what it looks
+  like, and no error can be emitted about a document that parses. The two DocMark profiles genuinely
+  disagree about an unclosed `:::` container — a deck refuses it, a text document swallows the rest
+  of itself into it — so the same finding comes back as an error in one and a warning in the other,
+  with the consequence spelled out in the message rather than assumed. Cost: **+104 tokens** in the
+  session preamble (2 124 → 2 228), inside the wire-cost gate's allowance without touching it.
+
 - **A chart is data, not an opaque part** (plan v2 Phase 16, increments A, B and C). A `.pptx` chart
   used to round-trip byte for byte while telling an agent the word `barChart` and nothing else. It
   now reads as its **categories, its series, its per-series number format, its title and its embedded

@@ -101,6 +101,7 @@ Practical difference between the two folders:
 | [85 — Phase 17 plan](85-phase-17-plan.md) | `apply_edits`: the nine operations, etags, the transaction, and the reading of the 2k-token budget decided before anyone is losing |
 | [86 — Phase 17 A](86-phase-17-operations.md) | The operation set specified before it is written: ten names, what each does to ids, why a selector is not a target, the nineteen refusals, and 118 tokens for one edit |
 | [87 — Phase 17 B](87-phase-17-etags.md) | The etag covers the node **and its subtree**, argued from what each choice does when it is wrong; the appearance it deliberately does not cover; total target resolution with six typed failures, and one etag of twenty-five moving through a real package |
+| [88 — Phase 17 F](88-phase-17-validate.md) | `validate_docmark`: the parser is the only authority, so an error is text it refuses and a warning is text it reads as something else — the same unclosed container being an error in a deck and a warning in a text document; the list instead of the first failure; +104 preamble tokens |
 
 ## Status in one line
 

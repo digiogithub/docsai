@@ -33,6 +33,7 @@ pub mod raw;
 mod sheet_parser;
 mod sheet_writer;
 pub mod units;
+pub mod validate;
 mod writer;
 mod yaml;
 
@@ -40,6 +41,7 @@ pub use error::ParseError;
 pub use frontmatter::{selection_front_matter, skeleton_path};
 pub use ids::NodeFragment;
 pub use parser::{parse, parse_with_base};
+pub use validate::{validate, validate_at, validate_file, Diagnostic, Profile, Validation};
 
 use docsai_model::addressing::IdPolicy;
 use docsai_model::assets::AssetStore;
