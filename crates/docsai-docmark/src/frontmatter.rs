@@ -169,13 +169,26 @@ fn has_comment(doc: &Document) -> bool {
 /// version, where the document came from, the id counter (so a node added to
 /// the selection can never collide with one in the source), the `partial` flag
 /// and the etags an if-match write-back needs.
-pub fn selection_front_matter(options: &Options, next_id: u64, etags: &[(NodeId, Etag)]) -> String {
+pub fn selection_front_matter(
+    options: &Options,
+    next_id: u64,
+    etags: &[(NodeId, Etag)],
+    has_comment: bool,
+) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    // A selection of a deck is written in the presentation profile — its body
-    // carries `.slide` and shape containers — and the version names the
-    // profile, not the ids (spec §11.2, version rule).
-    let version = if options.source_format.is_presentation() {
+    // A selection *is* a document (spec §2.1), so the same version rule
+    // applies to it: a comment in the selection makes it 1.3, whichever
+    // profile it is written in (spec §11.3, version rule). The caller decides,
+    // because only the caller knows what ended up in the body — the whole
+    // document's answer would declare 1.3 for a selection that carries no
+    // comment at all, which is the mirror of the defect this fixes.
+    let version = if has_comment {
+        DOCMARK_VERSION_COMMENTS
+    } else if options.source_format.is_presentation() {
+        // A selection of a deck is written in the presentation profile — its
+        // body carries `.slide` and shape containers — and the version names
+        // the profile, not the ids (spec §11.2, version rule).
         DOCMARK_VERSION_PRESENTATION
     } else {
         DOCMARK_VERSION_ADDRESSED

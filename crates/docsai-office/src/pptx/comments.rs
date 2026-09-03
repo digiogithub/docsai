@@ -15,8 +15,25 @@
 //!
 //! Neither part is added to `SkeletonRef::rebuilt_parts`. Reading a comment
 //! does not license regenerating the part that holds it, so a deck whose
-//! comments nobody touched still comes back byte for byte; writing them back is
-//! plan v2 Phase 16-F.
+//! comments nobody touched still comes back byte for byte; 16-F writes one back
+//! by *splicing* into the very part that was read, exactly as 16-C does with a
+//! chart.
+//!
+//! **The unit of `p:cm/p:pos`, settled with a file** (16-E carried this open;
+//! spec §11.3). The schema says `a:CT_Point2D`, whose `x`/`y` are
+//! `ST_Coordinate` and therefore EMU — and every real deck contradicts it: the
+//! example in ECMA-376 itself is `<p:pos x="1426" y="660"/>`, which as EMU is
+//! 1/640 of an inch from the corner of a ten-inch slide. The unit is
+//! PowerPoint's **master unit**, 1/576 in, which is also an eighth of a point,
+//! and the evidence is a file rather than a reading of prose: an `.odp`
+//! carrying one `office:annotation` at `svg:x="5cm"` converted by LibreOffice
+//! to `.pptx` comes out as `<p:pos x="1134" y="680"/>`, and 5 cm is exactly
+//! 1134 × 1/576 in. LibreOffice's exporter says the same in source
+//! (`sd/source/filter/eppt/pptx-epptooxml.cxx`, `convertMm100ToMasterUnit`),
+//! and its importer is reverse-engineered from what PowerPoint writes.
+//! So [`Length::from_eighth_points`] on the way in and
+//! [`Length::eighth_points`] on the way out, and a comment DocMark places at
+//! `2.5cm` is 2.5 cm from the corner of the slide.
 //!
 //! **What is not read, and is said out loud.** Since 2021 PowerPoint also
 //! writes threaded, text-anchored comments into `ppt/comments/modernComment_*.xml`
@@ -113,6 +130,75 @@ impl Authors {
             None => "no comment-authors part",
         }
     }
+
+    /// The part the table was read from, when the deck declares one.
+    pub(super) fn part_name(&self) -> Option<&str> {
+        self.part.as_deref()
+    }
+
+    /// The id the deck already gives this author, matched on what DocMark
+    /// carries: the display name, and the initials when both sides state them.
+    ///
+    /// This is what keeps a round trip that changed nothing from renumbering
+    /// the table (16-F): the writer never mints an id for a name the package
+    /// already knows, so every `authorId` in every preserved `p:cm` still
+    /// resolves to the same person.
+    pub(super) fn id_of(&self, name: &str, initials: Option<&str>) -> Option<i64> {
+        self.by_id
+            .iter()
+            .find(|(_, (known, known_initials))| {
+                known == name
+                    && match (initials, known_initials.as_deref()) {
+                        (Some(wanted), Some(known)) => wanted == known,
+                        // One side is silent: the name decides. A DocMark
+                        // document written at a level that keeps `author=` and
+                        // drops nothing else is still the same person.
+                        _ => true,
+                    }
+            })
+            .map(|(id, _)| *id)
+    }
+
+    /// The first id no author in the table uses.
+    pub(super) fn next_id(&self) -> i64 {
+        self.by_id.keys().next_back().map(|id| id + 1).unwrap_or(1)
+    }
+}
+
+/// The classic comment part of one slide, when its relationships name one.
+///
+/// Told apart from PowerPoint's modern comment part by **content type**, for
+/// the reason [`read`] gives: both hang off the slide with a relationship whose
+/// last segment is `comments`.
+pub(super) fn part(types: &ContentTypes, slide_rels: &Relationships) -> Option<String> {
+    slide_rels
+        .of_kind("comments")
+        .find(|rel| {
+            !rel.external
+                && match types.of(&rel.target) {
+                    Some(CT_MODERN_COMMENTS) => false,
+                    Some(other) => other == CT_COMMENTS,
+                    // No declaration at all: the relationship already said what
+                    // it is, and [`read`] reads it, so the writer writes it.
+                    None => true,
+                }
+        })
+        .map(|rel| rel.target.clone())
+}
+
+/// What one comment part says, as the model holds it.
+///
+/// The writer's whole comparison runs through this: «has anything changed?» is
+/// asked once, in the model's own units, by the model's own reader, so there is
+/// no second notion of what a comment part says for the two to drift apart
+/// (the rule 16-C states for charts).
+pub(super) fn read_one_part(
+    package: &Package,
+    part: &str,
+    authors: &Authors,
+    report: &mut ConversionReport,
+) -> Result<Vec<Comment>, ReadError> {
+    read_part(package, part, authors, report)
 }
 
 /// The comment parts of one slide, when its relationships name any.
@@ -198,8 +284,8 @@ fn read_part(
         // comment nobody can point at on the slide. Kept, and said.
         let anchor = match cm.child("pos") {
             Some(pos) => CommentAnchor::Point(Point::new(
-                Length::from_emu(pos.attr_i64("x").unwrap_or_default()),
-                Length::from_emu(pos.attr_i64("y").unwrap_or_default()),
+                Length::from_eighth_points(pos.attr_i64("x").unwrap_or_default()),
+                Length::from_eighth_points(pos.attr_i64("y").unwrap_or_default()),
             )),
             None => {
                 report.warn(Warning::Degraded {

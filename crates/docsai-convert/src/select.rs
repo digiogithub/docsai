@@ -218,6 +218,22 @@ impl Selection {
     }
 }
 
+/// The `ref=` token a `::: {.comment}` container declares, when it has one.
+///
+/// Read off the rendered attribute list rather than the IR: the token is handed
+/// out by the writer in writing order (spec §11.3 rule 3) and exists nowhere
+/// else.
+fn comment_ref(markdown: &str) -> Option<&str> {
+    let line = markdown.lines().next()?;
+    let attrs = line.strip_prefix(":::")?.trim_start().strip_prefix('{')?;
+    let at = attrs.find("ref=")? + "ref=".len();
+    let rest = &attrs[at..];
+    let end = rest
+        .find(|c: char| c == '}' || c.is_whitespace())
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
 /// Selects from an in-memory document.
 ///
 /// `options.ids` decides what can be selected at all, exactly as it does for
@@ -279,6 +295,34 @@ pub fn select(
         body.push_str(fragment.markdown.trim_end_matches('\n'));
         etags.push((fragment.id.clone(), fragment.etag.clone()));
     }
+    // And a comment anchor needs its container, for exactly the same reason and
+    // with exactly the same consequence if it is missing: a span the document
+    // says is under review, with nothing saying what the review said (spec
+    // §11.3). The binding is `ref=`, not the node id — the anchor carries no id
+    // — so the token is read off the container and looked for in the body as it
+    // stood before this loop began appending to it.
+    let anchors = body.clone();
+    let mut has_comment = anchors.contains("{.comment ") || anchors.contains(" .comment ");
+    for (index, fragment) in fragments.iter().enumerate() {
+        if fragment.kind != NodeKind::Comment {
+            continue;
+        }
+        let Some(token) = comment_ref(&fragment.markdown) else {
+            // A reply, or a slide comment: neither carries a `ref=`, and both
+            // are already inside a fragment the body has or has not taken.
+            continue;
+        };
+        if !anchors.contains(&format!(".comment ref={token}}}")) {
+            continue;
+        }
+        has_comment = true;
+        body.push_str("\n\n");
+        body.push_str(fragment.markdown.trim_end_matches('\n'));
+        let first = index.saturating_sub(fragment.descendants);
+        for inner in &fragments[first..=index] {
+            etags.push((inner.id.clone(), inner.etag.clone()));
+        }
+    }
     if !body.is_empty() {
         body.push('\n');
     }
@@ -287,7 +331,7 @@ pub fn select(
     let front_matter = if body.is_empty() {
         String::new()
     } else {
-        selection_front_matter(&options, next_id(doc, &fragments), &etags)
+        selection_front_matter(&options, next_id(doc, &fragments), &etags, has_comment)
     };
     let docmark = format!("{front_matter}{body}");
 

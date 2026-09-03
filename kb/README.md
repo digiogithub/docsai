@@ -96,6 +96,7 @@ Practical difference between the two folders:
 | [80 — Phase 16 D](80-phase-16-opaque.md) | SmartArt, OLE, transitions and animations proved through the whole loop; the `p:oleObj` fixture; a generated deck that no longer drops a transition in silence |
 | [81 — Phase 16 G](81-phase-16-thumbnails.md) | Slide thumbnails through LibreOffice, the word «thumbnail» taken back from the image rung, and a renderer probe that runs the tool instead of trusting the file |
 | [82 — Phase 16 E](82-phase-16-comments.md) | Comments read from both formats into one IR node, DocMark 1.3 and the anchor-plus-container syntax, and the `w:commentReference` that was becoming a raw fragment |
+| [83 — Phase 16 F](83-phase-16-comment-write.md) | Comments written back: the deck's comment parts spliced and still byte-identical, the docx thread through `w14:paraId`, the author table matched by name, and `p:cm/p:pos` proved to be master units and not EMU |
 
 ## Status in one line
 

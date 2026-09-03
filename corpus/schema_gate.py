@@ -163,6 +163,29 @@ def bump_chart_values(markdown):
     return "".join(out), touched
 
 
+def edit_comments(markdown):
+    """Retype the first line of every `::: {.comment}` container (Phase 16-F).
+
+    Same argument as `bump_chart_values` one increment earlier: the comment
+    parts are preserved, so nothing else this gate does makes the writer touch
+    `ppt/comments/*` or `ppt/commentAuthors.xml`, and a part the gate never
+    sees is a part whose schema nobody checks. Retyping the text is the
+    smallest edit that forces the splice."""
+    out, touched, inside = [], 0, False
+    for line in markdown.splitlines(keepends=True):
+        if line.startswith("::: {") and ".comment" in line:
+            inside = True
+            out.append(line)
+            continue
+        if inside:
+            inside = False
+            if line.strip() and not line.startswith(":::"):
+                line = line.rstrip("\n") + " (revisado)\n"
+                touched += 1
+        out.append(line)
+    return "".join(out), touched
+
+
 def without_skeleton(markdown):
     return "".join(
         line
@@ -252,6 +275,7 @@ def package_for(binary, deck, workdir, variant):
     if not touched:
         return None, "no slide heading to retype"
     markdown, _ = bump_chart_values(markdown)
+    markdown, _ = edit_comments(markdown)
     if variant == "generated":
         markdown = without_skeleton(markdown)
     edited = workdir / "edited.dmk.md"

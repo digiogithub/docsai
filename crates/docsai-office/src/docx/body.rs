@@ -764,7 +764,17 @@ fn read_run(r: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut Vec<Piece>
                     }),
                 }
             }
-            "footnoteRef" | "endnoteRef" | "separator" | "continuationSeparator" => {}
+            // `w:annotationRef` is the comment's own mark inside
+            // `word/comments.xml` — the same thing `w:footnoteRef` is inside a
+            // footnote — and it says nothing the model does not already know
+            // from *being* a comment. Until 16-F it fell through to the raw
+            // branch below, so every comment read out of a document Word wrote
+            // carried a `::: {.raw}` block holding `<w:annotationRef/>`.
+            "footnoteRef"
+            | "endnoteRef"
+            | "annotationRef"
+            | "separator"
+            | "continuationSeparator" => {}
             // Where a comment reference actually lives. Word writes it inside a
             // run of its own, never as a child of `w:p`, so this arm — not the
             // one in `collect_pieces` — is the one that fires on a real

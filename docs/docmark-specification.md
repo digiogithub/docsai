@@ -949,8 +949,8 @@ The `.odp` reader (Phase 18) consumes this profile but does not change it.
 Fourth addition, and the first that belongs to **no single document class**. A `.docx` anchors a
 comment over a *range* of text; a `.pptx` pins one to a *point* on a slide. Plan v2 Phase 16
 task 3 says the two share one syntax, so it is designed once, here, and both readers produce the
-same node. **Normative** as of plan v2 Phase 16-E, which reads comments; what 16-E does not do is
-named under *Not yet implemented* at the end of this section.
+same node. **Normative** as of plan v2 Phase 16-E, which reads comments, and written back by
+16-F; what neither does is named under *Not yet implemented* at the end of this section.
 
 A comment is not what a document says. It is what somebody said *about* it, and that difference
 decides almost every rule below.
@@ -1038,7 +1038,7 @@ This chart is the one they will ask about.
 | `initials=` | The author's initials, when the source keeps them separately | `full`, `agent` |
 | `date=` | When it was written, as an ISO-8601 instant, copied from the source rather than reformatted | `full`, `agent` |
 | `resolved=true` | The thread is marked done by a reviewer. Present only when true, and only on the comment that opens the thread | `full`, `agent` |
-| `pos=` | Where on the surface it is pinned, as the `"x,y"` pair of §11.2 rule 7 in readable units. Only a slide comment has one | `full`, `agent` |
+| `pos=` | Where on the surface it is pinned, as the `"x,y"` pair of §11.2 rule 7 in readable units. Only a slide comment has one. `p:cm/p:pos` is written on PowerPoint's *master unit* grid — 1/576 in, an eighth of a point — and not in the EMU its `a:CT_Point2D` type implies, so `pos="2.5cm"` is 2.5 cm from the corner of the slide | `full`, `agent` |
 
 #### Where the container is written
 
@@ -1089,12 +1089,31 @@ under a 1.3 reader. A 1.3 document read by an older parser keeps its headings, l
 images: the anchor span degrades to its own text under any parser that implements §3.2, and the
 container degrades to its blocks. Principle §0.1 holds.
 
+#### Writing a comment back
+
+Both writers landed in plan v2 Phase 16-F, and each keeps the fidelity contract its format already
+had.
+
+- A **deck** keeps byte identity. The comment parts stay outside
+  `SkeletonRef::rebuilt_parts` (architecture §9.4) and an edited comment is *spliced* into the
+  part that was read, so a deck whose comments nobody touched produces no edit and no warning, and
+  one whose comment text changed differs in that one part and in that one string.
+- A **`.docx`** is regenerated whole, as it always was, so a comment's `w:id` and its `w14:paraId`
+  are handed out afresh on every write. Neither is an identity this format carries: `w:id` is
+  package-local exactly as `authorId` is (rule 4), and `w14:paraId` is what `commentsExtended`
+  joins on and nothing else. What survives is what §11.3 states — the author, the initials, the
+  date, the thread, the resolved mark and the range.
+- **The author table is re-established by name**, never carried (rule 4). A writer looks the
+  `author=` up in the table the package already has and mints an id only for a name no
+  `p:cmAuthor` states, appending it after the last. That is what keeps a round trip that changed
+  nothing from renumbering anything.
+- **What a format cannot hold is named.** A classic `p:cmLst` has no reply, no done flag and no
+  block structure inside `p:text`, so a reply, a `resolved=true` or a non-paragraph block on a
+  *slide* comment is a warning naming the comment, never a silent drop. In a `.docx` all four
+  survive.
+
 #### Not yet implemented
 
-- **Writing comments back** is plan v2 Phase 16-F. Until it lands, a comment read out of a `.docx`
-  reaches DocMark and does not reach a `.docx` written from it, and the loss is warned like every
-  other. A deck is unaffected: its comment parts are preserved (architecture §9.4) and come back
-  byte for byte whether or not the writer understands them.
 - **PowerPoint's modern comments are not read.** Since 2021 PowerPoint also writes threaded,
   text-anchored comments into `ppt/comments/modernComment_*.xml` under a Microsoft extension
   schema that is not part of ECMA-376 and is not the `p:cmLst` this section maps. A deck carrying

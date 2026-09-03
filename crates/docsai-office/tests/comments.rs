@@ -6,14 +6,16 @@
 //! [`Comment`] with a different [`CommentAnchor`]. A test file per format would
 //! let the two drift into two models without anything failing.
 //!
-//! The docx side builds its packages here rather than in `corpus/`: the corpus
-//! round-trip gate asserts `docx → DocMark → docx → DocMark` identity, and the
-//! docx **writer** does not write comments back until Phase 16-F. A corpus
-//! fixture would therefore fail a gate for a reason that is not a defect, so
-//! the fixture lands with the writer. The deck fixture
-//! (`corpus/pptx/comments-slide.pptx`) has no such problem: its comment parts
-//! are preserved, so the deck comes back byte for byte whether or not the
-//! writer understands them.
+//! The docx side builds most of its packages here rather than in `corpus/`,
+//! because a case is easier to isolate in fifteen lines of XML than in a whole
+//! document. The corpus does now carry one — `corpus/docx/comments-review.docx`,
+//! which 16-E could not add because the docx writer did not write comments back
+//! and `goldens.rs::docx_roundtrip_is_idempotent` runs over every file in that
+//! directory. It does now, so the fixture landed with 16-F. The deck fixture is
+//! `corpus/pptx/comments-slide.pptx`.
+//!
+//! **Phase 16-F adds the writing half here**, under the same rule: one file, so
+//! that the two formats cannot drift into two models.
 
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
@@ -449,8 +451,17 @@ fn a_slide_comment_is_anchored_at_a_point_and_names_its_author() {
             first[0].anchor
         )
     };
-    assert_eq!(pos.x.emu(), 1_200_000);
-    assert_eq!(pos.y.emu(), 900_000);
+    // `p:pos` is written on PowerPoint's *master unit* grid — 1/576 in, which
+    // is an eighth of a point — and not in the EMU `ST_Coordinate` claims; the
+    // evidence is in `pptx::comments`' module documentation, and the fixture
+    // now states the numbers a real deck states. `x="1134"` is 5 cm.
+    assert_eq!(pos.x, docsai_model::units::Length::from_eighth_points(1134));
+    assert_eq!(pos.y, docsai_model::units::Length::from_eighth_points(678));
+    assert!(
+        (pos.x.cm() - 5.0).abs() < 0.001,
+        "1134 master units is 5 cm, not {} cm",
+        pos.x.cm()
+    );
     // `p:cmLst` has no reply mechanism, so a classic deck has no thread.
     assert!(first.iter().all(|c| c.replies.is_empty()));
     assert!(first.iter().all(|c| !c.resolved));
@@ -536,4 +547,440 @@ fn a_slide_comment_writes_its_position_and_parses_back() {
         deck.slides[0].comments[0].anchor,
         CommentAnchor::Point(_)
     ));
+}
+
+// --------------------------------------------------------------------------
+// The writers (Phase 16-F)
+// --------------------------------------------------------------------------
+
+/// Every member of a `.pptx`, by name, with its bytes.
+fn members(package: &[u8]) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(package.to_vec())).expect("a zip");
+    let mut out = std::collections::BTreeMap::new();
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).expect("a member");
+        let name = entry.name().to_string();
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut bytes).expect("readable");
+        out.insert(name, bytes);
+    }
+    out
+}
+
+fn write_deck(document: &Document, assets: &MemoryAssetStore) -> (Vec<u8>, Vec<Warning>) {
+    let mut out = Cursor::new(Vec::new());
+    let report = docsai_office::write_pptx(document, assets, &mut out).expect("the deck writes");
+    (out.into_inner(), report.warnings)
+}
+
+fn deck_mut(document: &mut Document) -> &mut docsai_model::Presentation {
+    match document {
+        Document::Presentation(deck) => deck,
+        _ => panic!("not a deck"),
+    }
+}
+
+#[test]
+fn a_comment_nobody_touched_produces_no_edit_and_no_warning() {
+    // The other half of `a_deck_whose_comments_nobody_touched_…`: the bytes are
+    // already asserted there, and what this asserts is that the silence is
+    // real. A writer that rewrote the part and happened to produce the same
+    // bytes would still have raised «it was copied from the preserved package».
+    let (document, assets, _) = read_deck("comments-slide.pptx");
+    let (_, warnings) = write_deck(&document, &assets);
+    let about_comments: Vec<String> = warnings
+        .iter()
+        .map(|w| w.message())
+        .filter(|m| m.contains("comment") || m.contains("author"))
+        .collect();
+    assert!(
+        about_comments.is_empty(),
+        "a deck nobody edited said something about its comments: {about_comments:?}"
+    );
+}
+
+#[test]
+fn a_comment_the_model_changed_reaches_exactly_one_member_in_exactly_one_place() {
+    let original = std::fs::read(corpus("comments-slide.pptx")).expect("the fixture");
+    let (mut document, assets, _) = read_deck("comments-slide.pptx");
+    deck_mut(&mut document).slides[0].comments[0].blocks = vec![Block::Paragraph(
+        docsai_model::text::Paragraph::text("La cifra es la definitiva del cierre auditado."),
+    )];
+    let (written, _) = write_deck(&document, &assets);
+
+    let before = members(&original);
+    let after = members(&written);
+    assert_eq!(
+        before.keys().collect::<Vec<_>>(),
+        after.keys().collect::<Vec<_>>(),
+        "editing a comment added or removed a package member"
+    );
+    let differing: Vec<&String> = before
+        .keys()
+        .filter(|name| before[*name] != after[*name])
+        .collect();
+    assert_eq!(
+        differing,
+        vec!["ppt/comments/comment1.xml"],
+        "exactly one member differs"
+    );
+
+    // And inside it, exactly one place: the `p:text` of the first comment. The
+    // second comment, the positions, the ids and the XML declaration stand.
+    let was = String::from_utf8(before["ppt/comments/comment1.xml"].clone()).unwrap();
+    let now = String::from_utf8(after["ppt/comments/comment1.xml"].clone()).unwrap();
+    assert_eq!(
+        was.replace(
+            "La cifra de ingresos viene del cierre provisional.",
+            "La cifra es la definitiva del cierre auditado."
+        ),
+        now,
+        "the edit was not confined to the one string that changed"
+    );
+
+    // It reads back as what was written.
+    let mut store = MemoryAssetStore::new();
+    let (reread, _) = docsai_office::read_pptx(Cursor::new(written), &mut store).expect("reads");
+    let Document::Presentation(deck) = &reread else {
+        panic!("not a deck")
+    };
+    let Some(Block::Paragraph(said)) = deck.slides[0].comments[0].blocks.first() else {
+        panic!("a comment says something")
+    };
+    assert_eq!(
+        said.plain_text(),
+        "La cifra es la definitiva del cierre auditado."
+    );
+}
+
+#[test]
+fn a_comment_added_to_a_slide_that_had_none_brings_the_parts_into_existence() {
+    let (mut document, assets, _) = read_deck("basic-slides.pptx");
+    let before = members(&std::fs::read(corpus("basic-slides.pptx")).expect("the fixture"));
+    assert!(
+        !before.keys().any(|name| name.starts_with("ppt/comments/")),
+        "the fixture must start with no comment part"
+    );
+    let mut comment = Comment::new(vec![Block::Paragraph(docsai_model::text::Paragraph::text(
+        "Revisar la cifra de la primera linea.",
+    ))]);
+    comment.author = Some("Ada Lovelace".into());
+    comment.initials = Some("AL".into());
+    comment.date = Some("2026-05-04T09:12:00Z".into());
+    comment.anchor = CommentAnchor::Point(docsai_model::units::Point::new(
+        docsai_model::units::Length::from_eighth_points(1134),
+        docsai_model::units::Length::from_eighth_points(678),
+    ));
+    deck_mut(&mut document).slides[0].comments.push(comment);
+    let (written, _) = write_deck(&document, &assets);
+    let after = members(&written);
+
+    assert!(
+        after.contains_key("ppt/comments/comment1.xml"),
+        "the comment part was not written: {:?}",
+        after.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        after.contains_key("ppt/commentAuthors.xml"),
+        "the author table was not written"
+    );
+    let types = String::from_utf8(after["[Content_Types].xml"].clone()).unwrap();
+    assert!(
+        types.contains("/ppt/comments/comment1.xml") && types.contains("/ppt/commentAuthors.xml"),
+        "a part with no content type is the one thing OPC refuses:\n{types}"
+    );
+    let slide_rels = String::from_utf8(after["ppt/slides/_rels/slide1.xml.rels"].clone()).unwrap();
+    assert!(
+        slide_rels.contains("../comments/comment1.xml"),
+        "the slide does not point at its comment part:\n{slide_rels}"
+    );
+
+    // And the deck reads back as the deck that was written.
+    let mut store = MemoryAssetStore::new();
+    let (reread, _) = docsai_office::read_pptx(Cursor::new(written), &mut store).expect("reads");
+    let Document::Presentation(deck) = &reread else {
+        panic!("not a deck")
+    };
+    assert_eq!(deck.slides[0].comments.len(), 1);
+    assert_eq!(
+        deck.slides[0].comments[0].author.as_deref(),
+        Some("Ada Lovelace")
+    );
+    assert!(matches!(
+        deck.slides[0].comments[0].anchor,
+        CommentAnchor::Point(_)
+    ));
+}
+
+#[test]
+fn a_new_author_is_appended_and_the_ids_the_deck_already_gave_do_not_move() {
+    let (mut document, assets, _) = read_deck("comments-slide.pptx");
+    let mut comment = Comment::new(vec![Block::Paragraph(docsai_model::text::Paragraph::text(
+        "Anado una linea al hilo.",
+    ))]);
+    comment.author = Some("Alan Turing".into());
+    comment.anchor = CommentAnchor::Point(docsai_model::units::Point::new(
+        docsai_model::units::Length::from_eighth_points(600),
+        docsai_model::units::Length::from_eighth_points(600),
+    ));
+    deck_mut(&mut document).slides[0].comments.push(comment);
+    let (written, _) = write_deck(&document, &assets);
+    let after = members(&written);
+    let authors = String::from_utf8(after["ppt/commentAuthors.xml"].clone()).unwrap();
+
+    // The two the deck already had keep their ids and their bytes.
+    assert!(
+        authors.contains(r#"id="1" name="Ada Lovelace" initials="AL""#),
+        "{authors}"
+    );
+    assert!(
+        authors.contains(r#"id="2" name="Grace Hopper" initials="GH""#),
+        "{authors}"
+    );
+    // The new one is appended after the last, with initials derived from the
+    // name because `p:cmAuthor@initials` is required and DocMark stated none.
+    assert!(
+        authors.contains(r#"id="3" name="Alan Turing" initials="AT""#),
+        "{authors}"
+    );
+    let comment1 = String::from_utf8(after["ppt/comments/comment1.xml"].clone()).unwrap();
+    assert!(
+        comment1.contains(r#"authorId="1""#) && comment1.contains(r#"authorId="2""#),
+        "an existing comment was renumbered:\n{comment1}"
+    );
+    assert!(comment1.contains(r#"authorId="3""#), "{comment1}");
+}
+
+#[test]
+fn a_slide_whose_last_comment_was_deleted_loses_the_part_the_relationship_and_the_override() {
+    let (mut document, assets, _) = read_deck("comments-slide.pptx");
+    deck_mut(&mut document).slides[0].comments.clear();
+    let (written, _) = write_deck(&document, &assets);
+    let after = members(&written);
+
+    assert!(
+        !after.contains_key("ppt/comments/comment1.xml"),
+        "the part stayed behind"
+    );
+    assert!(
+        after.contains_key("ppt/comments/comment2.xml"),
+        "the other slide's comments must not be touched"
+    );
+    let types = String::from_utf8(after["[Content_Types].xml"].clone()).unwrap();
+    assert!(
+        !types.contains("/ppt/comments/comment1.xml"),
+        "an override naming a part the package does not carry:\n{types}"
+    );
+    let rels = String::from_utf8(after["ppt/slides/_rels/slide1.xml.rels"].clone()).unwrap();
+    assert!(
+        !rels.contains("comment1.xml"),
+        "a relationship pointing at nothing:\n{rels}"
+    );
+    let mut store = MemoryAssetStore::new();
+    let (reread, report) =
+        docsai_office::read_pptx(Cursor::new(written), &mut store).expect("reads");
+    let Document::Presentation(deck) = &reread else {
+        panic!("not a deck")
+    };
+    assert!(deck.slides[0].comments.is_empty());
+    assert_eq!(deck.slides[1].comments.len(), 1);
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.message().contains("comment1.xml")),
+        "{:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn what_a_classic_deck_cannot_hold_is_named_and_never_silently_dropped() {
+    let (mut document, assets, _) = read_deck("comments-slide.pptx");
+    {
+        let comment = &mut deck_mut(&mut document).slides[0].comments[0];
+        comment.resolved = true;
+        comment.replies = vec![Comment::new(vec![Block::Paragraph(
+            docsai_model::text::Paragraph::text("De acuerdo."),
+        )])];
+        comment.date = Some("ayer por la tarde".into());
+        comment
+            .blocks
+            .push(Block::Table(docsai_model::text::Table::default()));
+    }
+    let (written, warnings) = write_deck(&document, &assets);
+    let said: Vec<String> = warnings.iter().map(|w| w.message()).collect();
+    let joined = said.join("\n");
+    for expected in [
+        "repl",      // the reply `p:cmLst` cannot hold
+        "done flag", // the resolved mark
+        "xsd:dateTime",
+        "not a paragraph",
+    ] {
+        assert!(
+            joined.contains(expected),
+            "no warning named `{expected}`:\n{joined}"
+        );
+    }
+    // And the part is still a valid one: no `dt` at all rather than a `dt`
+    // the schema rejects.
+    let after = members(&written);
+    let part = String::from_utf8(after["ppt/comments/comment1.xml"].clone()).unwrap();
+    assert!(!part.contains("ayer"), "{part}");
+}
+
+#[test]
+fn a_docx_comment_thread_survives_the_writer() {
+    // The docx writer regenerates the whole package (it holds no skeleton), so
+    // its contract is the model's, not the bytes': what the reader read must
+    // come back out of what the writer wrote.
+    let (document, assets, _) = read_docx(commented_document());
+    let mut out = Cursor::new(Vec::new());
+    let report = docsai_office::write_docx(&document, &assets, &mut out).expect("writes");
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.message().contains("does not write comments back")),
+        "the 16-E warning survived: {:?}",
+        report.warnings
+    );
+    let written = out.into_inner();
+    let (reread, _, _) = read_docx(written.clone());
+    let found = comments_of(&reread);
+    let before = comments_of(&document);
+    assert_eq!(
+        found.len(),
+        before.len(),
+        "a comment was lost on the way out"
+    );
+    for (was, now) in before.iter().zip(&found) {
+        assert_eq!(was.author, now.author);
+        assert_eq!(was.initials, now.initials);
+        assert_eq!(was.date, now.date);
+        assert_eq!(was.resolved, now.resolved);
+        assert_eq!(was.replies.len(), now.replies.len());
+        assert_eq!(plain_of(was.covered()), plain_of(now.covered()));
+    }
+
+    // The two parts, their content types and the relationship that binds the
+    // Microsoft extension.
+    let mut zip = zip::ZipArchive::new(Cursor::new(written)).expect("a zip");
+    let names: Vec<String> = (0..zip.len())
+        .map(|i| zip.by_index(i).unwrap().name().to_string())
+        .collect();
+    assert!(names.iter().any(|n| n == "word/comments.xml"), "{names:?}");
+    assert!(
+        names.iter().any(|n| n == "word/commentsExtended.xml"),
+        "{names:?}"
+    );
+    let read_part = |zip: &mut zip::ZipArchive<Cursor<Vec<u8>>>, name: &str| {
+        let mut entry = zip.by_name(name).expect(name);
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
+        text
+    };
+    let types = read_part(&mut zip, "[Content_Types].xml");
+    assert!(types.contains("/word/comments.xml"), "{types}");
+    assert!(types.contains("/word/commentsExtended.xml"), "{types}");
+    let rels = read_part(&mut zip, "word/_rels/document.xml.rels");
+    assert!(
+        rels.contains("http://schemas.microsoft.com/office/2011/relationships/commentsExtended"),
+        "commentsExtended is not an ECMA-376 relationship type:\n{rels}"
+    );
+    let extended = read_part(&mut zip, "word/commentsExtended.xml");
+    assert!(extended.contains("w15:paraIdParent"), "{extended}");
+}
+
+#[test]
+fn a_docx_comment_marker_inside_a_field_is_dropped_on_read_and_cannot_be_written() {
+    // 16-E's carried defect 5, settled from the write side. A comment marker
+    // between `fldChar begin` and `end` is dropped on read with a named
+    // warning, and the writer is consistent with that by construction: what
+    // the model then holds is a `Inline::Field`, whose `cached` is a string,
+    // so there is nothing for the writer to claim it wrote.
+    let body = format!(
+        r#"<w:p>{}<w:r><w:fldChar w:fldCharType="begin"/></w:r>\
+<w:r><w:instrText> PAGE </w:instrText></w:r>\
+<w:commentRangeStart w:id="1"/>\
+<w:r><w:fldChar w:fldCharType="separate"/></w:r>{}\
+<w:commentRangeEnd w:id="1"/>\
+<w:r><w:commentReference w:id="1"/></w:r>\
+<w:r><w:fldChar w:fldCharType="end"/></w:r>{}</w:p>"#,
+        run("Pagina "),
+        run("7"),
+        run(" de 12."),
+    );
+    let comments = comment_part(1, "Ada", "A", "2026-05-04T09:12:00Z", "1", "revisar");
+    let (document, assets, report) = read_docx(docx(&body, &comments, None));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.message().contains("anchor falls inside a field")),
+        "the loss must be named: {:?}",
+        report.warnings
+    );
+    assert!(
+        comments_of(&document).is_empty(),
+        "the comment cannot be in the model if its anchor was refused"
+    );
+    let mut out = Cursor::new(Vec::new());
+    let written = docsai_office::write_docx(&document, &assets, &mut out).expect("writes");
+    assert!(
+        !written
+            .warnings
+            .iter()
+            .any(|w| w.message().contains("comment")),
+        "the writer must not claim anything about a comment it never received: {:?}",
+        written.warnings
+    );
+    let mut zip = zip::ZipArchive::new(Cursor::new(out.into_inner())).expect("a zip");
+    assert!(
+        (0..zip.len()).all(|i| zip.by_index(i).unwrap().name() != "word/comments.xml"),
+        "a comments part with no comment in it"
+    );
+}
+
+#[test]
+fn a_generated_deck_carries_its_comments_too() {
+    // A deck typed as DocMark has no preserved package (15-G), so its slide is
+    // *written* rather than spliced — and its comment part, its author table
+    // and the relationships that bind them do not exist anywhere to be edited.
+    // This is the «the source had no part for it» case at its widest.
+    let markdown = "---\n\
+docmark: \"1.3\"\n\
+source-format: pptx\n\
+---\n\n\
+## Cierre del trimestre {#n1 .slide}\n\n\
+- Los ingresos crecen un doce por ciento.\n\n\
+::: {#n2 .comment author=\"Ada Lovelace\" initials=AL date=\"2026-05-04T09:12:00Z\" pos=\"5cm,3cm\"}\n\
+Revisar la cifra con tesoreria.\n\
+:::\n";
+    let mut store = MemoryAssetStore::new();
+    let (document, _) = docsai_docmark::parse(markdown, &mut store).expect("it parses");
+    let (written, _) = write_deck(&document, &store);
+    let after = members(&written);
+    assert!(
+        after.contains_key("ppt/comments/comment1.xml")
+            && after.contains_key("ppt/commentAuthors.xml"),
+        "{:?}",
+        after.keys().collect::<Vec<_>>()
+    );
+    let main_rels = String::from_utf8(after["ppt/_rels/presentation.xml.rels"].clone()).unwrap();
+    assert!(
+        main_rels.contains("commentAuthors.xml"),
+        "the author table hangs off the deck's own part:\n{main_rels}"
+    );
+
+    let mut back = MemoryAssetStore::new();
+    let (reread, _) = docsai_office::read_pptx(Cursor::new(written), &mut back).expect("reads");
+    let Document::Presentation(deck) = &reread else {
+        panic!("not a deck")
+    };
+    assert_eq!(deck.slides[0].comments.len(), 1);
+    assert_eq!(
+        deck.slides[0].comments[0].author.as_deref(),
+        Some("Ada Lovelace")
+    );
 }

@@ -95,6 +95,7 @@ use crate::write_error::WriteError;
 use crate::xml::Element;
 
 use super::write_chart;
+use super::write_comments;
 use super::write_gen;
 use super::write_text::{self, Links};
 
@@ -588,7 +589,7 @@ impl ChartParts {
 }
 
 /// A part name of the shape `dir/stemN.xml` the package does not already use.
-fn free_part(taken: &BTreeSet<String>, dir: &str, stem: &str) -> String {
+pub(super) fn free_part(taken: &BTreeSet<String>, dir: &str, stem: &str) -> String {
     let mut n = 1;
     loop {
         let candidate = format!("{dir}/{stem}{n}.xml");
@@ -753,6 +754,31 @@ fn rebuild_slides(
         .map(|fragment| (fragment.id.as_str(), fragment))
         .collect();
 
+    // The comment parts, before the slides: they are parts of their own, and
+    // one of them — `ppt/commentAuthors.xml` — is deck-wide, so it is written
+    // once from every slide's answer rather than once per slide. A generated
+    // slide goes through here too: its comments need a part the package never
+    // had, which is the same work as a preserved slide's first comment.
+    let (comments, comment_warnings) = write_comments::write(
+        &package,
+        &parts.main,
+        &map.iter()
+            .zip(&deck.slides)
+            .map(|(&entry, slide)| (parts.entries[entry].part.clone(), slide))
+            .collect::<Vec<_>>(),
+    );
+    for (index, why) in comment_warnings {
+        report.warn(Warning::Degraded {
+            what: format!("slide {}", index + 1),
+            why: format!("{why}: the rest of its comments still reach the file, and this does not"),
+        });
+    }
+    for (name, bytes) in comments.parts {
+        rebuild.put(&package, name, bytes);
+    }
+    rebuild.removals.extend(comments.removed);
+    let comment_overrides = comments.overrides;
+
     for (index, (&entry, slide)) in map.iter().zip(&deck.slides).enumerate() {
         let number = index + 1;
         let part = &parts.entries[entry].part;
@@ -854,7 +880,7 @@ fn rebuild_slides(
     if let Some((name, xml)) = content_types(
         &package,
         &media.extensions,
-        &BTreeMap::new(),
+        &comment_overrides,
         &rebuild.removals,
     ) {
         rebuild.put(&package, name, xml.into_bytes());
@@ -2549,7 +2575,7 @@ fn is_true(value: Option<&str>) -> bool {
 /// is not touched at all and the slide keeps the ids it was read with. Only a
 /// genuinely new target mints an id, and even then the part is **spliced**: the
 /// relationships the deck had keep their bytes, their order and their ids.
-struct PartRels {
+pub(super) struct PartRels {
     /// The `_rels` part's own name.
     part: String,
     /// The directory a relative target is written against.
@@ -2563,7 +2589,7 @@ struct PartRels {
 }
 
 impl PartRels {
-    fn new(package: &Package, owner: &str) -> Self {
+    pub(super) fn new(package: &Package, owner: &str) -> Self {
         let existing = package.relationships(owner);
         let part = rels_part_name(owner).unwrap_or_default();
         let source = package.text(&part).ok().map(str::to_string);
@@ -2601,7 +2627,7 @@ impl PartRels {
     }
 
     /// The id for a target, reusing the relationship the part already has.
-    fn relate(&mut self, kind: &'static str, target: &str, external: bool) -> String {
+    pub(super) fn relate(&mut self, kind: &'static str, target: &str, external: bool) -> String {
         if let Some(id) = self.id_of_target(target) {
             return id;
         }
@@ -2624,7 +2650,35 @@ impl PartRels {
 
     /// The relationship part with the new relationships in it, or `None` when
     /// nothing was added — an unedited slide must not move its `_rels` at all.
-    fn rewritten(&self) -> Option<(String, String)> {
+    /// The relationship part with the relationship naming `target` taken out,
+    /// or `None` when it names none.
+    ///
+    /// A part the written package does not carry must not be named by a
+    /// relationship either: a dangling `Relationship` is the same class of OPC
+    /// inconsistency as a dangling `Override`. Only that element is removed —
+    /// every other byte of the `_rels` part, including the ids of the
+    /// relationships that stay, is the byte that was read.
+    pub(super) fn without(&self, target: &str) -> Option<(String, String)> {
+        let source = self.source.as_ref()?;
+        let root = Element::parse(&self.part, source.as_bytes()).ok()?;
+        let relative = relative_target(&self.base, target);
+        let edits: Vec<(Range<usize>, String)> = root
+            .children_named("Relationship")
+            .filter(|rel| {
+                rel.attr("TargetMode") != Some("External")
+                    && rel
+                        .attr("Target")
+                        .is_some_and(|stated| stated == relative || stated == target)
+            })
+            .map(|rel| (rel.span.clone(), String::new()))
+            .collect();
+        if edits.is_empty() {
+            return None;
+        }
+        Some((self.part.clone(), splice(source, edits)))
+    }
+
+    pub(super) fn rewritten(&self) -> Option<(String, String)> {
         if self.added.is_empty() || self.part.is_empty() {
             return None;
         }

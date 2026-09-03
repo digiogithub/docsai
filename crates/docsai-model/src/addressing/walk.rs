@@ -461,6 +461,19 @@ fn each_comment(comment: &Comment, f: &mut dyn FnMut(&dyn Addressable)) {
     }
 }
 
+/// The same comment, and the same thread under it, with every node id cleared.
+///
+/// A node id is DocMark's, not the source package's: it is handed out by
+/// [`assign_ids`] after a document has been read, and a `.pptx` comment part
+/// never carried one. So a writer asking «does the part already say what the
+/// model says?» has to ask it without them (spec §11.3, plan v2 16-F), and it
+/// asks through the very walk that put them there, so the two cannot drift.
+pub fn comment_without_ids(comment: &Comment) -> Comment {
+    let mut clone = comment.clone();
+    visit_comment(&mut clone, &mut |node| node.clear_node_id());
+    clone
+}
+
 fn visit_comment(comment: &mut Comment, f: &mut dyn FnMut(&mut dyn Addressable)) {
     f(comment);
     if let crate::text::CommentAnchor::Span(content) = &mut comment.anchor {

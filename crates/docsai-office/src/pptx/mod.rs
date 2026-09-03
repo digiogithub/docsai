@@ -48,6 +48,7 @@ mod skeleton;
 mod text;
 pub mod write;
 mod write_chart;
+mod write_comments;
 mod write_gen;
 mod write_text;
 

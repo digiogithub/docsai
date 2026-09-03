@@ -290,6 +290,8 @@ def build_docx(
     rels: list[tuple[str, str, str]] | None = None,
     headers: dict[str, str] | None = None,
     footnotes: str | None = None,
+    comments: str | None = None,
+    comments_extended: str | None = None,
     custom: dict[str, str] | None = None,
 ) -> None:
     """Assemble a .docx package.
@@ -329,6 +331,27 @@ def build_docx(
         overrides.append(
             ("/word/footnotes.xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml")
         )
+
+    if comments is not None:
+        parts["word/comments.xml"] = (XML_DECL + comments).encode()
+        rels.append(("rIdCm", "comments", "comments.xml"))
+        overrides.append(
+            ("/word/comments.xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml")
+        )
+
+    if comments_extended is not None:
+        parts["word/commentsExtended.xml"] = (XML_DECL + comments_extended).encode()
+        # A Microsoft extension: its relationship type is not under the
+        # ECMA-376 namespace, so the whole URI is stated.
+        rels.append((
+            "rIdCmEx",
+            "http://schemas.microsoft.com/office/2011/relationships/commentsExtended",
+            "commentsExtended.xml",
+        ))
+        overrides.append((
+            "/word/commentsExtended.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml",
+        ))
 
     for part, xml in sorted(headers.items()):
         parts[f"word/{part}"] = (XML_DECL + xml).encode()
@@ -384,8 +407,11 @@ def build_docx(
     doc_rel_xml = []
     for rid, kind, target in rels:
         mode = ' TargetMode="External"' if target.startswith("http") else ""
+        # A relationship type is a whole URI; the shorthand is the common case,
+        # not the rule (`commentsExtended` is a Microsoft extension).
+        rel_type = kind if kind.startswith("http") else f"{REL_BASE}/{kind}"
         doc_rel_xml.append(
-            f'<Relationship Id="{rid}" Type="{REL_BASE}/{kind}" Target="{target}"{mode}/>'
+            f'<Relationship Id="{rid}" Type="{rel_type}" Target="{target}"{mode}/>'
         )
     parts["word/_rels/document.xml.rels"] = (
         XML_DECL + f"<Relationships {RELS_NS}>" + "".join(doc_rel_xml) + "</Relationships>"
@@ -947,6 +973,111 @@ def docx_footnotes() -> None:
     )
     build_docx("footnotes.docx", document(body), title="Notas al pie",
                styles=styles, footnotes=fn)
+
+
+
+# `w14` and `w15` are the namespaces the paragraph id and the thread live in.
+# Word declares both on every part that uses them, and lists them as ignorable
+# so a consumer that does not know them still opens the file.
+W14_NS = (
+    'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+    'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" '
+    'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" '
+    'mc:Ignorable="w14 w15"'
+)
+
+
+def docx_comments_review() -> None:
+    """A reviewed document: `word/comments.xml` plus `word/commentsExtended.xml`
+    (Phase 16-F, spec §11.3).
+
+    Four facts the reader and the writer both have to get right, one per shape
+    of the file:
+
+    * a **commented range** — `w:commentRangeStart` … `w:commentRangeEnd` and
+      the `w:commentReference` run that follows — so the anchor covers words
+      rather than a point;
+    * a **thread**: a reply, joined to the comment it answers by `w14:paraId`
+      through `w15:paraIdParent`, which is the only place WordprocessingML
+      records a thread. A reader that joined on comment id would build the
+      wrong tree, or none;
+    * a **resolved** thread (`w15:done="1"`), which lives in the same part and
+      nowhere else;
+    * a **bare `w:commentReference`** with no range around it: a comment
+      anchored at a point in the text, which reads back with an empty anchor.
+
+    The body is real prose for the same reason every other fixture's is: the
+    `standard` residue budget is measured over exactly these files, and a
+    document whose text is one word makes every marker look enormous."""
+    body = (
+        p(r("Cierre contable del tercer trimestre"), '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>')
+        + p(r("Enviar la conciliacion bancaria antes del ")
+            + '<w:commentRangeStart w:id="1"/>'
+            + r("viernes")
+            + '<w:commentRangeEnd w:id="1"/>'
+            + '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="1"/></w:r>'
+            + '<w:commentRangeStart w:id="2"/><w:commentRangeEnd w:id="2"/>'
+            + '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="2"/></w:r>'
+            + r(", porque el consejo imprime el dosier la noche anterior."))
+        + p(r("La auditoria revisa el criterio de reconocimiento de ingresos y ")
+            + '<w:commentRangeStart w:id="3"/>'
+            + r("pide una comparativa con el mismo trimestre del ano pasado")
+            + '<w:commentRangeEnd w:id="3"/>'
+            + '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="3"/></w:r>'
+            + r("."))
+        + p(r("El desglose por region llega la semana que viene y ")
+            + r("no cambia el resultado", '<w:rPr><w:b/></w:rPr>')
+            + r(" del ejercicio."))
+        + p(r("Las cifras provisionales estan ")
+            + r("pendientes de confirmacion", '<w:rPr><w:i/><w:color w:val="C00000"/></w:rPr>')
+            + r(" por parte de la auditoria externa contratada en marzo."),
+            '<w:pPr><w:jc w:val="both"/><w:spacing w:before="120" w:after="120"/>'
+            '<w:ind w:left="284" w:right="284"/></w:pPr>')
+        + p(r("El comite de direccion revisara el documento el lunes por la manana, ")
+            + r("antes de la sesion ordinaria", '<w:rPr><w:b/><w:u w:val="single"/></w:rPr>')
+            + r(" del consejo de administracion."),
+            '<w:pPr><w:jc w:val="right"/><w:spacing w:line="360" w:lineRule="auto"/></w:pPr>')
+        + p(r("La tesoreria cubre catorce meses de gasto corriente al cierre del periodo.")
+            + '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="4"/></w:r>')
+    )
+
+    def comment(cid: int, author: str, initials: str, date: str, para: str, text: str) -> str:
+        return (
+            f'<w:comment w:id="{cid}" w:author="{author}" w:initials="{initials}" w:date="{date}">'
+            + f'<w:p w14:paraId="{para}" w14:textId="{para}">'
+            + '<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:annotationRef/></w:r>'
+            + r(text)
+            + "</w:p></w:comment>"
+        )
+
+    comments = (
+        f"<w:comments {W_NS} {W14_NS}>"
+        + comment(1, "Ada Lovelace", "AL", "2026-05-04T09:12:00Z", "1A2B3C01",
+                  "El jueves es la fecha real: el dosier se imprime esa noche.")
+        + comment(2, "Grace Hopper", "GH", "2026-05-04T10:01:00Z", "1A2B3C02",
+                  "De acuerdo, lo muevo al jueves y aviso a tesoreria.")
+        + comment(3, "Ada Lovelace", "AL", "2026-05-04T10:20:00Z", "1A2B3C03",
+                  "La comparativa ya esta preparada desde el lunes.")
+        + comment(4, "Grace Hopper", "GH", "2026-05-04T11:05:00Z", "1A2B3C04",
+                  "Confirmar esta cifra con el equipo de tesoreria.")
+        + "</w:comments>"
+    )
+    extended = (
+        f"<w15:commentsEx {W_NS} {W14_NS}>"
+        '<w15:commentEx w15:paraId="1A2B3C01" w15:done="0"/>'
+        '<w15:commentEx w15:paraId="1A2B3C02" w15:paraIdParent="1A2B3C01" w15:done="0"/>'
+        '<w15:commentEx w15:paraId="1A2B3C03" w15:done="1"/>'
+        '<w15:commentEx w15:paraId="1A2B3C04" w15:done="0"/>'
+        "</w15:commentsEx>"
+    )
+    styles = DEFAULT_STYLES.replace(
+        "</w:styles>",
+        '<w:style w:type="character" w:styleId="CommentReference">'
+        '<w:name w:val="annotation reference"/><w:rPr><w:sz w:val="16"/></w:rPr>'
+        "</w:style></w:styles>",
+    )
+    build_docx("comments-review.docx", document(body), title="Revision del cierre",
+               styles=styles, comments=comments, comments_extended=extended)
 
 
 CUSTOM_STYLES = DEFAULT_STYLES.replace(
@@ -3747,16 +3878,16 @@ def pptx_comments_slide() -> None:
     )
     slide1_comments = (
         comment.format(
-            author=1, dt="2026-02-03T09:12:00Z", idx=1, x=1200000, y=900000,
+            author=1, dt="2026-02-03T09:12:00Z", idx=1, x=1134, y=678,
             text="La cifra de ingresos viene del cierre provisional.",
         )
         + comment.format(
-            author=2, dt="2026-02-03T10:04:00Z", idx=2, x=4600000, y=2400000,
+            author=2, dt="2026-02-03T10:04:00Z", idx=2, x=2899, y=1517,
             text="De acuerdo, pero conviene fechar el dato en el pie.",
         )
     )
     slide2_comments = comment.format(
-        author=7, dt="2026-02-03T11:30:00Z", idx=1, x=2000000, y=1500000,
+        author=7, dt="2026-02-03T11:30:00Z", idx=1, x=1260, y=942,
         text="Falta el desglose por region.",
     )
     build_pptx(
@@ -4039,6 +4170,7 @@ GENERATORS = [
     docx_repeated_formatting,
     docx_images_vml,
     docx_fields_raw,
+    docx_comments_review,
     xlsx_values_types,
     xlsx_formulas_basic,
     xlsx_formulas_shared,

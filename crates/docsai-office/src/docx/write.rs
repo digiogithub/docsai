@@ -14,8 +14,8 @@ use docsai_model::style::{
     Align, FontProps, LineHeight, ParaProps, StyleCatalog, StyleType, Underline, VertAlign,
 };
 use docsai_model::text::{
-    Block, BreakKind, HeaderFooter, HeaderScope, Heading, Inline, List, ListItem, Orientation,
-    Paragraph, RawFragment, RunProps, Section, Table, TableCell, TextDocument,
+    Block, BreakKind, Comment, HeaderFooter, HeaderScope, Heading, Inline, List, ListItem,
+    Orientation, Paragraph, RawFragment, RunProps, Section, Table, TableCell, TextDocument,
 };
 use docsai_model::Document;
 
@@ -38,6 +38,7 @@ const NS_WPG: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessi
 const NS_WPS: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
 const NS_WP14: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing";
 const NS_W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
+const NS_W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
 const NS_CT: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 const NS_PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const NS_CORE: &str = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
@@ -50,6 +51,10 @@ const NS_CUST: &str = "http://schemas.openxmlformats.org/officeDocument/2006/cus
 
 const REL_OFFICE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const REL_PKG: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+/// `word/commentsExtended.xml` is a Microsoft extension, and its relationship
+/// type is not under the ECMA-376 namespace.
+const REL_COMMENTS_EXTENDED: &str =
+    "http://schemas.microsoft.com/office/2011/relationships/commentsExtended";
 
 /// Writes a text document as a `.docx` package.
 pub fn write_docx<W: Write + Seek>(
@@ -108,6 +113,14 @@ struct WriterCtx<'a> {
     /// footnotes: id → body XML already rendered with full block fidelity
     footnotes: Vec<(i64, String)>,
     next_footnote: i64,
+    /// comments, in the order the body anchors them (spec §11.3)
+    comments: Vec<CommentOut>,
+    next_comment: i64,
+    /// `w14:paraId` values, which WordprocessingML joins `commentsExtended`
+    /// on. Sequential from a fixed base so the same document written twice is
+    /// the same document: `0x00000000` is reserved and Word treats an id at or
+    /// above `0x80000000` as invalid, so the range is the safe middle.
+    next_para_id: u32,
     /// list id string → numId
     list_nums: BTreeMap<String, i64>,
     /// drawing unique ids
@@ -130,6 +143,9 @@ impl<'a> WriterCtx<'a> {
             hf_seq: 0,
             footnotes: Vec::new(),
             next_footnote: 1,
+            comments: Vec::new(),
+            next_comment: 1,
+            next_para_id: 0x1000_0001,
             list_nums: BTreeMap::new(),
             drawing_id: 1,
             bookmark_id: 1,
@@ -137,7 +153,13 @@ impl<'a> WriterCtx<'a> {
     }
 
     fn add_rel(&mut self, kind_suffix: &str, target: &str, external: bool) -> String {
-        let kind = format!("{REL_OFFICE}/{kind_suffix}");
+        self.add_rel_kind(format!("{REL_OFFICE}/{kind_suffix}"), target, external)
+    }
+
+    /// The same, for a relationship whose type is not under the ECMA-376
+    /// namespace: `commentsExtended` is a Microsoft extension and Word writes
+    /// it under `…/office/2011/relationships/`, so the whole URI is stated.
+    fn add_rel_kind(&mut self, kind: String, target: &str, external: bool) -> String {
         let scope = self
             .rel_scopes
             .entry(self.current_part.clone())
@@ -174,6 +196,13 @@ impl<'a> WriterCtx<'a> {
     }
 
     /// Renders `f` with relationships routed to `part` instead of the current one.
+    /// The next `w14:paraId`, as the eight uppercase hex digits Word writes.
+    fn fresh_para_id(&mut self) -> String {
+        let id = self.next_para_id;
+        self.next_para_id += 1;
+        format!("{id:08X}")
+    }
+
     fn in_part<T>(&mut self, part: &str, f: impl FnOnce(&mut Self) -> T) -> T {
         let previous = std::mem::replace(&mut self.current_part, part.to_string());
         let out = f(self);
@@ -236,13 +265,38 @@ fn build_package(
     if has_footnotes {
         let _ = ctx.add_rel("footnotes", "footnotes.xml", false);
     }
+    // Comments are two parts, and the second only when the document says
+    // something `comments.xml` cannot: a thread, or a resolved mark. A document
+    // with flat, open comments is what every producer that is not Word writes,
+    // and it reads back as exactly that.
+    let has_comments = !ctx.comments.is_empty();
+    let has_extended = ctx
+        .comments
+        .iter()
+        .any(|comment| comment.parent.is_some() || comment.done);
+    if has_comments {
+        let _ = ctx.add_rel("comments", "comments.xml", false);
+        if has_extended {
+            let _ = ctx.add_rel_kind(
+                REL_COMMENTS_EXTENDED.to_string(),
+                "commentsExtended.xml",
+                false,
+            );
+        }
+    }
 
     let mut package = Package::new();
 
     // Content types
     package.insert(
         "[Content_Types].xml",
-        content_types_xml(&ctx, has_numbering, has_footnotes),
+        content_types_xml(
+            &ctx,
+            has_numbering,
+            has_footnotes,
+            has_comments,
+            has_extended,
+        ),
     );
 
     // Package relationships
@@ -271,6 +325,14 @@ fn build_package(
     // Footnotes
     if has_footnotes {
         package.insert("word/footnotes.xml", footnotes_xml(&ctx));
+    }
+
+    // Comments
+    if has_comments {
+        package.insert("word/comments.xml", comments_xml(&ctx));
+        if has_extended {
+            package.insert("word/commentsExtended.xml", comments_extended_xml(&ctx));
+        }
     }
 
     // Headers / footers
@@ -597,18 +659,26 @@ fn write_inlines(inlines: &[Inline], ctx: &mut WriterCtx<'_>, out: &mut String, 
                 write_inlines(content, ctx, out, &merged);
                 out.push_str("</w:hyperlink>");
             }
-            // Comments are read (spec §11.3) and not yet written: that is plan
-            // v2 Phase 16-F. The commented text is the document and survives;
-            // the annotation does not, and says so.
+            // A comment is three markers in the body and a `w:comment` in
+            // `word/comments.xml` (spec §11.3). Every comment of the thread —
+            // the one that opens it and every reply — brackets the same range
+            // and gets its own reference run, which is what Word writes and
+            // what this crate's own reader puts back together.
             Inline::Comment(comment) => {
-                ctx.report.warn(Warning::Degraded {
-                    what: match comment.author.as_deref() {
-                        Some(author) => format!("comment by {author}"),
-                        None => "comment".into(),
-                    },
-                    why: "the .docx writer does not write comments back yet".into(),
-                });
+                let mut ids = Vec::new();
+                write_comment_thread(comment, None, ctx, &mut ids);
+                for id in &ids {
+                    out.push_str(&format!(r#"<w:commentRangeStart w:id="{id}"/>"#));
+                }
                 write_inlines(comment.covered(), ctx, out, base);
+                for id in &ids {
+                    out.push_str(&format!(r#"<w:commentRangeEnd w:id="{id}"/>"#));
+                }
+                for id in &ids {
+                    out.push_str("<w:r><w:rPr><w:rStyle w:val=\"CommentReference\"/></w:rPr>");
+                    out.push_str(&format!(r#"<w:commentReference w:id="{id}"/>"#));
+                    out.push_str("</w:r>");
+                }
             }
             Inline::Footnote(note) => {
                 let id = ctx.next_footnote;
@@ -1352,7 +1422,13 @@ fn package_rels_xml() -> String {
     )
 }
 
-fn content_types_xml(ctx: &WriterCtx<'_>, numbering: bool, footnotes: bool) -> String {
+fn content_types_xml(
+    ctx: &WriterCtx<'_>,
+    numbering: bool,
+    footnotes: bool,
+    comments: bool,
+    comments_extended: bool,
+) -> String {
     let mut s = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="{NS_CT}">
@@ -1380,6 +1456,14 @@ fn content_types_xml(ctx: &WriterCtx<'_>, numbering: bool, footnotes: bool) -> S
     if footnotes {
         s.push_str(r#"
   <Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>"#);
+    }
+    if comments {
+        s.push_str(r#"
+  <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>"#);
+    }
+    if comments_extended {
+        s.push_str(r#"
+  <Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/>"#);
     }
     for name in ctx.header_parts.keys() {
         s.push_str(&format!(
@@ -1634,6 +1718,136 @@ fn footnotes_xml(ctx: &WriterCtx<'_>) -> String {
         s.push_str(&format!(r#"<w:footnote w:id="{id}">{body}</w:footnote>"#));
     }
     s.push_str("</w:footnotes>");
+    s
+}
+
+/// One comment of `word/comments.xml`, with what `commentsExtended` says about
+/// it (spec §11.3).
+struct CommentOut {
+    id: i64,
+    author: Option<String>,
+    initials: Option<String>,
+    date: Option<String>,
+    /// The rendered `w:p` sequence, every top-level paragraph already carrying
+    /// its `w14:paraId`.
+    body: String,
+    /// The paragraph id `commentsExtended` names this comment by. Word uses the
+    /// **last** paragraph of the comment, and so does this.
+    para_id: String,
+    /// The `w14:paraId` of the comment this one replies to.
+    parent: Option<String>,
+    done: bool,
+}
+
+/// Registers one comment and, under it, its whole thread; appends every `w:id`
+/// in the thread to `ids` in the order the body must reference them.
+///
+/// The thread is flattened into `word/comments.xml` — WordprocessingML has no
+/// nesting there — and rebuilt by `word/commentsExtended.xml`, which is where
+/// the nesting actually lives (`w15:paraIdParent`, joined by paragraph id and
+/// never by comment id). A reply the model added is written exactly like one
+/// that was read: it is given a `w:id` and a `w14:paraId` of its own, and its
+/// parent's paragraph id points at the comment it answers.
+fn write_comment_thread(
+    comment: &Comment,
+    parent: Option<&str>,
+    ctx: &mut WriterCtx<'_>,
+    ids: &mut Vec<i64>,
+) {
+    let id = ctx.next_comment;
+    ctx.next_comment += 1;
+    ids.push(id);
+
+    // The body, block by block, so that every top-level paragraph can be given
+    // its own `w14:paraId` without pattern-matching rendered markup.
+    let mut body = String::new();
+    let mut para_ids: Vec<String> = Vec::new();
+    for block in &comment.blocks {
+        let mut piece = String::new();
+        ctx.in_part("comments.xml", |ctx| {
+            write_block(block, ctx, &mut piece, None);
+        });
+        if piece.starts_with("<w:p>") {
+            let para_id = ctx.fresh_para_id();
+            piece.replace_range(
+                0..5,
+                &format!(r#"<w:p w14:paraId="{para_id}" w14:textId="{para_id}">"#),
+            );
+            para_ids.push(para_id);
+        }
+        body.push_str(&piece);
+    }
+    if para_ids.is_empty() {
+        // `w:comment` needs at least one paragraph, and `commentsExtended`
+        // needs a paragraph id to name it by. A comment whose blocks are all
+        // tables gets an empty trailing paragraph rather than no identity.
+        let para_id = ctx.fresh_para_id();
+        body.push_str(&format!(
+            r#"<w:p w14:paraId="{para_id}" w14:textId="{para_id}"/>"#
+        ));
+        para_ids.push(para_id);
+    }
+    let para_id = para_ids.last().expect("one was pushed").clone();
+
+    ctx.comments.push(CommentOut {
+        id,
+        author: comment.author.clone(),
+        initials: comment.initials.clone(),
+        date: comment.date.clone(),
+        body,
+        para_id: para_id.clone(),
+        parent: parent.map(str::to_string),
+        done: comment.resolved,
+    });
+    for reply in &comment.replies {
+        write_comment_thread(reply, Some(&para_id), ctx, ids);
+    }
+}
+
+fn comments_xml(ctx: &WriterCtx<'_>) -> String {
+    let mut s = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:comments xmlns:w="{NS_W}" xmlns:mc="{NS_MC}" xmlns:w14="{NS_W14}" xmlns:r="{NS_R}" xmlns:wp="{NS_WP}" xmlns:a="{NS_A}" xmlns:pic="{NS_PIC}" mc:Ignorable="w14">"#
+    );
+    for comment in &ctx.comments {
+        s.push_str(&format!(r#"<w:comment w:id="{}""#, comment.id));
+        if let Some(author) = &comment.author {
+            s.push_str(&format!(r#" w:author="{}""#, esc_attr(author)));
+        }
+        if let Some(initials) = &comment.initials {
+            s.push_str(&format!(r#" w:initials="{}""#, esc_attr(initials)));
+        }
+        if let Some(date) = &comment.date {
+            s.push_str(&format!(r#" w:date="{}""#, esc_attr(date)));
+        }
+        s.push('>');
+        s.push_str(&comment.body);
+        s.push_str("</w:comment>");
+    }
+    s.push_str("</w:comments>");
+    s
+}
+
+/// `word/commentsExtended.xml`: the thread and the done flag, and nothing else.
+fn comments_extended_xml(ctx: &WriterCtx<'_>) -> String {
+    let mut s = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w15:commentsEx xmlns:w="{NS_W}" xmlns:mc="{NS_MC}" xmlns:w14="{NS_W14}" xmlns:w15="{NS_W15}" mc:Ignorable="w14 w15">"#
+    );
+    for comment in &ctx.comments {
+        s.push_str(&format!(
+            r#"<w15:commentEx w15:paraId="{}""#,
+            comment.para_id
+        ));
+        if let Some(parent) = &comment.parent {
+            s.push_str(&format!(r#" w15:paraIdParent="{parent}""#));
+        }
+        s.push_str(&format!(
+            r#" w15:done="{}"/>"#,
+            if comment.done { 1 } else { 0 }
+        ));
+    }
+    s.push_str("</w15:commentsEx>");
     s
 }
 

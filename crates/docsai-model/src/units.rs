@@ -72,12 +72,22 @@ impl Length {
         div_round(self.0, EMU_PER_POINT / 2)
     }
 
-    /// Builds a length from eighth-points, the unit of border widths (`w:sz`).
+    /// Builds a length from eighth-points, the unit of border widths (`w:sz`)
+    /// and of PowerPoint's *master unit* (1/576 in — see [`Length::eighth_points`]).
     ///
     /// An eighth of a point is 1587.5 EMU, so this is the one Word unit that
     /// does not divide EMU exactly; the result is rounded to nearest.
     pub const fn from_eighth_points(eighth_points: i64) -> Self {
         Length(div_round(eighth_points * EMU_PER_POINT, 8))
+    }
+
+    /// The length in eighth-points, rounded to nearest.
+    ///
+    /// An eighth of a point is 1/576 in, which is also PowerPoint's *master
+    /// unit* — the grid `p:cm/p:pos` is written on, whatever `ST_Coordinate`
+    /// says (spec §11.3).
+    pub fn eighth_points(self) -> i64 {
+        div_round(self.0 * 8, EMU_PER_POINT)
     }
 
     /// Builds a length from points.

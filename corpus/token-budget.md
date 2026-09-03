@@ -14,6 +14,7 @@ An update that inflates the total by more than 5 % is refused unless
 |---|---:|---:|---:|---:|
 | `docx/basic-styles.docx` | 535 | 199 | 295 | 72 |
 | `docx/basic-text.docx` | 456 | 166 | 226 | 72 |
+| `docx/comments-review.docx` | 848 | 494 | 346 | 145 |
 | `docx/custom-styles.docx` | 583 | 166 | 229 | 33 |
 | `docx/fields-raw.docx` | 484 | 175 | 203 | 33 |
 | `docx/footnotes.docx` | 471 | 157 | 193 | 39 |
@@ -49,4 +50,4 @@ An update that inflates the total by more than 5 % is refused unless
 | `xlsx/merged-cells.xlsx` | 300 | 220 | 189 | 71 |
 | `xlsx/number-formats.xlsx` | 344 | 216 | 201 | 94 |
 | `xlsx/values-types.xlsx` | 335 | 234 | 219 | 114 |
-| **total** | **25776** | **15549** | **17087** | **10577** |
+| **total** | **26624** | **16043** | **17433** | **10722** |

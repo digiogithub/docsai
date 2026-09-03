@@ -174,7 +174,7 @@ fn a_selection_of_a_deck_declares_the_presentation_profile() {
     // version names the *profile* the body is written in, not whether it has
     // ids (spec §11.2, version rule). A selection of a text document is
     // unchanged.
-    let deck = docsai_docmark::selection_front_matter(&options(Fidelity::Full), 7, &[]);
+    let deck = docsai_docmark::selection_front_matter(&options(Fidelity::Full), 7, &[], false);
     assert!(deck.contains("docmark: \"1.2\""), "{deck}");
 
     let text = docsai_docmark::selection_front_matter(
@@ -184,6 +184,12 @@ fn a_selection_of_a_deck_declares_the_presentation_profile() {
         },
         7,
         &[],
+        false,
     );
     assert!(text.contains("docmark: \"1.1\""), "{text}");
+
+    // A selection that carries a comment is 1.3, whichever profile it is in
+    // (spec §11.3, version rule; plan v2 16-F, carried defect 3 of 16-E).
+    let commented = docsai_docmark::selection_front_matter(&options(Fidelity::Full), 7, &[], true);
+    assert!(commented.contains("docmark: \"1.3\""), "{commented}");
 }
