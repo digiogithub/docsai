@@ -7,11 +7,14 @@ Bytes and tokens are of the framed JSON-RPC that actually crossed the transport,
 | scenario | request bytes | response bytes | request tokens | response tokens | total tokens |
 |---|---|---|---|---|---|
 | session-preamble | 295 | 10043 | 93 | 2388 | 2481 |
-| deck-retitle (read half) | 1131 | 2930 | 353 | 897 | 1250 |
+| deck-retitle | 771 | 1951 | 242 | 562 | 804 |
 | report-fix-typo | 1204 | 2448 | 355 | 676 | 1031 |
 | sheet-add-row | 1004 | 2159 | 294 | 576 | 870 |
+
+## The Phase 17 acceptance criterion
+
+«retitle slide 4, add a bullet, bold it, verify» on a 40-slide deck, `corpus/pptx/forty-slides.pptx`, costs **2 tool calls** and **804 tokens** (242 in, 562 out) against a budget of 3 and 2000. That is the `deck-retitle` row: the task's own calls. The `session-preamble` row beside it, **2481 tokens**, is what every task in a session pays once and is not part of this budget — it is reported here so the two columns cannot be swapped quietly.
 
 ## Not measured yet
 
 * **restyle every `Heading 2`** — waits on E6 (`read_styles` / `set_style`); today it has no loop that does not read the document.
-* **deck-retitle, return leg** — waits on pptx write (Phase 15).

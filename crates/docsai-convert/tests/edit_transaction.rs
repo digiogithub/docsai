@@ -251,6 +251,79 @@ fn an_injected_failure_before_the_rename_leaves_the_original_untouched() {
     );
 }
 
+/// Both fault points, on **every** package family, because each has its own
+/// writer and the criterion is about the file rather than about a deck.
+///
+/// The two tests above prove the mechanism on a deck in detail; this one proves
+/// it is not a property of that one writer. Every case asserts the same three
+/// things: the fault is the typed one that was asked for, the original is
+/// byte-identical, and nothing was left in the directory.
+#[test]
+fn an_injected_failure_leaves_every_package_family_untouched() {
+    let dir = scratch("fault-families");
+    for rel in [
+        "docx/long-report.docx",
+        "odt/basic-text.odt",
+        "xlsx/values-types.xlsx",
+        "ods/values-types.ods",
+        "pptx/basic-slides.pptx",
+    ] {
+        for point in [FaultPoint::AfterApply, FaultPoint::BeforeRename] {
+            let path = copy(rel, &dir);
+            let before = digest(&path);
+            // An operation that certainly applies, so the fault is what stops
+            // the request and not the operation.
+            let error = edit_path(
+                &path,
+                &EditRequest::new(vec![Operation::InsertAfter {
+                    target: "doc/1".into(),
+                    content: match rel.split('/').next() {
+                        Some("pptx") => "## Diapositiva nueva {.slide}\n\nUn párrafo.\n".into(),
+                        Some("xlsx") | Some("ods") => {
+                            "# Hoja nueva {.sheet}\n\n| A |\n|---|\n| uno |\n".to_string()
+                        }
+                        _ => "| a | b |\n|---|---|\n| 1 | 2 |\n".to_string(),
+                    },
+                    if_match: None,
+                }]),
+                &EditOptions {
+                    fault: Some(point),
+                    ..EditOptions::default()
+                },
+            );
+            match &error {
+                Err(EditError::InjectedFault { at, temporary }) => {
+                    assert_eq!(*at, point, "{rel}: the wrong fault fired");
+                    // A fault before the rename has a complete document on
+                    // disk, beside the destination; one before serialisation
+                    // has nothing at all.
+                    match point {
+                        FaultPoint::BeforeRename => assert_eq!(
+                            temporary.as_ref().and_then(|t| t.parent()),
+                            path.parent(),
+                            "{rel}: the temporary file is not beside the destination"
+                        ),
+                        FaultPoint::AfterApply => {
+                            assert!(temporary.is_none(), "{rel}: nothing is serialised yet")
+                        }
+                    }
+                }
+                other => panic!("{rel} at {point:?}: {other:?}"),
+            }
+            assert_eq!(
+                digest(&path),
+                before,
+                "{rel} at {point:?}: the original moved"
+            );
+            assert!(
+                leftovers(&dir).is_empty(),
+                "{rel} at {point:?}: {:?}",
+                leftovers(&dir)
+            );
+        }
+    }
+}
+
 fn text_of(path: &Path) -> String {
     let out = path.with_extension("view.dmk.md");
     docsai_convert::convert_file(path, Some(&out), &ConvertOptions::default())
@@ -370,6 +443,161 @@ fn an_edit_touches_exactly_the_members_it_has_to() {
         changed.contains("Segunda, retitulada"),
         "the new title is not in {name}"
     );
+}
+
+/// The same claim one level finer, and this is the level the criterion is
+/// actually made at: **inside** the part that changed, every sibling's
+/// serialization is byte-identical.
+///
+/// `an_edit_touches_exactly_the_members_it_has_to` proves no other part moves,
+/// which for a deck is most of the claim because a slide is a part of its own.
+/// It is not the claim for a text document or a sheet, where every sibling
+/// lives in the same XML as the target. So: edit the second element of a
+/// sequence, split the changed part on the family's own element boundary, and
+/// assert that exactly one element differs.
+///
+/// **What «before» is, stated rather than assumed.** The preserved skeleton is
+/// a pptx property (Phase 15): a deck is written back over its own package and
+/// an untouched part keeps its bytes. The docx, odt, xlsx and ods writers build
+/// their parts from the model, so an edit's baseline for them is not the
+/// original package — it is *what the writer would have produced from the same
+/// document with no operations at all*, which this test takes by running an
+/// empty batch first. Against that baseline the criterion means exactly what it
+/// says for all five families, and it is the strongest form the writers
+/// currently support. That pptx is the only family where the baseline is the
+/// original bytes is measured here too, and carried forward rather than hidden:
+/// see `kb/92-phase-17-loop.md`.
+#[test]
+fn an_edit_leaves_every_sibling_byte_identical_inside_the_part_it_changed() {
+    let dir = scratch("siblings");
+    std::fs::create_dir_all(dir.join("baseline")).expect("creates the baseline directory");
+    // The element boundary each family serializes a sibling to, and the
+    // operation that changes exactly one of them.
+    let cases: [(&str, &str, Operation); 5] = [
+        (
+            "docx/long-report.docx",
+            "</w:p>",
+            replace_text("doc/2", "Segundo, reescrito"),
+        ),
+        (
+            "odt/basic-text.odt",
+            "</text:p>",
+            replace_text("doc/2", "Segundo, reescrito"),
+        ),
+        (
+            "pptx/slide-order.pptx",
+            "</a:p>",
+            replace_text("doc/2/1", "Segunda, retitulada"),
+        ),
+        (
+            "xlsx/values-types.xlsx",
+            "</row>",
+            Operation::SetCell {
+                target: "n1".into(),
+                // A number into a numeric cell: the sheet part is the only
+                // one with anything to say about it, so the comparison below is
+                // about rows and not about a shared-string table.
+                cell: "B2".into(),
+                value: Some(Some(docsai_convert::Scalar::Int(1200))),
+                if_match: None,
+            },
+        ),
+        (
+            "ods/values-types.ods",
+            "</table:table-row>",
+            Operation::SetCell {
+                target: "n1".into(),
+                // A number into a numeric cell: the sheet part is the only
+                // one with anything to say about it, so the comparison below is
+                // about rows and not about a shared-string table.
+                cell: "B2".into(),
+                value: Some(Some(docsai_convert::Scalar::Int(1200))),
+                if_match: None,
+            },
+        ),
+    ];
+
+    for (rel, close, operation) in cases {
+        // The baseline: the same document, written back with nothing done to
+        // it. For a deck this is the original package byte for byte, and the
+        // assertion below says so.
+        let baseline = copy(rel, &dir.join("baseline"));
+        let original = digest(&baseline);
+        edit_path(
+            &baseline,
+            &EditRequest::new(vec![]),
+            &EditOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{rel}: {e}"));
+        assert_eq!(
+            digest(&baseline) == original,
+            rel.starts_with("pptx/"),
+            "{rel}: whether an empty batch is byte-identical is a property of \
+             the preserved skeleton, and only pptx has one"
+        );
+
+        let path = copy(rel, &dir);
+        let before = members(&baseline);
+        edit_path(
+            &path,
+            &EditRequest::new(vec![operation]),
+            &EditOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let after = members(&path);
+
+        assert_eq!(
+            before.keys().collect::<Vec<_>>(),
+            after.keys().collect::<Vec<_>>(),
+            "{rel}: the member list changed"
+        );
+        let changed: Vec<&String> = before
+            .keys()
+            .filter(|name| before[*name] != after[*name])
+            .collect();
+        assert_eq!(
+            changed.len(),
+            1,
+            "{rel}: the edit reached members it had no business in: {changed:?}"
+        );
+        let name = changed[0].clone();
+
+        let was = elements(&before[&name], close);
+        let now = elements(&after[&name], close);
+        assert!(
+            was.len() > 1,
+            "{rel}: {name} has no siblings to leave alone"
+        );
+        assert_eq!(
+            was.len(),
+            now.len(),
+            "{rel}: {name} gained or lost a `{close}` element"
+        );
+        let differing: Vec<usize> = (0..was.len()).filter(|i| was[*i] != now[*i]).collect();
+        assert_eq!(
+            differing.len(),
+            1,
+            "{rel}: {} of {name}'s {close} elements moved, not 1",
+            differing.len()
+        );
+    }
+}
+
+/// A part split into the elements a sibling serializes to, boundaries kept, so
+/// that comparing two splits compares whole serializations.
+fn elements(bytes: &[u8], close: &str) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    let mut out = Vec::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find(close) {
+        let (head, tail) = rest.split_at(at + close.len());
+        out.push(head.to_string());
+        rest = tail;
+    }
+    if !rest.is_empty() {
+        out.push(rest.to_string());
+    }
+    out
 }
 
 // ---------------------------------------------------------------- 17-D

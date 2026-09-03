@@ -1356,11 +1356,10 @@ impl PropPlan {
         }
         for (key, value) in &self.font {
             set_font(&mut paragraph.format.run_direct, key, value.as_ref());
-            // §6.2: the property is *also* cleared on every descendant run that
-            // overrode it, so the paragraph reads uniformly. A caller that says
-            // «bold this paragraph» and gets one stubbornly non-bold word has
-            // been failed.
-            clear_font(&mut paragraph.content, key);
+            // §6.2: the property also reaches every run of the paragraph, so
+            // the paragraph reads uniformly. A caller that says «bold this
+            // paragraph» and gets one stubbornly non-bold word has been failed.
+            apply_font(&mut paragraph.content, key, value.as_ref());
         }
     }
 }
@@ -1385,8 +1384,8 @@ fn validate_font_value(key: &str, value: Option<&Scalar>) -> Result<(), Refusal>
         ("underline", _) => Err(bad("none, single, double, thick, dotted, dashed, wave")),
         ("color", Some(Scalar::Text(t))) if is_rgb(t) => Ok(()),
         ("color", _) => Err(bad("RRGGBB")),
-        ("highlight", Some(Scalar::Text(_))) => Ok(()),
-        ("highlight", _) => Err(bad("a highlight colour")),
+        ("highlight", Some(Scalar::Text(t))) if HIGHLIGHTS.contains(&t.as_str()) => Ok(()),
+        ("highlight", _) => Err(bad(HIGHLIGHT_LIST)),
         ("size", Some(Scalar::Text(t))) if Length::parse(t).is_some() => Ok(()),
         ("size", _) => Err(bad("a DocMark length such as `11pt`")),
         ("font", Some(Scalar::Text(_))) => Ok(()),
@@ -1394,6 +1393,36 @@ fn validate_font_value(key: &str, value: Option<&Scalar>) -> Result<(), Refusal>
         _ => Ok(()),
     }
 }
+
+/// `w:highlight/@val` is an **enumeration**, not a colour: `ST_HighlightColor`
+/// names sixteen highlights and `none`. 17-A's §6.2 typed the key `RRGGBB` by
+/// analogy with `color`, and the validator took any string at all, so
+/// `highlight: "FFFF00"` was written verbatim into the package and produced a
+/// `w:highlight` Word does not accept — a silent no-op reported as a change,
+/// which is the exact failure §6.2's own paragraph on `bould` refuses. 17-H
+/// measured it and this list is the fix; §6.2 was corrected to match.
+const HIGHLIGHTS: &[&str] = &[
+    "none",
+    "black",
+    "blue",
+    "cyan",
+    "darkBlue",
+    "darkCyan",
+    "darkGray",
+    "darkGreen",
+    "darkMagenta",
+    "darkRed",
+    "darkYellow",
+    "green",
+    "lightGray",
+    "magenta",
+    "red",
+    "white",
+    "yellow",
+];
+
+const HIGHLIGHT_LIST: &str = "none, black, blue, cyan, darkBlue, darkCyan, darkGray, darkGreen, \
+     darkMagenta, darkRed, darkYellow, green, lightGray, magenta, red, white, yellow";
 
 fn set_font(font: &mut FontProps, key: &str, value: Option<&Scalar>) {
     let flag = |value: Option<&Scalar>| match value {
@@ -1437,6 +1466,40 @@ fn set_font(font: &mut FontProps, key: &str, value: Option<&Scalar>) {
             }
         }
         _ => {}
+    }
+}
+
+/// §6.2's «applies to the paragraph's whole content», on the runs themselves.
+///
+/// `ParaFormat::run_direct` alone does not deliver it, and that is measured
+/// rather than assumed: ODF writes it into the paragraph's own text
+/// properties, where it does reach the text, but docx writes it to
+/// `w:pPr/w:rPr` and pptx to `a:endParaRPr` — the properties of the paragraph
+/// *mark*, which format nothing a reader sees. `run_direct` is still set,
+/// because it is what text typed at the end of the paragraph inherits; the
+/// runs are what make the paragraph read the way the caller asked.
+///
+/// Clearing (`null`) only clears: there is nothing to wrap, because a bare
+/// `Inline::Text` overrides nothing.
+fn apply_font(inlines: &mut [Inline], key: &str, value: Option<&Scalar>) {
+    for inline in inlines.iter_mut() {
+        match inline {
+            Inline::Styled { content, props } | Inline::Link { content, props, .. } => {
+                set_font(&mut props.direct, key, value);
+                // A descendant that overrode the property would still win.
+                clear_font(content, key);
+            }
+            Inline::Text(text) if value.is_some() && !text.is_empty() => {
+                let mut props = RunProps::default();
+                set_font(&mut props.direct, key, value);
+                let taken = std::mem::replace(inline, Inline::Text(String::new()));
+                *inline = Inline::Styled {
+                    content: vec![taken],
+                    props,
+                };
+            }
+            _ => {}
+        }
     }
 }
 

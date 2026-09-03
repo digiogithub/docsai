@@ -408,12 +408,30 @@ fn write_image(
             docsai_model::units::Length::ZERO,
         ),
     };
+    out.push_str("<draw:frame");
+    // The reader takes a picture's name from `draw:name` and its description
+    // from `svg:desc`, falling back to the name (`draw::read_frame`). A writer
+    // that emits neither loses both on every write-back, silently and without
+    // a warning — which is what `replace_image --alt` on an `.ods` did until
+    // Phase 17-H measured it. The `.odt` writer has always written all three.
+    if let Some(name) = img.name.as_ref().or(img.title.as_ref()) {
+        out.push_str(&format!(r#" draw:name="{}""#, esc_attr(name)));
+    }
     out.push_str(&format!(
-        r#"<draw:frame draw:z-index="0" svg:width="{}" svg:height="{}" svg:x="{}" svg:y="{}"><draw:image xlink:href="{}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/></draw:frame>"#,
+        r#" draw:z-index="0" svg:width="{}" svg:height="{}" svg:x="{}" svg:y="{}">"#,
         esc_attr(&w),
         esc_attr(&h),
         esc_attr(&format_cm(x)),
         esc_attr(&format_cm(y)),
+    ));
+    if let Some(title) = &img.title {
+        out.push_str(&format!("<svg:title>{}</svg:title>", esc_text(title)));
+    }
+    if !img.alt.is_empty() {
+        out.push_str(&format!("<svg:desc>{}</svg:desc>", esc_text(&img.alt)));
+    }
+    out.push_str(&format!(
+        r#"<draw:image xlink:href="{}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/></draw:frame>"#,
         esc_attr(&href),
     ));
     report.stats.images = report.stats.images.saturating_add(1);

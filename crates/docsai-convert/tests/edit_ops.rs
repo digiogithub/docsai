@@ -231,14 +231,16 @@ fn replace_text_refuses_a_workbook_and_a_chart() {
             }
         })
         .map(|(id, _, _)| id);
-    if let Some(chart) = chart {
-        match refuse(&deck, vec![replace_text(&chart, "no")]) {
-            Refusal::WrongKind { because, .. } => assert!(
-                because.contains("§9"),
-                "a chart refusal must name the escape hatch: {because}"
-            ),
-            other => panic!("{other:?}"),
-        }
+    // Not `if let`: a corpus that stopped carrying an embedded chart would
+    // turn this case into a silent pass, which is the failure mode 17-H exists
+    // to find.
+    let chart = chart.expect("charts-embedded.pptx carries a chart shape");
+    match refuse(&deck, vec![replace_text(&chart, "no")]) {
+        Refusal::WrongKind { because, .. } => assert!(
+            because.contains("§9"),
+            "a chart refusal must name the escape hatch: {because}"
+        ),
+        other => panic!("{other:?}"),
     }
 }
 
@@ -266,6 +268,50 @@ fn set_props_applies_and_refuses_an_unknown_key() {
             }],
         );
         assert_eq!(report.changed.len(), 1, "{}", path.display());
+
+        // The round trip, which the report alone does not prove: §6.2 says the
+        // property applies to «the paragraph's whole content», so the
+        // paragraph's own text must come back marked. Asserting only
+        // `changed.len() == 1` let a `set_props` that wrote nothing a reader
+        // can see pass for four increments (17-H).
+        assert!(
+            text(&path).contains("**"),
+            "{}: set_props reported a change the document does not show",
+            path.display()
+        );
+
+        // §6.2's `highlight` is `w:highlight/@val`, an enumeration and not a
+        // colour. A hex value is refused by name rather than written verbatim
+        // into a package that will not honour it.
+        let props = [("highlight".to_string(), Some(Scalar::Text("FFFF00".into())))]
+            .into_iter()
+            .collect();
+        match refuse(
+            &path,
+            vec![Operation::SetProps {
+                target: target.clone(),
+                props,
+                if_match: None,
+            }],
+        ) {
+            Refusal::UnknownField { known, .. } => assert!(
+                known.contains("yellow"),
+                "{}: the refusal must name the highlights: {known}",
+                path.display()
+            ),
+            other => panic!("{other:?}"),
+        }
+        let props = [("highlight".to_string(), Some(Scalar::Text("yellow".into())))]
+            .into_iter()
+            .collect();
+        run(
+            &path,
+            vec![Operation::SetProps {
+                target: target.clone(),
+                props,
+                if_match: None,
+            }],
+        );
 
         let props = [("bould".to_string(), Some(Scalar::Bool(true)))]
             .into_iter()
@@ -608,22 +654,39 @@ fn move_reorders_and_keeps_every_id() {
         "the first block did not move out of the way"
     );
 
-    let book = copy("xlsx/values-types.xlsx", &dir);
+    // workbook: two sheets swap places. The corpus has no two-sheet workbook,
+    // so one is made — an `if sheets.len() >= 2` here would simply never run.
+    let book = two_sheets("xlsx/values-types.xlsx", &dir);
     let sheets: Vec<String> = nodes(&book)
         .into_iter()
         .filter(|(_, k, _)| *k == NodeKind::Sheet)
         .map(|(id, _, _)| id)
         .collect();
-    if sheets.len() >= 2 {
-        run(
-            &book,
-            vec![Operation::Move {
-                target: sheets[0].clone(),
-                after: Some(sheets[1].clone()),
-                before: None,
-                if_match: None,
-            }],
-        );
+    assert_eq!(sheets.len(), 2, "the fixture has two sheets");
+    let before = sheet_names(&book);
+    run(
+        &book,
+        vec![Operation::Move {
+            target: sheets[0].clone(),
+            after: Some(sheets[1].clone()),
+            before: None,
+            if_match: None,
+        }],
+    );
+    let after = sheet_names(&book);
+    assert_eq!(
+        after,
+        vec![before[1].clone(), before[0].clone()],
+        "the sheets did not swap"
+    );
+}
+
+fn sheet_names(path: &Path) -> Vec<String> {
+    match document(path) {
+        docsai_model::Document::Workbook(book) => {
+            book.sheets.iter().map(|s| s.name.clone()).collect()
+        }
+        other => panic!("not a workbook: {other:?}"),
     }
 }
 
@@ -745,21 +808,26 @@ fn set_cell_refuses_a_covered_cell_and_a_wrong_kind() {
             }),
         _ => None,
     };
-    if let Some(covered) = covered {
-        if covered != docsai_model::sheet::CellRef::new(1, 1).a1() {
-            match refuse(
-                &merged,
-                vec![Operation::SetCell {
-                    target: sheet.clone(),
-                    cell: covered,
-                    value: Some(Some(Scalar::Int(1))),
-                    if_match: None,
-                }],
-            ) {
-                Refusal::CoveredCell { .. } => {}
-                other => panic!("expected CoveredCell, got {other:?}"),
-            }
-        }
+    // Both guards were `if`s and both could pass by doing nothing: a corpus
+    // without a merge, or a merge whose covered corner happened to be A1, made
+    // this assertion disappear.
+    let covered = covered.expect("merged-cells.xlsx carries a merge");
+    assert_ne!(
+        covered,
+        docsai_model::sheet::CellRef::new(1, 1).a1(),
+        "the covered corner of the merge must not be its anchor"
+    );
+    match refuse(
+        &merged,
+        vec![Operation::SetCell {
+            target: sheet.clone(),
+            cell: covered,
+            value: Some(Some(Scalar::Int(1))),
+            if_match: None,
+        }],
+    ) {
+        Refusal::CoveredCell { .. } => {}
+        other => panic!("expected CoveredCell, got {other:?}"),
     }
 
     let text_doc = copy("docx/basic-text.docx", &dir);
@@ -1061,4 +1129,90 @@ fn an_id_target_is_immune_to_a_preceding_delete_and_an_index_path_is_not() {
         "Escrito sobre lo que era doc/2",
         "the second operation addressed a position, not a node"
     );
+}
+
+// ------------------------------------------------------------------- §5.4.1
+
+/// «Ids are never renumbered» has an edge, and it is measured here rather than
+/// discovered by a caller: **an id is stable for the lifetime of a reading.**
+///
+/// No Office format stores a DocMark node id — the project decided that
+/// deliberately, and a package is not annotated with bookmarks to carry one —
+/// so a reader assigns ids in document order every time it opens one. An
+/// order-changing operation therefore makes the next read of the *package* hand
+/// the same token to a different node. A `.dmk.md` writes its ids down and does
+/// not have the property.
+///
+/// §5.4.1 of `docs/edit-operations.md` states this; this test is what makes the
+/// statement true rather than hopeful.
+#[test]
+fn a_package_reassigns_ids_on_the_next_read_and_docmark_does_not() {
+    let dir = scratch("ids-on-reread");
+
+    let deck = copy("pptx/slide-order.pptx", &dir);
+    let before: Vec<(String, String)> = slide_ids_and_titles(&deck);
+    assert!(before.len() >= 3);
+    run(
+        &deck,
+        vec![Operation::Move {
+            target: before[0].0.clone(),
+            after: Some(before[2].0.clone()),
+            before: None,
+            if_match: None,
+        }],
+    );
+    let after = slide_ids_and_titles(&deck);
+    assert_eq!(
+        after.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        before.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        "the reader hands out the same ids in the same order, whatever moved"
+    );
+    assert_ne!(
+        after[0].1, before[0].1,
+        "`{}` names the same slide after a move; the property under test is gone",
+        before[0].0
+    );
+
+    // DocMark carries its ids in the file, so the same batch keeps them.
+    let markdown = as_docmark("pptx/slide-order.pptx", &dir);
+    let before = slide_ids_and_titles(&markdown);
+    run(
+        &markdown,
+        vec![Operation::Move {
+            target: before[0].0.clone(),
+            after: Some(before[2].0.clone()),
+            before: None,
+            if_match: None,
+        }],
+    );
+    let after = slide_ids_and_titles(&markdown);
+    let mut moved: Vec<&(String, String)> = after.iter().collect();
+    moved.sort();
+    let mut original: Vec<&(String, String)> = before.iter().collect();
+    original.sort();
+    assert_eq!(
+        moved, original,
+        "a DocMark file's ids must follow their nodes across a move"
+    );
+    assert_ne!(
+        after.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        before.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        "if the ids are still in the same order, nothing moved"
+    );
+}
+
+fn slide_ids_and_titles(path: &Path) -> Vec<(String, String)> {
+    match document(path) {
+        docsai_model::Document::Presentation(deck) => deck
+            .slides
+            .iter()
+            .map(|s| {
+                (
+                    s.id.as_ref().map(|i| i.0.clone()).unwrap_or_default(),
+                    s.title().unwrap_or_default(),
+                )
+            })
+            .collect(),
+        other => panic!("not a deck: {other:?}"),
+    }
 }

@@ -288,6 +288,35 @@ The invariants, first, because every row below is one of them applied:
 | `set_notes` | the notes' blocks are content of the slide and are not separately addressable, so none are allocated. |
 | `replace_image` | none. The `ImageRef` keeps its id; only the asset it points at changes. |
 
+#### 5.4.1 What «never renumbered» means, and where it stops
+
+The invariants above are about **one reading of one document**, and that is the whole of what
+they claim. Said the way a caller needs to hear it: *an id is stable for the lifetime of a
+reading.*
+
+No Office format stores a DocMark node id, and this project deliberately does not annotate a
+package to make one stick — writing ids into a `.docx` as bookmarks was tried and removed,
+because it changes what the document *is* to serve an addressing scheme that is ours. So a reader
+assigns ids in document order every time it opens a package. The consequence is exact and is
+measured
+(`crates/docsai-convert/tests/edit_ops.rs::a_package_reassigns_ids_on_the_next_read_and_docmark_does_not`):
+
+- Within a request, nothing is renumbered. `move n1 after n3` leaves every id where it was, the
+  response names nodes by the ids the caller read, and §5.3's «ids are stable, positions are not»
+  holds without qualification.
+- On the **next read of a package**, after any operation that changed the document's order —
+  `move`, `delete`, `insert_after`, `insert_before`, `duplicate_slide` — the reader hands the same
+  tokens out again in document order, so `n1` may now name the node that used to be `n3`. A
+  caller holding ids from before such an operation must re-read before using them.
+- A **`.dmk.md` does not have the property.** DocMark writes its ids into the file, so they
+  follow their nodes across a move and survive any number of reads.
+
+This is a property and not a defect: it is what «the package is the document» costs, and the
+alternative was rejected on fidelity grounds. It is stated here because a caller reading §5.4
+alone would reasonably conclude otherwise, and an agent that acted on that conclusion would edit
+the wrong slide. An `if_match` etag is the guard: an id that has come to mean a different node
+carries a different etag, so a stale batch is refused rather than misapplied (§7).
+
 ### 5.5 Ids the caller writes
 
 Inserted content is DocMark, so it may carry `{#n9}`.
@@ -387,11 +416,18 @@ A `table` or `row` is refused; the cell's paragraph is the target, reached by pa
 |---|---|---|
 | `bold`, `italic`, `strike`, `small_caps`, `caps` | bool | `FontProps` |
 | `underline` | `none`, `single`, `double`, `thick`, `dotted`, `dashed`, `wave` | `FontProps::underline` |
-| `color`, `highlight` | `RRGGBB` | `FontProps` |
+| `color` | `RRGGBB` | `FontProps::color` |
+| `highlight` | a highlight **name**: `none`, `black`, `blue`, `cyan`, `darkBlue`, `darkCyan`, `darkGray`, `darkGreen`, `darkMagenta`, `darkRed`, `darkYellow`, `green`, `lightGray`, `magenta`, `red`, `white`, `yellow` | `FontProps::highlight` |
 | `size` | a DocMark length (`11pt`) | `FontProps::size` |
 | `font` | string | `FontProps::name` |
 | `align` | `left`, `center`, `right`, `justify` | `ParaProps::align` |
 | `style` | a style id present in the document's catalogue | `ParaFormat::style` |
+
+`highlight` is **not** a colour, and 17-A typed it as one by analogy with `color`. The IR holds
+`w:highlight/@val`, which is the `ST_HighlightColor` enumeration; a hex value written there
+produces a package Word does not honour, which is a silent no-op reported as a change. 17-H
+measured that and the key is now validated against the list above, refusing anything else with
+`UnknownField` naming it.
 
 An unknown key is `UnknownField`, not an ignored key. A misspelled `bould: true` that returned
 success would be a silent no-op reported as a change, which is worse than a refusal by exactly the
@@ -401,8 +437,14 @@ amount an agent trusts the response.
 alone. That distinction is why the field is a map and not a struct of `Option`s on the wire.
 
 A **font** property set on a paragraph or a heading applies to the paragraph's whole content: it
-is written to `ParaFormat::run_direct` *and* the same property is cleared on every descendant run
-that overrode it, so the paragraph reads uniformly. This is the operation's definition, not a
+is written to `ParaFormat::run_direct`, it is set on **every run of the paragraph**, and it is
+cleared on every descendant run that would otherwise override those, so the paragraph reads
+uniformly. 17-A specified only the first and the third of those three, and 17-H measured what
+that delivered: `run_direct` is the *paragraph mark's* run properties, which ODF writes into the
+paragraph's own text properties but docx writes to `w:pPr/w:rPr` and pptx to `a:endParaRPr` —
+neither of which formats anything a reader sees. `set_props {"bold": true}` therefore reported a
+change and left the document reading exactly as before, on two of the three families. Setting the
+runs is what makes the operation's own definition true. This is the operation's definition, not a
 degradation, and it emits no warning: a caller that says «bold this paragraph» and gets a
 paragraph with one stubbornly non-bold word has been failed, and a warning on every such call
 would fire on the ordinary case. On a `shape`, the same applies to every paragraph of its body.
@@ -892,9 +934,33 @@ Each names the increment that owns it.
   session preamble, and the wire-cost suite moved 5 355 → 5 616 tokens, **+4.9 %**, inside the
   gate's 5 % allowance and without the hatch (`crates/docsai-mcp/tests/goldens/wire-cost.md`).
   §10.
-- **Selectors as targets**, refused in §5.2 against a literal reading of plan task 2. If the owner
-  reads the plan as requiring them, it is a version 2 decision and not a patch. **17-H**.
-- **«Four document classes»**, read in §2 as text / workbook / presentation / docmark. **17-H**.
+- ~~**Selectors as targets**, refused in §5.2 against a literal reading of plan task 2.~~ Settled
+  in **17-H**: §5.2's narrowing stands for version 1, and the reason is now measured rather than
+  argued — the acceptance loop that plan task 2 exists to serve costs **2 tool calls and 804
+  tokens** with ids alone (`crates/docsai-mcp/tests/goldens/wire-cost.md`), so a selector saves a
+  caller nothing it does not already have. It remains a version 2 decision and not a patch: the
+  set is closed and versioned (§1), and adding a target form is exactly what the version number
+  is for.
+- ~~**«Four document classes»**, read in §2 as text / workbook / presentation / docmark.~~
+  Settled in **17-H**: the reading stands, and it is now a walked table rather than a claim.
+  `crates/docsai-convert/tests/edit_matrix.rs` holds §11's matrix as a constant and visits
+  **72 cells** — ten operations over four classes, with §2's «both packages» for text and
+  workbook and one DocMark case per IR root an operation applies to. Every `✔` is a round trip
+  asserted on the document's own DocMark and every `—` is a typed refusal that also leaves the
+  file byte-identical. A combination the file cannot exercise is a panic, so the table cannot be
+  covered by omission.
+- ~~**`set_props`'s reach into a paragraph**, and `highlight`'s type.~~ Both were defects, found
+  in **17-H** and fixed: §6.2 above. A font property now reaches the runs, and `highlight` is the
+  enumeration it always was in the IR.
+- **The byte-level sibling criterion, and which writers can meet it.** Measured in **17-H**: the
+  preserved skeleton is a **pptx** property (Phase 15), so a deck written back with no operations
+  is byte-identical and an edited one differs in exactly one part. The docx, odt, xlsx and ods
+  writers build their parts from the model, so their baseline is what the writer would have
+  produced from the same document with no operations at all — against that baseline the criterion
+  holds for all five families
+  (`crates/docsai-convert/tests/edit_transaction.rs::an_edit_leaves_every_sibling_byte_identical_inside_the_part_it_changed`).
+  Extending the preserved skeleton beyond pptx is a phase, not a patch, and is carried forward in
+  [`kb/92-phase-17-loop.md`](../kb/92-phase-17-loop.md).
 - **Risk P2.** `apply_edits` multiplies the number of ways bytes leave this project, and every one
   of them reaches a package as a splice into a preserved part — which is exactly the construction
   `docs/spikes/P2-powerpoint-gate.md` asks about, and it is still unsigned

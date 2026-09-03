@@ -29,6 +29,18 @@ use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
 /// How much the suite total may grow before the gate refuses the update.
 const MAX_INFLATION: f64 = 5.0;
 
+/// Plan v2's fourth acceptance criterion for Phase 17, as a number: the
+/// scripted loop «retitle slide 4, add a bullet, bold it, verify» on a
+/// 40-slide deck costs at most this many tool calls and this many tokens.
+///
+/// The tokens are the **task's own calls** — the `deck-retitle` row — and not
+/// the `session-preamble` row, which every task in a session pays once and
+/// which this harness has always tallied separately ([[kb/85]]). The preamble
+/// is reported beside the result all the same, so cost cannot be moved from
+/// one column to the other without it showing.
+const LOOP_MAX_CALLS: usize = 3;
+const LOOP_MAX_TOKENS: usize = 2_000;
+
 /// The repository root, which this test makes the working directory.
 ///
 /// Every path in a request is relative to it on purpose: an absolute path
@@ -70,6 +82,12 @@ impl Meter {
             response_bytes: from_server.len(),
             request_tokens: count(&String::from_utf8_lossy(&to_server)),
             response_tokens: count(&String::from_utf8_lossy(&from_server)),
+            // Counted at the transport like everything else here: the
+            // criterion's «tool calls» are the `tools/call` frames the client
+            // sent, not a number the test kept on the side.
+            calls: String::from_utf8_lossy(&to_server)
+                .matches("\"method\":\"tools/call\"")
+                .count(),
         }
     }
 }
@@ -80,6 +98,7 @@ struct Tally {
     response_bytes: usize,
     request_tokens: usize,
     response_tokens: usize,
+    calls: usize,
 }
 
 impl Tally {
@@ -204,45 +223,90 @@ async fn scenario_session_preamble() -> Tally {
     tally
 }
 
-/// Locate and read one slide title in a 40-slide deck.
+/// Plan v2's acceptance criterion, scripted: **retitle slide 4, add a bullet,
+/// bold it, verify** on a 40-slide deck, in ≤ 3 tool calls and ≤ 2 000 tokens.
 ///
-/// The loop stops at the read: writing a pptx package is Phase 15, so the
-/// return leg cannot be measured yet. The read half is the half that used to
-/// cost the whole deck.
+/// It is two calls, and the second one is the whole return leg:
+///
+/// 1. `read_selection` on slide 4 — the node ids, the etags, and `next-id`,
+///    which is how the request below knows `n121` is free to write on the
+///    bullet it creates (`docs/edit-operations.md` §5.5).
+/// 2. `apply_edits` with the three operations. The **verify** step costs
+///    nothing: 17-D's report already carries each changed node's new etag, so
+///    there is no confirmation read (§5.6).
+///
+/// The deck is copied first, off the wire, because an agent edits its own file
+/// and not the corpus.
 async fn scenario_deck_retitle() -> Tally {
-    let (client, meter) = session().await;
     let source = corpus("pptx/forty-slides.pptx");
-    let written = scratch("deck.dmk.md");
+    let deck = scratch("deck.pptx");
+    std::fs::copy(&source, &deck).expect("copies the deck");
+    let before = std::fs::read(&deck).expect("reads the deck");
 
-    call(&client, "estimate_tokens", json!({ "path": source })).await;
-    call(
-        &client,
-        "convert_to_markdown",
-        json!({ "path": source, "output_path": written }),
-    )
-    .await;
-    call(
-        &client,
-        "outline_document",
-        json!({ "path": written, "max_nodes": 5 }),
-    )
-    .await;
-    let hits = call(
-        &client,
-        "search_document",
-        json!({ "path": written, "query": "Slide 7", "limit": 3 }),
-    )
-    .await;
-    assert!(hits.contains("Slide 7"), "the deck says it: {hits}");
-    call(
+    let (client, meter) = session().await;
+    let slide = call(
         &client,
         "read_selection",
-        json!({ "path": written, "select": "s7" }),
+        json!({ "path": &deck, "select": "s4" }),
     )
     .await;
+    assert!(
+        slide.contains("{#n4 .slide"),
+        "slide 4 is addressed: {slide}"
+    );
+    assert!(
+        slide.contains("next-id: 121"),
+        "the free id is named: {slide}"
+    );
+
+    let report = call(
+        &client,
+        "apply_edits",
+        json!({
+            "path": &deck,
+            "operations": [
+                { "op": "replace_text", "target": "n4/1", "text": "Resultados del Q3" },
+                {
+                    "op": "insert_after",
+                    "target": "n6",
+                    "content": "- Ingresos al alza un 12 % {list-id=n121}"
+                },
+                { "op": "set_props", "target": "n121/1/1", "props": { "bold": true } }
+            ]
+        }),
+    )
+    .await;
+    // The report is the verification: new etags for both changed nodes and the
+    // id of what was created, without a second read.
+    assert!(report.contains("n4/1"), "the retitled node: {report}");
+    assert!(report.contains("n121"), "the created bullet: {report}");
 
     let tally = meter.tally();
     let _ = client.cancel().await;
+
+    // Off the wire, and therefore free: the deck really did change, and it
+    // changed the way the report said it did.
+    assert_ne!(
+        std::fs::read(&deck).expect("reads the deck"),
+        before,
+        "the return leg wrote nothing"
+    );
+    let view = scratch("deck-after.dmk.md");
+    docsai_convert::convert_file(
+        Path::new(&deck),
+        Some(Path::new(&view)),
+        &docsai_convert::ConvertOptions::default(),
+    )
+    .expect("re-reads the edited deck");
+    let text = std::fs::read_to_string(&view).expect("reads the view");
+    assert!(
+        text.contains("Resultados del Q3"),
+        "the new title is not there"
+    );
+    assert!(
+        text.contains("**Ingresos al alza un 12 %**"),
+        "the bullet is not there, or is not bold"
+    );
     tally
 }
 
@@ -384,18 +448,41 @@ async fn the_agent_loop_costs_what_the_golden_says() -> anyhow::Result<()> {
          | scenario | request bytes | response bytes | request tokens | response tokens | \
          total tokens |\n|---|---|---|---|---|---|\n",
     );
-    report.push_str(&row("session-preamble", scenario_session_preamble().await));
-    report.push_str(&row(
-        "deck-retitle (read half)",
-        scenario_deck_retitle().await,
-    ));
+    let preamble = scenario_session_preamble().await;
+    report.push_str(&row("session-preamble", preamble));
+    let loop_cost = scenario_deck_retitle().await;
+    report.push_str(&row("deck-retitle", loop_cost));
     report.push_str(&row("report-fix-typo", scenario_report_fix_typo().await));
     report.push_str(&row("sheet-add-row", scenario_sheet_add_row().await));
+
+    // The criterion, asserted before the golden is even consulted: a golden is
+    // a record of what something costs, and this is a budget. A regenerated
+    // golden must never be able to make the loop affordable.
+    assert!(
+        loop_cost.calls <= LOOP_MAX_CALLS && loop_cost.total_tokens() <= LOOP_MAX_TOKENS,
+        "the agent loop costs {} tool calls and {} tokens, over its budget of {LOOP_MAX_CALLS} \
+         and {LOOP_MAX_TOKENS}",
+        loop_cost.calls,
+        loop_cost.total_tokens()
+    );
+    report.push_str(&format!(
+        "\n## The Phase 17 acceptance criterion\n\n\
+         «retitle slide 4, add a bullet, bold it, verify» on a 40-slide deck, \
+         `corpus/pptx/forty-slides.pptx`, costs **{} tool calls** and **{} tokens** \
+         ({} in, {} out) against a budget of {LOOP_MAX_CALLS} and {LOOP_MAX_TOKENS}. \
+         That is the `deck-retitle` row: the task's own calls. The `session-preamble` row \
+         beside it, **{} tokens**, is what every task in a session pays once and is not part \
+         of this budget — it is reported here so the two columns cannot be swapped quietly.\n",
+        loop_cost.calls,
+        loop_cost.total_tokens(),
+        loop_cost.request_tokens,
+        loop_cost.response_tokens,
+        preamble.total_tokens(),
+    ));
     report.push_str(
         "\n## Not measured yet\n\n\
          * **restyle every `Heading 2`** — waits on E6 (`read_styles` / `set_style`); today it \
-         has no loop that does not read the document.\n\
-         * **deck-retitle, return leg** — waits on pptx write (Phase 15).\n",
+         has no loop that does not read the document.\n",
     );
 
     let golden = golden_path();

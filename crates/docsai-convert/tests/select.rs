@@ -348,3 +348,80 @@ fn a_footnote_is_not_a_document_of_its_own() {
         .iter()
         .all(|node| node.kind != docsai_model::NodeKind::Footnote));
 }
+
+// ------------------------------------------------------------------- 17-H
+
+/// The blast radius of the `ETAGS_MOVE_ON_REPARSE` defect, measured.
+///
+/// 17-B chose the subtree as an etag's scope, which means a defect inside a
+/// cell moves the etag of every node above it. 17-B handed the question of how
+/// wide that actually is to 17-H, and describing it is not the same as knowing
+/// it: this test takes the very selection
+/// `every_corpus_document_selects_into_a_document` pins, re-parses it, and
+/// names every id whose etag moved.
+///
+/// The consequence for a caller is stated rather than left to be discovered:
+/// an `if_match` on one of these ids can be refused as `StaleEtag` against a
+/// document nobody changed. That is a **false refusal**, which is a defect —
+/// but it fails in the safe direction, no overwrite, and the fix belongs where
+/// the ODF table is read and not in the edit engine. Carried forward in
+/// `kb/92-phase-17-loop.md`.
+#[test]
+fn the_merged_table_etag_defect_is_measured_and_not_merely_described() {
+    let path = corpus("odt/table-merged.odt");
+    let selection = select_path(
+        &path,
+        &ConvertOptions::default(),
+        &"s1-s5".parse::<Selector>().unwrap(),
+    )
+    .expect("selects");
+    let (again, _) = rewrite_with_assets(&selection.docmark, &path);
+    assert_eq!(
+        body_of(&again),
+        body_of(&selection.docmark),
+        "the body is what always agreed; if it stopped, this is a different defect"
+    );
+
+    let was = etags_of(&selection.docmark);
+    let now = etags_of(&again);
+    let moved: Vec<&String> = was
+        .keys()
+        .filter(|id| now.get(*id) != was.get(*id))
+        .collect();
+    assert!(
+        !moved.is_empty(),
+        "the defect is gone: drop `odt/table-merged.odt` from ETAGS_MOVE_ON_REPARSE \
+         and delete this test"
+    );
+    // The radius, named. The table is `n1`; §7's subtree scope carries the move
+    // up to it and no further, because a section is not addressable here and
+    // the cells' own text never changed. A leaf id in this list would mean the
+    // defect had grown a second cause.
+    assert_eq!(
+        moved,
+        vec![&"n1".to_string()],
+        "the defect reaches ids this test did not expect: {moved:?}"
+    );
+}
+
+/// The `etags:` block of a selection's front matter, as a map.
+fn etags_of(markdown: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut inside = false;
+    for line in markdown.lines() {
+        if line == "etags:" {
+            inside = true;
+            continue;
+        }
+        if inside {
+            let trimmed = line.trim_start();
+            if trimmed.len() == line.len() {
+                break; // dedented: the block is over
+            }
+            if let Some((id, etag)) = trimmed.split_once(": ") {
+                out.insert(id.to_string(), etag.trim_matches('"').to_string());
+            }
+        }
+    }
+    out
+}
