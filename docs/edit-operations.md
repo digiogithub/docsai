@@ -7,7 +7,9 @@
 it is wrong, and changing it is a specification decision with a version bump attached, not a way
 to make a test pass.
 
-Nothing here is implemented yet. Phase 17-A is the specification half of task 1 on purpose — the
+Implementation began with 17-B (target resolution and the etag precondition,
+[`kb/87-phase-17-etags.md`](../kb/87-phase-17-etags.md)); no operation applies anything yet.
+Phase 17-A was the specification half of task 1 on purpose — the
 same discipline that produced §11.3 before a line of comment code, and that let Phase 14 write a
 parser that worked on the first run. The increments that implement it are 17-B (etags and the
 precondition), 17-C (the transaction), 17-D (`dry_run` and the report) and 17-E (the two doors).
@@ -204,6 +206,13 @@ index  ::= 1..N          # 1-based position in the parent's child sequence
   deck. It exists because a single-section text document has no addressable section (§11.1: a
   section is addressed only in a multi-section document) and would otherwise have no way to say
   «at the top».
+  **In a multi-section text document `doc`'s children are its sections**, and the third block of
+  the second section is `doc/2/3`. 17-B added this sentence, which 17-A left implicit: `doc` names
+  what the document *shows*, so the single section that DocMark does not write is transparent and
+  the sections it does write are not. The rule is the same one §11.1 already states about when a
+  section is addressable at all, applied to the root.
+  **`doc` is reserved**, so a document containing a node whose id is literally `doc` makes the
+  root ambiguous; that is refused rather than shadowed, on the same grounds as `DuplicateId`.
 - An **index** is 1-based, matching the `s4` selectors of Phase 11 and every other position in
   DocMark.
 
@@ -644,11 +653,21 @@ Every operation accepts the optional field **`if_match`**, whose value is an eta
 document-level etag would fail on any concurrent change anywhere in the file, including in a
 region the caller neither read nor touched, which turns a precondition into a lock.
 
-**What 17-B decides**, reserved here rather than pre-empted: whether an etag covers the node
-alone or the node and its subtree. `move` and `delete` operate on subtrees, so the answer decides
-whether a concurrent edit *inside* a subtree is detected before that subtree is moved or deleted.
-This document fixes the field's name, its type, its placement and its failure; 17-B fixes its
-scope and implements the check.
+**Scope: an etag covers the node *and its subtree*.** This was reserved for 17-B and 17-B decided
+it; the argument is in [`kb/87-phase-17-etags.md`](../kb/87-phase-17-etags.md). A slide's etag
+moves when a shape on it changes, a table's when a cell does, a section's when any block inside
+it does. The alternative — a node-only etag — would let `delete n4` and `move n4` guarded by an
+`if_match` sail through a concurrent edit *inside* `n4` and destroy it, which is the one failure
+the precondition exists to prevent.
+
+**What an etag does not cover is appearance.** It hashes content and structure; formatting
+properties are excluded, as they have been since Phase 10. The reason is that `agent` fidelity
+drops appearance by design (spec §6), so an etag that hashed formatting would differ between the
+same node read at `agent` and read at `full`, and §3 admits both for editing: a caller that read
+one and wrote against the other would be refused for a change nobody made. A false refusal is as
+forbidden as a missed one (§0.5). The consequence is stated rather than hidden: **a concurrent
+`set_props` is not detected by `if_match` in version 1**, and a caller that must serialise
+formatting edits has to do so above this layer.
 
 ## 8. Refusals
 
@@ -675,7 +694,7 @@ mismatch. The variants version 1 defines:
 | `GridMismatch { target, destination, got, takes }` | `move` of a row into a table with a different column count. |
 | `LastOfKind { kind }` | `delete` of the last slide, sheet or section. |
 | `Unaddressable { reason }` | the request's fidelity or id policy would produce a document with no ids (§3). |
-| `StaleEtag { target, expected, actual }` | **reserved for 17-B** (§7). |
+| `StaleEtag { target, expected, actual }` | `if_match` was given and the target's etag is not it (§7). Carries both values and never overwrites. |
 
 ### 8.1 The writer's own refusals
 
@@ -826,7 +845,8 @@ below is reachable through §9.
 
 Each names the increment that owns it.
 
-- **The scope of an etag** — node, or node and subtree. **17-B**, §7.
+- ~~**The scope of an etag** — node, or node and subtree.~~ Decided in **17-B**: node *and*
+  subtree, §7.
 - **Whether a writer can request recalculation** after `set_cell` writes a formula, and the
   warning if it cannot. **17-E**, §6.7.
 - **The full response shape**, of which §5.6 fixes only the id-bearing part. **17-D**.

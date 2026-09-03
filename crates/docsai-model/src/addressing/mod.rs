@@ -19,11 +19,18 @@
 //! ```
 //!
 //! The companion mechanism is the [`Etag`]: a short hash of the *normalised*
-//! content of a node, used as an edit precondition. Normalisation excludes ids,
-//! etags and formatting, so restyling a paragraph does not churn its etag.
+//! content of a node **and of its whole subtree**, used as an edit
+//! precondition. Normalisation excludes ids, etags and formatting, so restyling
+//! a paragraph does not churn its etag. Phase 17-B settled the scope and argues
+//! it in [`target`]; [`target::check_if_match`] is the precondition itself.
 
+pub mod target;
 pub mod walk;
 
+pub use target::{
+    check_if_match, etag_of, resolve, resolve_checked, resolve_str, MalformedReason, Place,
+    PreconditionError, Target, TargetError, TargetRoot, DOC_ROOT,
+};
 pub use walk::{
     assign_ids, clear_ids, comment_without_ids, for_each_addressable, implicit_shapes,
     list_is_addressable, node_ids, observe_ids, paragraph_is_container, Addressable, NodeKind,

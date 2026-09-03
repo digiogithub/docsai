@@ -100,6 +100,7 @@ Practical difference between the two folders:
 | [84 — Phase 16 close](84-phase-16-close.md) | The three criteria answered with re-run evidence, the thirty things carried forward, the three places a budget or a golden moved — and risk P2 still open, with what that means for Phase 17 |
 | [85 — Phase 17 plan](85-phase-17-plan.md) | `apply_edits`: the nine operations, etags, the transaction, and the reading of the 2k-token budget decided before anyone is losing |
 | [86 — Phase 17 A](86-phase-17-operations.md) | The operation set specified before it is written: ten names, what each does to ids, why a selector is not a target, the nineteen refusals, and 118 tokens for one edit |
+| [87 — Phase 17 B](87-phase-17-etags.md) | The etag covers the node **and its subtree**, argued from what each choice does when it is wrong; the appearance it deliberately does not cover; total target resolution with six typed failures, and one etag of twenty-five moving through a real package |
 
 ## Status in one line
 
