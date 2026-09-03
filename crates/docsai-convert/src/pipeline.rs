@@ -240,9 +240,10 @@ pub fn read_path_with_options(
         return Ok((document, format, report));
     }
 
-    // Phase 5: optional LibreOffice pre-conversion for legacy .doc.
+    // Phase 5 for `.doc`, Phase 19-B for `.ppt`: optional LibreOffice
+    // pre-conversion into the modern twin, then the ordinary reader.
     if crate::loffice::benefits_from_loffice(format) {
-        if let Some(result) = try_loffice_doc(input, format, assets, options)? {
+        if let Some(result) = try_loffice(input, format, assets, options)? {
             return Ok(result);
         }
     }
@@ -267,22 +268,34 @@ pub fn read_path_with_options(
     Ok((document, format, report))
 }
 
-/// Attempts LibreOffice `.doc` → `.docx` → IR. Returns `Ok(None)` when the
-/// policy says to skip or LO is unavailable under `Auto`.
-fn try_loffice_doc(
+/// Attempts LibreOffice *legacy* → *modern* → IR.
+///
+/// `.doc` → `.docx` (Phase 5) and `.ppt` → `.pptx` (Phase 19-B) are the same
+/// operation with a different extension, so they are the same function: one
+/// `--use-loffice` policy, one sandbox, one place where a second legacy format
+/// would be added.
+///
+/// Returns `Ok(None)` when the policy says to skip or LO is unavailable under
+/// `Auto`; the caller then falls through to the native reader, which for `.ppt`
+/// is the 19-D seam and says by name what it does not have.
+fn try_loffice(
     input: &Path,
     source_format: Format,
     assets: &mut dyn AssetStore,
     options: &ConvertOptions,
 ) -> Result<Option<(Document, Format, ConversionReport)>, ConvertError> {
+    let Some((intermediate, extension)) = crate::loffice::loffice_route(source_format) else {
+        return Ok(None);
+    };
     let soffice = crate::loffice::find_soffice();
     let use_it = crate::loffice::should_use(options.use_loffice, soffice.is_some())?;
     if !use_it {
         if options.use_loffice == crate::UseLoffice::Auto {
             tracing::info!(
-                "LibreOffice not found; reading {} with the native degraded .doc path. \
+                "LibreOffice not found; reading {} with the native .{} path. \
                  Install LibreOffice or set DOCSAI_LIBREOFFICE for full fidelity.",
-                input.display()
+                input.display(),
+                source_format.as_str(),
             );
         }
         return Ok(None);
@@ -291,20 +304,29 @@ fn try_loffice_doc(
         message: "internal: soffice missing after should_use".into(),
     })?;
 
+    // Everything the child writes — the converted package and its own user
+    // profile — lives in here and is removed when `tmp` drops.
     let tmp = tempfile::tempdir().map_err(|source| ConvertError::Io {
         path: "tempdir".into(),
         source,
     })?;
-    let docx_path = crate::loffice::convert_to_docx(&soffice, input, tmp.path())?;
-    let file = File::open(&docx_path).map_err(|source| ConvertError::Io {
-        path: docx_path.display().to_string(),
+    let converted = match intermediate {
+        Format::Pptx => crate::loffice::convert_to_pptx(&soffice, input, tmp.path())?,
+        _ => crate::loffice::convert_to_docx(&soffice, input, tmp.path())?,
+    };
+    let file = File::open(&converted).map_err(|source| ConvertError::Io {
+        path: converted.display().to_string(),
         source,
     })?;
-    let (document, mut report) = docsai_office::read_docx(file, assets)?;
+    // The Phase 1 / Phase 13 reader, unchanged: a deck LibreOffice wrote is
+    // read exactly as a deck PowerPoint wrote, or the equivalence the phase
+    // claims would be an artefact of a special case.
+    let (document, mut report) = docsai_office::read(intermediate, file, assets)?;
     report.warn(docsai_model::Warning::Degraded {
-        what: "doc-via-libreoffice".into(),
+        what: format!("{}-via-libreoffice", source_format.as_str()),
         why: format!(
-            "legacy .doc pre-converted to docx with `{}` before the docx pipeline",
+            "legacy .{} pre-converted to {extension} with `{}` before the {extension} pipeline",
+            source_format.as_str(),
             soffice.display()
         ),
     });
@@ -317,9 +339,9 @@ fn try_loffice_doc(
                 .join("; "),
         )
     })?;
-    // Keep the logical source format as Doc so reports/front matter stay honest.
-    let _ = source_format;
-    Ok(Some((document, Format::Doc, report)))
+    // Keep the logical source format as the legacy one so reports and front
+    // matter stay honest about what was actually opened.
+    Ok(Some((document, source_format, report)))
 }
 
 /// Converts a file on disk.
@@ -467,7 +489,7 @@ pub(crate) fn write_document(
                 report,
             })
         }
-        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods | Format::Pptx => {
+        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods | Format::Odp | Format::Pptx => {
             let ext = target.as_str();
             let output = file_output.ok_or_else(|| {
                 ConvertError::Invalid(format!(
@@ -480,7 +502,9 @@ pub(crate) fn write_document(
                 source,
             })?;
             let write_report = match target {
-                Format::Odt | Format::Ods => docsai_odf::write(target, &document, store, file)?,
+                Format::Odt | Format::Ods | Format::Odp => {
+                    docsai_odf::write(target, &document, store, file)?
+                }
                 other => docsai_office::write(other, &document, store, file)?,
             };
             report.merge(write_report);
@@ -592,7 +616,9 @@ pub fn roundtrip_file(
     let (document1, source_format, mut report) =
         read_path_with_options(input, &mut store1, options)?;
     let office_format = match source_format {
-        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods | Format::Pptx => source_format,
+        Format::Docx | Format::Xlsx | Format::Odt | Format::Ods | Format::Odp | Format::Pptx => {
+            source_format
+        }
         // Legacy .doc round-trips through docx (write path for .doc is out of scope).
         Format::Doc => Format::Docx,
         Format::DocMark => match &document1 {
@@ -636,7 +662,7 @@ pub fn roundtrip_file(
 
     let mut office_buf = Cursor::new(Vec::new());
     let r3 = match office_format {
-        Format::Odt | Format::Ods => {
+        Format::Odt | Format::Ods | Format::Odp => {
             docsai_odf::write(office_format, &document2, &store2, &mut office_buf)?
         }
         other => docsai_office::write(other, &document2, &store2, &mut office_buf)?,
@@ -654,7 +680,9 @@ pub fn roundtrip_file(
     office_buf.set_position(0);
     let mut store3 = MemoryAssetStore::new();
     let (document3, r4) = match office_format {
-        Format::Odt | Format::Ods => docsai_odf::read(office_format, &mut office_buf, &mut store3)?,
+        Format::Odt | Format::Ods | Format::Odp => {
+            docsai_odf::read(office_format, &mut office_buf, &mut store3)?
+        }
         other => docsai_office::read(other, &mut office_buf, &mut store3)?,
     };
     report.merge(r4);
@@ -809,7 +837,8 @@ fn write_skeleton_package(
     }
     // The name is the serializer's, taken from the reference it wrote, so the
     // file and the `skeleton:` line cannot drift apart.
-    let reference = docsai_docmark::skeleton_path(&options.assets_dir, &skeleton.asset);
+    let reference =
+        docsai_docmark::skeleton_path(&options.assets_dir, &skeleton.asset, options.source_format);
     let name = reference.rsplit('/').next().unwrap_or(&reference);
     let path = assets_dir.join("_skeleton").join(name);
     store.relocate(&skeleton.asset, &path).map_err(|source| {

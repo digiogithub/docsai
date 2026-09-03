@@ -8,8 +8,10 @@ RELAX NG for an `.odp` (Phase 18-A, `kb/96-phase-18-corpus.md`).
     python3 corpus/schema_gate.py basic-slides    # one fixture, by name
     python3 corpus/schema_gate.py --keep /tmp/g   # leave the packages behind
 
-The two arms measure different things and say so: `odf_arm()` carries the
-argument for what it can and cannot assert while there is no `.odp` writer.
+Both arms validate the same two things: the packages this project's fixtures
+are, and every part its writers produce. `odf_arm()` carries the argument for
+the one variant it does not have — an `.odp` written on no package at all,
+which the `.odp` writer refuses by name rather than inventing a design.
 
 Requires `xmllint` (Debian/Ubuntu `libxml2-utils`, macOS built in) and a built
 CLI (`cargo build -p docsai-cli`). Neither is guessed at: a missing tool exits 2
@@ -392,22 +394,27 @@ def strip_foreign(blob, allowed):
     return ET.tostring(root, encoding="utf-8"), True
 
 
-def odf_parts(package):
+def odf_parts(package, only=None):
     """Every XML part of an ODF package, paired with the grammar that describes
     it. `META-INF/manifest.xml` has a schema of its own — it is not written in
     the document grammar and validating it against the big one reports "Did not
-    expect element manifest there"."""
+    expect element manifest there".
+
+    `only` narrows the set to a collection of part names, which is how the
+    writer arm asks for the parts the writer actually produced."""
     parts = []
     with zipfile.ZipFile(package) as zf:
         for name in sorted(zf.namelist()):
             if not name.endswith(".xml"):
+                continue
+            if only is not None and name not in only:
                 continue
             schema = ODF_MANIFEST_SCHEMA if name.startswith("META-INF/") else ODF_SCHEMA
             parts.append((name, zf.read(name), schema))
     return parts
 
 
-def validate_odf(package, workdir):
+def validate_odf(package, workdir, only=None):
     """Every XML part of one ODF package against the vendored RELAX NG.
 
     Two grammars means two xmllint runs; both are reported into one dictionary
@@ -416,7 +423,7 @@ def validate_odf(package, workdir):
     by_schema = {}
     processed = set()
     allowed = odf_namespaces()
-    for name, blob, schema in odf_parts(package):
+    for name, blob, schema in odf_parts(package, only):
         # A space in a part name — `Object 1/content.xml` is where an ODF chart
         # lives — comes back from xmllint percent-escaped, and the escaped path
         # matches nothing this function wrote. Renaming it on disk keeps every
@@ -433,19 +440,24 @@ def validate_odf(package, workdir):
     return problems, processed
 
 
-def odf_arm(scratch, wanted):
-    """The `.odp` corpus against ODF 1.3.
+def odf_arm(scratch, wanted, binary):
+    """The `.odp` corpus against ODF 1.3, in two passes.
 
-    What this measures, stated plainly because it is **weaker** than the OOXML
-    arm above and must not be mistaken for it: the OOXML arm validates what the
-    *writer* produces, found by diffing a written package against the package it
-    was written on. There is no `.odp` writer until 18-D, so what is validated
-    here is what `corpus/generate.py` produces — the fixtures themselves. That
-    is still a real measurement (the generator is this repository's code, and it
-    is the code every later increment is measured against), and it is the
-    difference between a gated new format and an ungated one. When 18-D lands
-    the writer, this arm gains the writer's output the same way the OOXML arm
-    has it, and this paragraph gets shorter.
+    **The fixtures**, which is what 18-A could measure: the packages
+    `corpus/generate.py` produces, every XML part of each.
+
+    **The writer's output**, which 18-D closes: the same thing the OOXML arm
+    does — the deck's DocMark with every page title retyped, written back on the
+    preserved package, and every XML part whose bytes are new or changed
+    validated. That set is found by diffing, so it cannot drift: a part the
+    writer starts rewriting turns up in it by itself.
+
+    There is no `generated` variant here, and that is the writer's design rather
+    than a gap in the gate: the `.odp` writer splices into the package a deck
+    was read from and ships no embedded ODF template, so a deck with its
+    `skeleton:` line removed is refused by name instead of being written on a
+    design nobody chose. `crates/docsai-convert/tests/odp_write.rs` pins the
+    refusal; there is nothing for a schema to validate.
 
     `odt/` and `ods/` are deliberately **not** here, and not because the
     machinery cannot reach them: it is one glob away, and switching it on today
@@ -467,13 +479,8 @@ def odf_arm(scratch, wanted):
         decks = [d for d in decks if d.stem in wanted]
     checked = invalid = 0
     failures = []
-    for deck in decks:
-        print(f"{deck.name} [fixture: the package corpus/generate.py wrote]")
-        problems, processed = validate_odf(deck, scratch / "odf" / deck.stem)
-        if not problems:
-            failures.append(f"{deck.name}: the package has no XML part at all")
-            print("  SKIP  no XML part to validate")
-            continue
+    def report(problems, processed):
+        nonlocal checked, invalid
         for name in sorted(problems):
             checked += 1
             if problems[name]:
@@ -484,7 +491,60 @@ def odf_arm(scratch, wanted):
             else:
                 foreign = " (after foreign markup removal)" if name in processed else ""
                 print(f"  ok    {name}{foreign}")
+
+    for deck in decks:
+        print(f"{deck.name} [fixture: the package corpus/generate.py wrote]")
+        problems, processed = validate_odf(deck, scratch / "odf" / deck.stem)
+        if not problems:
+            failures.append(f"{deck.name}: the package has no XML part at all")
+            print("  SKIP  no XML part to validate")
+            continue
+        report(problems, processed)
+
+        print(f"{deck.name} [edited: the parts the .odp writer rewrote]")
+        workdir = scratch / "odf-written" / deck.stem
+        written, why = odp_package_for(binary, deck, workdir)
+        if written is None:
+            skipped = f"{deck.name} [edited]: {why}"
+            failures.append(skipped)
+            print(f"  SKIP  {why}")
+            continue
+        names = [name for name, _ in written_parts(written, deck)]
+        if not names:
+            failures.append(
+                f"{deck.name} [edited]: nothing to validate — the writer produced "
+                f"no part of its own"
+            )
+            print("  SKIP  the writer produced no part of its own")
+            continue
+        problems, processed = validate_odf(written, workdir / "parts", only=set(names))
+        report(problems, processed)
     return checked, invalid, failures
+
+
+def odp_package_for(binary, deck, workdir):
+    """Convert a `.odp` to DocMark, retype every page title, write it back.
+
+    The retitle is what makes the writer *write*: an untouched `.odp` comes back
+    byte for byte the package that was read (18-D), so a round trip on its own
+    produces no part of the writer's for a schema to look at."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    markdown_path = workdir / "deck.dmk.md"
+    run(binary, "convert", deck, "-o", markdown_path)
+    if not markdown_path.exists():
+        return None, "the deck did not convert to DocMark"
+
+    markdown, touched = retitle(markdown_path.read_text(encoding="utf-8"))
+    if not touched:
+        return None, "no page heading to retype"
+    edited = workdir / "edited.dmk.md"
+    edited.write_text(markdown, encoding="utf-8")
+
+    out = workdir / "edited.odp"
+    run(binary, "convert", edited, "-o", out)
+    if not out.exists():
+        return None, "the DocMark did not convert back to a package"
+    return out, None
 
 
 def main():
@@ -550,7 +610,7 @@ def main():
                         print(f"  ok    {name}{mce}")
 
         print(f"\n--- ODF: corpus/odp against {ODF_SCHEMA.name} ---")
-        odf_checked, odf_invalid, odf_failures = odf_arm(scratch, wanted_odf)
+        odf_checked, odf_invalid, odf_failures = odf_arm(scratch, wanted_odf, binary)
         checked += odf_checked
         invalid += odf_invalid
         failures += odf_failures

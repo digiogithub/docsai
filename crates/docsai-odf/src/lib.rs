@@ -1,4 +1,4 @@
-//! OpenDocument readers and writers (`.odt`, `.ods`).
+//! OpenDocument readers and writers (`.odt`, `.ods`, `.odp`).
 //!
 //! Phase 4 of `docs/development-plan.md`. This crate depends on `docsai-model`
 //! and on nothing else in the workspace (`AGENTS.md` §3).
@@ -37,11 +37,7 @@ use std::io::{Read, Seek, Write};
 pub const READABLE: &[Format] = &[Format::Odt, Format::Ods, Format::Odp];
 
 /// Formats this crate can write.
-///
-/// `.odp` is deliberately absent: increment 18-B reads a deck, and the writer
-/// and its preserved skeleton are 18-D. Claiming to write one before the
-/// skeleton exists would be the support matrix lying about the crate.
-pub const WRITABLE: &[Format] = &[Format::Odt, Format::Ods];
+pub const WRITABLE: &[Format] = &[Format::Odt, Format::Ods, Format::Odp];
 
 /// Formats this crate handles.
 pub const FORMATS: &[Format] = &[Format::Odt, Format::Ods, Format::Odp];
@@ -105,6 +101,19 @@ pub fn write_ods<W: Write + Seek>(
     ods::write::write_ods(document, assets, writer)
 }
 
+/// Writes a `.odp` presentation.
+///
+/// The deck is spliced into the package it was read from, so it needs the
+/// preserved skeleton the reader stored; a deck with none is an error by name
+/// (`docsai_odf::odp::write`).
+pub fn write_odp<W: Write + Seek>(
+    document: &Document,
+    assets: &dyn AssetStore,
+    writer: W,
+) -> Result<ConversionReport, WriteError> {
+    odp::write::write_odp(document, assets, writer)
+}
+
 /// Writes any ODF document this crate supports.
 pub fn write<W: Write + Seek>(
     format: Format,
@@ -115,6 +124,7 @@ pub fn write<W: Write + Seek>(
     match format {
         Format::Odt => write_odt(document, assets, writer),
         Format::Ods => write_ods(document, assets, writer),
+        Format::Odp => write_odp(document, assets, writer),
         other => Err(WriteError::Unsupported(other.to_string())),
     }
 }
@@ -122,11 +132,11 @@ pub fn write<W: Write + Seek>(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_third_odf_class_reads_but_does_not_write_yet() {
+    fn the_third_odf_class_reads_and_writes() {
         use docsai_model::Format;
         assert_eq!(super::FORMATS.len(), 3);
         assert!(super::READABLE.contains(&Format::Odp));
-        // 18-D lands the writer and the skeleton; until then the matrix says so.
-        assert!(!super::WRITABLE.contains(&Format::Odp));
+        // 18-D landed the writer and its preserved skeleton.
+        assert!(super::WRITABLE.contains(&Format::Odp));
     }
 }

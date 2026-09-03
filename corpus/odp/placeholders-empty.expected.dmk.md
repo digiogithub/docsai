@@ -11,6 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   AL1T19: { name: "AL1T19", master: Default, title: 0, body: 0 }
+skeleton: assets/_skeleton/deck-dc2cdb95.odp
 ---
 
 ## Título con cuerpo vacío {#n1 .slide layout=AL1T19 name=page1}

@@ -58,13 +58,20 @@ pub fn write_odt<W: Write + Seek>(
     Ok(report)
 }
 
-struct AutoStyles {
+/// The automatic styles a body needs, invented as it is written.
+///
+/// `prefix` is what keeps the `.odp` writer's spliced styles from colliding
+/// with the ones the package already declares: an `.odt` is generated whole and
+/// owns every name in it, while a `.odp` body is spliced into a
+/// `content.xml` that already has a `P1` of its own.
+pub(crate) struct AutoStyles {
     para: BTreeMap<String, (Option<String>, ParaProps, FontProps)>,
     text: BTreeMap<String, (Option<String>, FontProps)>,
     graphic: BTreeMap<String, GraphicOut>,
     para_seq: u32,
     text_seq: u32,
     graphic_seq: u32,
+    prefix: &'static str,
 }
 
 #[derive(Clone)]
@@ -81,6 +88,11 @@ struct GraphicOut {
 
 impl AutoStyles {
     fn new() -> Self {
+        Self::with_prefix("")
+    }
+
+    /// The same table, with every name it invents carrying `prefix`.
+    pub(crate) fn with_prefix(prefix: &'static str) -> Self {
         Self {
             para: BTreeMap::new(),
             text: BTreeMap::new(),
@@ -88,7 +100,13 @@ impl AutoStyles {
             para_seq: 0,
             text_seq: 0,
             graphic_seq: 0,
+            prefix,
         }
+    }
+
+    /// Whether anything was invented at all.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.para.is_empty() && self.text.is_empty() && self.graphic.is_empty()
     }
 
     fn para_style(
@@ -109,7 +127,7 @@ impl AutoStyles {
             }
         }
         self.para_seq += 1;
-        let name = format!("P{}", self.para_seq);
+        let name = format!("{}P{}", self.prefix, self.para_seq);
         self.para.insert(
             name.clone(),
             (parent.map(str::to_string), para.clone(), font.clone()),
@@ -130,7 +148,7 @@ impl AutoStyles {
             }
         }
         self.text_seq += 1;
-        let name = format!("T{}", self.text_seq);
+        let name = format!("{}T{}", self.prefix, self.text_seq);
         self.text
             .insert(name.clone(), (parent.map(str::to_string), font.clone()));
         Some(name)
@@ -151,19 +169,19 @@ impl AutoStyles {
             }
         }
         self.graphic_seq += 1;
-        let name = format!("fr{}", self.graphic_seq);
+        let name = format!("{}fr{}", self.prefix, self.graphic_seq);
         self.graphic.insert(name.clone(), g);
         name
     }
 }
 
-struct WriterCtx<'a> {
-    assets: &'a dyn AssetStore,
-    report: &'a mut ConversionReport,
-    auto: AutoStyles,
-    pictures: BTreeMap<String, Vec<u8>>, // path → bytes
-    pic_seq: u32,
-    note_seq: u32,
+pub(crate) struct WriterCtx<'a> {
+    pub(crate) assets: &'a dyn AssetStore,
+    pub(crate) report: &'a mut ConversionReport,
+    pub(crate) auto: AutoStyles,
+    pub(crate) pictures: BTreeMap<String, Vec<u8>>, // path → bytes
+    pub(crate) pic_seq: u32,
+    pub(crate) note_seq: u32,
 }
 
 fn build_package(
@@ -234,7 +252,7 @@ fn write_body(doc: &TextDocument, ctx: &mut WriterCtx<'_>) -> Result<String, Wri
     Ok(out)
 }
 
-fn write_blocks(
+pub(crate) fn write_blocks(
     blocks: &[Block],
     ctx: &mut WriterCtx<'_>,
     out: &mut String,
@@ -725,6 +743,16 @@ fn write_raw_inline(raw: &RawFragment, ctx: &mut WriterCtx<'_>, out: &mut String
 
 fn write_automatic_styles(auto: &AutoStyles) -> String {
     let mut s = String::from(" <office:automatic-styles>\n");
+    s.push_str(&automatic_style_bodies(auto));
+    s.push_str(" </office:automatic-styles>\n");
+    s
+}
+
+/// The `<style:style>` elements alone, with no container around them, so the
+/// `.odp` writer can splice them into an `<office:automatic-styles>` that
+/// already exists.
+pub(crate) fn automatic_style_bodies(auto: &AutoStyles) -> String {
+    let mut s = String::new();
     for (name, (parent, para, font)) in &auto.para {
         s.push_str(&format!(
             r#"  <style:style style:name="{}" style:family="paragraph""#,
@@ -792,7 +820,6 @@ fn write_automatic_styles(auto: &AutoStyles) -> String {
         }
         s.push_str("/>\n  </style:style>\n");
     }
-    s.push_str(" </office:automatic-styles>\n");
     s
 }
 
@@ -1251,7 +1278,7 @@ fn write_manifest(entries: &[(String, String)]) -> String {
     s
 }
 
-fn guess_image_mime(path: &str) -> String {
+pub(crate) fn guess_image_mime(path: &str) -> String {
     match path
         .rsplit('.')
         .next()

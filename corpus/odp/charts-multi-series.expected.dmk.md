@@ -11,6 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   AL2T1: { name: "AL2T1", master: Default, title: 0 }
+skeleton: assets/_skeleton/deck-3a6bacf2.odp
 ---
 
 ## Ventas por región y año {#n1 .slide layout=AL2T1 name=page1}

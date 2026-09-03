@@ -13,7 +13,7 @@ use docsai_model::style::{DocDefaults, FontProps, ParaProps, Style, StyleCatalog
 use docsai_model::text::{Block, DocumentMeta, Inline, PageGeometry};
 use docsai_model::units::Length;
 use docsai_model::{
-    Document, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED, DOCMARK_VERSION_COMMENTS,
+    Document, Format, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED, DOCMARK_VERSION_COMMENTS,
     DOCMARK_VERSION_PRESENTATION,
 };
 
@@ -100,7 +100,12 @@ pub fn write(
             // nothing in its body refers to one.
             if fidelity.addresses() {
                 write_layouts(out, &deck.layouts);
-                write_skeleton(out, deck.skeleton.as_ref(), &options.assets_dir);
+                write_skeleton(
+                    out,
+                    deck.skeleton.as_ref(),
+                    &options.assets_dir,
+                    options.source_format,
+                );
             }
             if fidelity == Fidelity::Full {
                 write_styles(out, &deck.styles, options.precision);
@@ -384,9 +389,18 @@ fn write_layouts(out: &mut String, catalog: &LayoutCatalog) {
 /// A path, not an asset id, for the same reason an image is a path: the
 /// document has to be readable and re-openable on its own. Absent when the deck
 /// has no skeleton, which is what a deck authored from scratch looks like.
-fn write_skeleton(out: &mut String, skeleton: Option<&SkeletonRef>, assets_dir: &str) {
+fn write_skeleton(
+    out: &mut String,
+    skeleton: Option<&SkeletonRef>,
+    assets_dir: &str,
+    source_format: Format,
+) {
     if let Some(skeleton) = skeleton {
-        scalar(out, "skeleton", &skeleton_path(assets_dir, &skeleton.asset));
+        scalar(
+            out,
+            "skeleton",
+            &skeleton_path(assets_dir, &skeleton.asset, source_format),
+        );
     }
 }
 
@@ -395,23 +409,48 @@ fn write_skeleton(out: &mut String, skeleton: Option<&SkeletonRef>, assets_dir: 
 /// Public because the naming is shared the way [`crate::raw::sidecar_path`] is:
 /// the serializer writes the reference and the caller writes the file, and a
 /// disagreement between them would leave a deck pointing at a package nobody
-/// wrote. The extension is the profile's format rather than the original file's
-/// — a `.pptm` reads as its macro-free equivalent (Phase 13-J), so the byte
-/// stream behind the reference is a presentation package either way.
-pub fn skeleton_path(assets_dir: &str, asset: &AssetId) -> String {
+/// wrote.
+///
+/// The extension names the **package family** rather than the original file's
+/// own extension: a `.pptm` reads as its macro-free equivalent (Phase 13-J), so
+/// the byte stream behind the reference is an OPC presentation package either
+/// way. A `.odp` is a different family, and calling its preserved package
+/// `deck-<hash>.pptx` would be the front matter stating something about the
+/// file that is not true (Phase 18-D).
+pub fn skeleton_path(assets_dir: &str, asset: &AssetId, source_format: Format) -> String {
     let dir = assets_dir.trim_end_matches('/');
+    format!(
+        "{dir}/_skeleton/deck-{}.{}",
+        skeleton_stem(asset),
+        skeleton_extension(source_format)
+    )
+}
+
+/// The extensions a `skeleton:` reference can carry, which is exactly one per
+/// package family this project preserves.
+pub(crate) const SKELETON_EXTENSIONS: &[&str] = &["pptx", "odp"];
+
+pub(crate) fn skeleton_extension(source_format: Format) -> &'static str {
+    match source_format {
+        Format::Odp => "odp",
+        _ => "pptx",
+    }
+}
+
+/// The content hash the reference is built from: the head of the asset id,
+/// which is the content, so the name alone is enough to find the bytes again.
+pub(crate) fn skeleton_stem(asset: &AssetId) -> String {
     let hash: String = asset
         .as_str()
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .take(8)
         .collect();
-    let hash = if hash.is_empty() {
+    if hash.is_empty() {
         "package".to_string()
     } else {
         hash
-    };
-    format!("{dir}/_skeleton/deck-{hash}.pptx")
+    }
 }
 
 fn write_styles(out: &mut String, catalog: &StyleCatalog, precision: u8) {

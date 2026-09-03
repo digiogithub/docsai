@@ -161,14 +161,20 @@ pub const SUPPORT: &[FormatSupport] = &[
     FormatSupport {
         format: Format::Odp,
         read: true,
-        write: false,
-        note: "Phase 18-B reads a deck into the same presentation IR a .pptx reads into: pages, frames, presentation:class as a placeholder type, master pages and presentation page layouts as the IR's master and layout, notes, comments, tables, pictures and embedded charts, with every construct the IR has no node for kept as a stub over its own markup; the writer and the preserved package are 18-D",
+        write: true,
+        note: "Phase 18: reading takes a deck into the same presentation IR a .pptx reads into — pages, frames, presentation:class as a placeholder type, master pages and presentation page layouts as the IR's master and layout, notes, comments, tables, pictures and embedded charts, with every construct the IR has no node for kept as a stub over its own markup; writing splices the model back into the preserved package entry by entry, so a deck nobody edited comes back byte for byte, mimetype first and stored, and a text body that changed is rewritten in place while everything else keeps its bytes; a slide or shape added or removed, and a table, chart, picture or preserved object that changed, are named in a warning rather than written",
     },
     FormatSupport {
         format: Format::Pptx,
         read: true,
         write: true,
         note: "Phase 16: writing rebuilds a slide's text, its pictures, its tables, its links, its charts, its comments and its speaker notes into the preserved package, a preserved object goes back as the markup it came in as, and a slide removed or reordered restates the deck's own slide list; a chart's data and a comment are spliced into the parts they were read from, and what cannot be spliced is refused by name rather than guessed; the autofit scale of a text body whose text changed is dropped and reported, because it was computed for text that is no longer there; a deck with no preserved package is written on an embedded template, with a layout chosen from the shape of each slide's content, and a slide or a notes page the package does not have is written rather than refused; `docsai roundtrip` covers decks, and a deck nobody edited comes back as the package that was read, byte for byte",
+    },
+    FormatSupport {
+        format: Format::Ppt,
+        read: true,
+        write: false,
+        note: "Phase 19-B reads a legacy .ppt by pre-converting it to .pptx with LibreOffice and handing the result to the unchanged Phase 13 reader, governed by the same --use-loffice auto|never|require as .doc; `never` refuses by name because the native degraded route is 19-D. Writing .ppt is out of scope for the whole phase",
     },
     FormatSupport {
         format: Format::DocMark,

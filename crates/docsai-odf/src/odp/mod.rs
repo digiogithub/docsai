@@ -47,6 +47,8 @@
 //! family `.odt` and `.ods` never needed.
 
 mod chart;
+pub(crate) mod skeleton;
+pub(crate) mod write;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek};
@@ -83,17 +85,43 @@ const DEFAULT_PAGE: (f64, f64) = (28.0, 21.0);
 /// uses, and for the same reason: boxes meant to line up rarely agree exactly.
 const ROW_BAND_EMU: i64 = 114_300;
 
+/// Cap on the bytes pulled into memory ahead of the ZIP directory, which is
+/// where the skeleton's copy of the package comes from.
+const MAX_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Reads a `.odp` presentation into the IR.
+///
+/// The stream is read once, into memory: the same bytes are both the package to
+/// decompress and the [`skeleton`](crate::odp::skeleton) the writer splices
+/// into. Handing [`Package::open`] a reader and then asking for the original
+/// again would mean reading the deck twice.
 pub fn read<R: Read + Seek>(
-    reader: R,
+    mut reader: R,
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
-    let package = Package::open(reader)?;
-    read_package(&package, assets)
+    // Capped here, because reading ahead of `Package::open` moves the first
+    // size check to this line: without it a file that is not even a ZIP would
+    // be pulled into memory before anything rejected it.
+    let mut original = Vec::new();
+    let read = (&mut reader)
+        .take(MAX_PACKAGE_BYTES.saturating_add(1))
+        .read_to_end(&mut original)?;
+    if read as u64 > MAX_PACKAGE_BYTES {
+        return Err(ReadError::TooLarge(format!(
+            "the package is larger than {MAX_PACKAGE_BYTES} bytes"
+        )));
+    }
+    let package = Package::open(std::io::Cursor::new(&original))?;
+    read_package(&package, Some(&original), assets)
 }
 
+/// `original` is the undecompressed package, when the caller has it: it is what
+/// the skeleton preserves. `None` — a package assembled in memory, as the tests
+/// do — reads into a deck with no skeleton, which is honest rather than a
+/// skeleton reconstructed from parts that have already lost their ZIP order.
 pub(crate) fn read_package(
     package: &Package,
+    original: Option<&[u8]>,
     assets: &mut dyn AssetStore,
 ) -> Result<(Document, ConversionReport), ReadError> {
     if !package.has_part(CONTENT_PART) {
@@ -213,10 +241,10 @@ pub(crate) fn read_package(
         layouts: catalog,
         slide_size,
         slides,
-        // The preserved package is 18-D's: this increment reads, and a
-        // skeleton nothing can splice into yet would be a claim the writer
-        // cannot honour.
-        skeleton: None,
+        // The whole package, byte for byte, so the writer splices into it
+        // rather than regenerating masters, page layouts and everything else
+        // this reader never looked at (18-D).
+        skeleton: original.and_then(|bytes| skeleton::capture(bytes, assets, &mut report)),
         raw: sink.fragments,
     };
     Ok((Document::Presentation(presentation), report))

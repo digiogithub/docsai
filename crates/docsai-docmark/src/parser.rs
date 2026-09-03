@@ -1146,7 +1146,7 @@ impl<'a> BodyParser<'a> {
             .assets
             .ids()
             .into_iter()
-            .find(|id| skeleton_hash(&crate::frontmatter::skeleton_path("", id)) == Some(hash)))
+            .find(|id| crate::frontmatter::skeleton_stem(id) == hash))
     }
 
     fn load_image(
@@ -2393,12 +2393,17 @@ pub(crate) fn split_trailing_attrs(text: &str) -> (&str, Option<Attrs>) {
     split_attrs(text, true)
 }
 
-/// The content hash inside a `…/_skeleton/deck-<hash>.pptx` reference.
+/// The content hash inside a `…/_skeleton/deck-<hash>.<ext>` reference.
+///
+/// Every package family the project preserves is accepted, because the hash is
+/// what identifies the bytes and the extension only says which family they
+/// belong to: a deck whose reference names a `.odp` has to be found by the same
+/// code that finds one naming a `.pptx`.
 fn skeleton_hash(path: &str) -> Option<&str> {
-    path.rsplit('/')
-        .next()?
-        .strip_prefix("deck-")?
-        .strip_suffix(".pptx")
+    let name = path.rsplit('/').next()?.strip_prefix("deck-")?;
+    crate::frontmatter::SKELETON_EXTENSIONS
+        .iter()
+        .find_map(|ext| name.strip_suffix(&format!(".{ext}")))
 }
 
 /// Like [`split_trailing_attrs`], for the attribute block of an image line,

@@ -11,6 +11,7 @@ language: "es-ES"
 application: "docsai-corpus"
 layouts:
   AL2T1: { name: "AL2T1", master: Default, title: 0 }
+skeleton: assets/_skeleton/deck-ea55f243.odp
 ---
 
 ## El vocabulario de presentation:class {#n1 .slide layout=AL2T1 name=page1}

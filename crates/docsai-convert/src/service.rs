@@ -219,7 +219,9 @@ pub fn convert_from_markdown(
 
     let mut cursor = Cursor::new(Vec::new());
     let write_report = match target {
-        Format::Odt | Format::Ods => docsai_odf::write(target, &document, &store, &mut cursor)?,
+        Format::Odt | Format::Ods | Format::Odp => {
+            docsai_odf::write(target, &document, &store, &mut cursor)?
+        }
         other => docsai_office::write(other, &document, &store, &mut cursor)?,
     };
     report.merge(write_report);
@@ -258,6 +260,7 @@ pub fn mime_type_for(format: Format) -> &'static str {
         Format::Doc => "application/msword",
         Format::Xlsx => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         Format::Xls => "application/vnd.ms-excel",
+        Format::Ppt => "application/vnd.ms-powerpoint",
         Format::Odt => "application/vnd.oasis.opendocument.text",
         Format::Ods => "application/vnd.oasis.opendocument.spreadsheet",
         Format::Odp => "application/vnd.oasis.opendocument.presentation",

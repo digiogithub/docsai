@@ -13,8 +13,9 @@ over the threshold fails the build and names the deck, the page and the number.
 
 ## What is compared, and why not simply "the round trip"
 
-The pptx writer preserves the package: for every deck in `corpus/pptx` the round
-trip is **byte for byte** the deck that was read (15-H). Rendering both sides of
+Both writers preserve the package: for every deck in `corpus/pptx` (15-H) and
+every one in `corpus/odp` (18-D) the round trip is **byte for byte** the deck
+that was read. Rendering both sides of
 a byte-identical pair measures nothing at all, so this gate does not pretend to:
 when the two packages have the same bytes it says so and counts the deck under
 "by bytes", which is a strictly stronger statement than any render diff, and
@@ -526,48 +527,87 @@ def check_generated(report, deck, original, generated):
             )
 
 
-def check_odp(renderer, report, scratch, wanted):
-    """The `.odp` corpus, rendered (Phase 18-A).
+def check_odp(binary, renderer, report, scratch, wanted):
+    """The `.odp` corpus: the fixture rendered, and the round trip compared
+    (Phase 18-A, completed by 18-D).
 
-    What this arm can assert, and why it is not the same assertion as the pptx
-    one above: there is no `.odp` reader until 18-B and no writer until 18-D, so
-    there is no round trip to compare against. What is left is still worth
-    having and is the thing schema validation cannot see — that LibreOffice,
-    which reads `.odp` natively, **opens every fixture, draws the number of
-    pages the fixture declares, and leaves ink on each of them**. A `draw:page`
-    that renders blank is a fixture that isolates nothing, and the trait matrix
-    of 18-E would be measuring an empty rectangle.
+    **The fixture.** LibreOffice reads `.odp` natively, so what is asserted is
+    the thing schema validation cannot see — that it opens every fixture, draws
+    the number of pages the fixture declares, and leaves ink on each of them. A
+    `draw:page` that renders blank is a fixture that isolates nothing.
 
-    When 18-D lands the writer this arm gains the round-trip comparison the
-    pptx side has, on the same comparator and the same threshold."""
+    **The round trip**, which 18-A could not do because there was no writer.
+    Exactly the pptx arm's assertion, on the same comparator and the same
+    threshold: convert the deck to DocMark, convert it back, and compare. The
+    `.odp` writer preserves the package, so the pair is byte for byte for every
+    fixture in this corpus and the deck is counted under "by bytes" — a
+    strictly stronger statement than any render diff, and one that costs no
+    renderer time. The moment the writer produces different bytes the pair is
+    rendered and scored, which is what this arm exists to catch.
+
+    There is no *generated* variant here, unlike the pptx arm: the `.odp` writer
+    ships no embedded template and refuses a deck with no preserved package by
+    name, so there is nothing to render."""
     decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
     if wanted:
         decks = [d for d in decks if d.stem in wanted]
     for deck in decks:
-        print(f"{deck.name} [fixture: rendered, not round-tripped]")
+        print(f"{deck.name}")
         declared = draw_pages(deck)
         pages, why = renderer.render(deck, scratch / "odp" / deck.stem)
         if pages is None:
             report.note(deck.name, f"not rendered: {why}")
-            continue
-        if len(pages) != declared:
+        elif len(pages) != declared:
             report.fail(
                 f"{deck.name}: {declared} draw:page in content.xml, "
                 f"{len(pages)} page(s) rendered"
             )
+        else:
+            report.by_render += 1
+            blank = []
+            for index, page in enumerate(pages, start=1):
+                report.pages += 1
+                width, height, pixels = read_pgm(page)
+                covered = ink(width, height, pixels)
+                if covered < MIN_INK:
+                    blank.append(f"page {index} (ink {covered:.4%})")
+            if blank:
+                report.fail(f"{deck.name}: rendered blank: {', '.join(blank)}")
+            else:
+                print(f"  ok    fixture: {len(pages)} page(s), all with ink")
+
+        workdir = scratch / "odp-roundtrip" / deck.stem
+        roundtrip, why = odp_roundtrip(binary, deck, workdir)
+        if roundtrip is None:
+            report.note(deck.name, why)
+            continue
+        if identical(deck, roundtrip):
+            report.by_bytes += 1
+            print("  ok    round trip: identical package, byte for byte "
+                  "(a render can only agree)")
+            continue
+        before, why = renderer.render(deck, workdir / "render-before")
+        after, why2 = (renderer.render(roundtrip, workdir / "render-after")
+                       if before is not None else (None, why))
+        if before is None or after is None:
+            report.note(deck.name, f"round trip not rendered: {why or why2}")
             continue
         report.by_render += 1
-        blank = []
-        for index, page in enumerate(pages, start=1):
-            report.pages += 1
-            width, height, pixels = read_pgm(page)
-            covered = ink(width, height, pixels)
-            if covered < MIN_INK:
-                blank.append(f"page {index} (ink {covered:.4%})")
-        if blank:
-            report.fail(f"{deck.name}: rendered blank: {', '.join(blank)}")
-        else:
-            print(f"  ok    {len(pages)} page(s), all with ink")
+        compare_pages(report, f"{deck.name} [round trip]", before, after)
+
+
+def odp_roundtrip(binary, deck, workdir):
+    """The deck's DocMark converted back to a `.odp`."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    markdown = workdir / "deck.dmk.md"
+    run(binary, "convert", deck, "-o", markdown)
+    if not markdown.exists():
+        return None, "the deck did not convert to DocMark"
+    roundtrip = workdir / "roundtrip.odp"
+    run(binary, "convert", markdown, "-o", roundtrip)
+    if not roundtrip.exists():
+        return None, "the DocMark did not convert back to a package"
+    return roundtrip, None
 
 
 def main():
@@ -657,8 +697,8 @@ def main():
                 continue
             check_generated(report, deck.name, source, written)
 
-        print(f"\n--- ODF: corpus/odp, rendered by LibreOffice ---")
-        check_odp(renderer, report, scratch, wanted)
+        print("\n--- ODF: corpus/odp, rendered and round-tripped ---")
+        check_odp(binary, renderer, report, scratch, wanted)
     finally:
         if not args.keep:
             shutil.rmtree(scratch, ignore_errors=True)
