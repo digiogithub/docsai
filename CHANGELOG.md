@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`w:commentReference` and `w:annotationRef` became raw fragments.** Word never writes a
+  `w:commentReference` as a child of `w:p` — it is always inside a `w:r` — and `read_run` had no
+  arm for it, so it fell through to the raw branch: every `.docx` with a comment showed a
+  `::: {.raw}` block holding `<w:commentReference w:id="1"/>` in the middle of a sentence. The
+  paragraph-level match that was supposed to catch it also carried a `Warning` saying comments were
+  «out of scope in v1», which therefore **never fired** — a false claim and a missing warning in the
+  same three lines. Both are gone, and `w:annotationRef` — the comment's own mark, which says
+  nothing the model does not know from *being* a comment — is ignored in the same arm as
+  `w:footnoteRef` instead of becoming a raw block of its own.
+- **A selection lost the comment its text was under review by.** The comment container is written
+  after the body, outside every fragment, so `docsai read <in> --select <sel>` produced
+  `[text]{.comment ref=c1}` with nothing declaring `c1` — the specification's own «anchor with no
+  definition» case, in which the annotation is silently gone. `select.rs` already had exactly this
+  repair for footnotes and now has it for comments, bound by `ref=` because the anchor carries no
+  id. A selection carrying a comment also declares `docmark: "1.3"` now, in whichever profile it is
+  in, instead of `1.2` or `1.1`.
+- **`p:cm/p:pos` is not in EMU.** It is PowerPoint's master unit, 1/576 in — an eighth of a point —
+  and reading it as EMU put every comment marker in the top-left corner of the slide. Corrected from
+  files rather than from prose: ECMA-376's own example `x="1426" y="660"` is 1/640 of an inch from
+  the corner as EMU and 2.48 × 1.15 in as master units; an `.odp` with one annotation at 5 cm,
+  converted by LibreOffice, comes out as `x="1134"`, which is exactly 1134 × 1/576 in; and
+  LibreOffice's exporter says so in source (`convertMm100ToMasterUnit`). The round trip is exact for
+  the values a producer writes and rounds back to itself for the rest.
+- **A generated deck dropped `p:transition` and `p:timing` in silence.** Slide-level markup hangs off
+  `p:sld` *beside* the shape tree, and `write_gen::slide_xml` walked only the tree — the same blind
+  spot the reader had until Phase 13-I, on the write side. A deck written without its preserved
+  package now reports each of them. It is a warning rather than a rewrite: splicing a preserved
+  subtree into a slide built on a different master and theme is a design decision, not a bug fix.
+- **A chart nobody edited used to report itself as a loss.** Every chart in every deck raised «its
+  chart: it was copied from the preserved package», on decks where nothing had been copied instead
+  of anything. The writer now asks «did this change?» exactly once, in the model's own units, by
+  running the model's own chart reader over the preserved part — so an untouched chart produces no
+  edit to any part and no warning at all.
+- **A non-image asset was named `img-…`.** The asset store learned only bitmaps, so a chart's
+  embedded `.xlsx` workbook would have been stored as `img-48b54984.bin` in every manifest, every
+  `assets/` directory and every DocMark reference. `sniff` now recognises a ZIP and, inside it, an
+  OPC package, by scanning the local file headers — no unzip, and none wanted in `docsai-model` —
+  and a non-image is named `asset-<hash8>.<ext>`.
+
 - pptx writer: a shape added to a preserved slide no longer discards that
   slide's other edits. The shape that cannot be added — and, symmetrically, one
   the model removed — is named on its own, and every other edit to the slide is
@@ -76,6 +115,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A chart is data, not an opaque part** (plan v2 Phase 16, increments A, B and C). A `.pptx` chart
+  used to round-trip byte for byte while telling an agent the word `barChart` and nothing else. It
+  now reads as its **categories, its series, its per-series number format, its title and its embedded
+  workbook**, and DocMark writes them as the GFM table the specification had reserved since Phase 14
+  — categories down the first column, one column per series, `data=` pointing at the workbook:
+
+  ```markdown
+  ::: {#n2 .chart data="assets/asset-48b54984.xlsx" kind=barChart}
+  Sales by region
+
+  |       | North {format="#,##0"} | South |
+  | ----- | ---------------------- | ----- |
+  | Q1    | 1200                   | 800   |
+  | Q2    | 980                    |       |
+  :::
+  ```
+
+  An **empty cell is a gap, never a zero** — PowerPoint draws a break where a zero draws a line
+  through the floor — and that survives from `c:ptCount`'s sparse indices, through the table, back
+  into the part. Retyping a number in that table changes **exactly one member** of the written
+  `.pptx` and exactly one `c:v` inside it: `ppt/charts/chart1.xml` is *spliced*, never regenerated,
+  because reading a chart as data bought no licence to rebuild the part, and the stale `c:f` range
+  beside an edited cache is restated so that «Edit Data» does not silently truncate the edit that was
+  just made. A chart the model did not touch produces no edit and no warning. The chart carries its
+  numbers twice — the caches in the chart part and the workbook in `ppt/embeddings/` — and **the
+  cache is authoritative**, because it is what the slide shows and is present even when the workbook
+  is linked or missing; a disagreement between the two is a real property of the file and is
+  **warned, never averaged**. The workbook is preserved rather than rewritten (the model holds cached
+  columns, not a spreadsheet, and rebuilding one would invent a provenance while destroying the real
+  one), and a deck generated from Markdown with no package at all now gets a **real chart part**
+  where it used to get a text box. What cannot be spliced is refused by name rather than guessed: a
+  series added or removed, the chart's kind, its `c:rich` title, an emptied category axis, and a
+  multi-level axis.
+- **Comments, in both formats, through one IR node and one DocMark syntax** (plan v2 Phase 16,
+  increments E and F; DocMark **1.3**, specification §11.3). `ppt/comments/*` with
+  `ppt/commentAuthors.xml`, and `word/comments.xml` with `word/commentsExtended.xml`, read into the
+  *same* node and write back from it. A docx comment covers a **range** (`[viernes]{.comment ref=c1}`
+  in the flow, with a `::: {.comment author=… date=… initials=… ref=c1}` container after the body); a
+  pptx comment is pinned to a **point** (`pos=`); a reply is the same container **nested** inside the
+  one it answers, so the nesting *is* the thread. DocMark names an author and never carries the
+  package-local `authorId`, which is resolved on read and re-established on write by **matching the
+  name against the table the package already has** — so ids never move for a deck nobody edited and a
+  new name is appended after the last. Comments are written at `full` and `agent` only; at `standard`
+  and `plain` the commented text survives and the annotation is a warned loss. On the pptx side the
+  comment parts stay **outside** the rebuilt set: an edited comment is spliced into the part that was
+  read, a comment added to a slide with no part brings the part, its `Override` and its relationship
+  into existence, and the last comment deleted takes all three away. What a classic `p:cmLst` cannot
+  hold — a reply, a resolved mark, a block that is not a paragraph, a date that is not an
+  `xsd:dateTime` — is refused by name, never dropped in silence. PowerPoint's **modern** comments
+  (`modernComment_*.xml`) are not read; the part is preserved unchanged and the refusal names the
+  content type and what it carries.
 - **Slide thumbnails: a picture of each slide, drawn by headless LibreOffice** (plan v2 Phase 16,
   seventh increment). `docsai convert deck.pptx -o deck.dmk.md --thumbnails` writes one PNG per
   slide into `<dir>/<name>-thumbnails/`, and the MCP server gains a `render_slides` tool that does
@@ -97,8 +187,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LD_LIBRARY_PATH` and the invocation retried, which is what makes `.doc` conversion and slide
   rendering work on such a machine at all. `DOCSAI_LIBREOFFICE_LIBPATH` overrides the derivation;
   `DOCSAI_PDFTOPPM` names the rasteriser.
+- **A conversion cache, so an agent's fourth question about a document does not re-parse it** (plan
+  v2 Phase 16, cache increment). `estimate_tokens`, then `outline_document`, then `search_document`,
+  then `read_selection` used to parse the same bytes four times. A content-hash LRU in
+  `docsai-convert` — 64 MiB and 16 entries by default, `DOCSAI_MCP_CACHE_BYTES=0` to turn it off —
+  makes that **one** read. The protocol stays stateless and the cache is a value the caller owns, not
+  a process global: the MCP server keeps one for the life of the process, the CLI passes none, and
+  every test brings its own. **A hit is indistinguishable from a miss**, which decided every design
+  question: the `ConversionReport` is stored with the document, so a degradation reported on the
+  first call is reported on the fourth; the asset store is *replayed* rather than bypassed, so a hit
+  still writes the same files with the same names in the same order; and the key covers the origin,
+  the content hash, the byte length and a fingerprint of every conversion option — deliberately wider
+  than a read consumes, because a key that is too wide loses a hit while a key that is too narrow
+  returns the wrong document. It refuses to serve rather than serve wrongly: an unhashable input, a
+  non-empty asset store, an error, and a legacy `.doc` — whose read depends on what was installed at
+  that moment, which is a property of the machine and not of the document — are never cached.
+- **The objects that stay opaque, confirmed end to end** (plan v2 Phase 16, opaque-objects
+  increment). SmartArt, OLE, transitions and animations have read as a stub plus a sidecar raw
+  fragment since Phase 13 and written back since Phase 15; what had never been asserted anywhere was
+  the *whole loop* on packages that carry them. `corpus/pptx/ole-embedded.pptx` is new and carries
+  both spellings — the plain `p:graphicFrame` of ECMA-376 and the `mc:AlternateContent` PowerPoint
+  actually writes — with an OPC package behind one object and an OLE2 compound file behind the other,
+  and the members' bytes are compared individually at the end of the loop so a regression names
+  *which* object was lost.
 
 ### Changed
+
+- **Phase 16 is closed — and risk P2 is still open** (plan v2 Phase 16, ninth increment). Its three
+  acceptance criteria are met, each measured rather than asserted: a chart's data reads as a table,
+  is edited through DocMark and reaches the package as one changed member; `--thumbnails` writes 67
+  PNGs over the deck corpus on this machine with no environment variable set, and says which of
+  LibreOffice or `pdftoppm` is missing — and exits 1 — when one is; and the cache turns 20 reads into
+  1 while `disabling_the_cache_changes_no_output` compares the DocMark, the assets **and** the report
+  across four documents, four fidelity levels and three conversions each. Underneath all of it the
+  property Phase 15 established never moved: **21 decks that nobody edited come back byte for byte**,
+  checked both by `corpus/render_gate.py` and by hand outside the suite. `corpus/schema_gate.py` is
+  at 21 decks, 42 packages, **363 parts validated, 0 invalid**. What is still not proven is what was
+  not proven a phase ago: **no PowerPoint has opened any of it.** The checklist of
+  `docs/spikes/P2-powerpoint-gate.md` needs PowerPoint and a person; the phase was directed to start
+  without it, and paid for that by keeping byte-identity in every increment, so the form is
+  re-runnable on any commit of the phase. `kb/84-phase-16-close.md` records the phase, the three
+  places a budget or a golden moved and what each bought, the thirty things it carries forward, and
+  the question its wire-cost measurement raises for Phase 17: the MCP `session-preamble` — the
+  handshake a session pays once — now costs **2 124 tokens** where Phase 17's acceptance criterion
+  budgets 2 000 for a whole agent loop, and whether the two are the same budget is Phase 17's to
+  decide.
 
 - **Breaking (MCP): `include_images=thumbnails` is now `include_images=downscaled`**, and the
   response fields it writes are `downscaled_base64`, `downscaled_content_type`,

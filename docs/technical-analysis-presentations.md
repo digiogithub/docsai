@@ -327,7 +327,7 @@ document handles.
 | # | Risk | Prob. | Impact | Mitigation |
 |---|---|---|---|---|
 | P1 | The slide→layout→master→theme cascade costs more than docx's | High | High | Spike (Phase 12); v1 resolves colour/font/size and leaves the rest to the layout reference |
-| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **STILL OPEN after Phase 15** — see §7.1 for exactly what is and is not proven. The gate that closes it is prepared and unrun: [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md) |
+| P2 | Round-trip is valid but PowerPoint offers to "repair" | Medium | **Very high** | Preserved-skeleton strategy (§5.1) + schema and render CI gates (§5.5). **STILL OPEN after Phase 16** — see §7.1 for exactly what is and is not proven. Phase 16 was directed to start with the form unsigned and kept byte-identity in every increment, so the form is re-runnable on any commit of it. The gate that closes it is prepared and unrun: [`spikes/P2-powerpoint-gate.md`](spikes/P2-powerpoint-gate.md) |
 | P3 | Freeform shapes / SmartArt / animations fragment the effort | High | Medium | Aggressive raw-block from day one; only model what has a Markdown representation |
 | P4 | DocMark-P becomes unreadable (stops being Markdown, becomes XML with `:::`) | Medium | High | Golden rule: `--fidelity standard` must be hand-editable by a human; if it is not, the design failed |
 | P5 | Text overflow after an agent edit | High | Medium | Explicit `Warning::AutofitStale`; no measurement in v1 |
@@ -336,19 +336,22 @@ document handles.
 | P8 | `apply_edits` surface grows without bound (one op per IR feature) | High | Medium | Closed op set in v2, versioned; anything not covered is done by `read --select` + rewrite of that node |
 | P9 | The skeleton blob makes `.dmk.md` packages heavy on disk | Medium | Low | Content-hash dedupe (already in `AssetStore`) + `--no-skeleton` for plain/standard fidelity |
 
-### 7.1 P2 at the end of Phase 15 — the state of the evidence
+### 7.1 P2 at the end of Phase 16 — the state of the evidence
 
 Phase 15 built the writer and both CI gates and **did not close P2**, because the only instrument
-that can close it is a person in front of PowerPoint and this project has never had one. Written
-out so that nobody reads the two green gates as an answer to a question they do not ask.
+that can close it is a person in front of PowerPoint and this project has never had one. Phase 16
+added charts as data, comments, an OLE fixture, slide thumbnails and a cache, was directed to start
+with the form still unsigned, and **did not close it either**; the numbers below are re-measured at
+that phase's close, over a corpus that grew from 17 decks to 21. Written out so that nobody reads
+the two green gates as an answer to a question they do not ask.
 
 **What is actually proven, and by what:**
 
 - A deck nobody edited comes back **byte for byte** the package that was read — the whole `.pptx`
-  corpus, seventeen decks, `.pptm` included (`pptx_roundtrip_is_idempotent`). The strongest
+  corpus, twenty-one decks, `.pptm` included (`pptx_roundtrip_is_idempotent`). The strongest
   statement available without an application, and it is a statement about *preservation*, not
   about acceptance: the input decks are docsai's own fixtures, not PowerPoint's output.
-- Every part whose bytes the writer **changed or created** is legal ECMA-376 — 34 packages, 322
+- Every part whose bytes the writer **changed or created** is legal ECMA-376 — 42 packages, 363
   parts, 0 invalid, 0 unmeasured (`corpus/schema_gate.py`, CI gate 1). Schema validity is a
   necessary condition for PowerPoint not repairing a file. It is not a sufficient one: a dangling
   relationship, an `r:embed` pointing at nothing or a content-type gap is schema-valid and gets
@@ -358,12 +361,12 @@ out so that nobody reads the two green gates as an answer to a question they do 
   and it is what caught the negative control of the P2 gate form.
 - That every package the writer authors end to end **loads and renders in a real consumer**. CI
   gate 2 (`corpus/render_gate.py`) has now been run with a working renderer over the whole corpus —
-  *17 decks, 17 round trips identical by bytes, 0 rendered, 61 pages compared, 0 failures, 0 not
-  measured*, exit 0 — and headless LibreOffice opened and rasterised all 61 pages of the generated
+  *21 decks, 21 round trips identical by bytes, 0 rendered, 67 pages compared, 0 failures, 0 not
+  measured*, exit 0 — and headless LibreOffice opened and rasterised all 67 pages of the generated
   packages without failing, with no page that should have carried ink coming out blank. This is
   the first evidence in the project that an application of any kind accepts these bytes.
 - Nothing about how a corpus deck *looks*, still. That same run produced **no perceptual-diff
-  score at all**: the seventeen round trips are byte-identical packages and take the gate's short
+  score at all**: the twenty-one round trips are byte-identical packages and take the gate's short
   circuit rather than a render, and every generated page reports `diff n/a (geometry)` because the
   embedded template's canvas is not the corpus deck's, so the pages cannot be paired pixel for
   pixel. The threshold of 2.5 is the one the comparator's fourteen self-test pairs chose and

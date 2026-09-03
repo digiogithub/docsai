@@ -370,7 +370,47 @@ and `<a:p/>` in `kb/73-phase-15-carried.md`, and the docx test in `kb/74-docx-bo
 paragraph's id survived a round trip while a footnote's, which has nowhere to be written, was handed
 out afresh and renumbered around it. Only ids that are document content — a bookmark name read off
 the source, which a TOC's `PAGEREF` fields address — are written back now.
-Next is **Phase 16**: charts, embedded objects and thumbnails — after the P2 form is signed.
+**Phase 16 is closed**: charts, embedded objects, comments, thumbnails and the cache — the content
+classes that survive as data rather than as opaque XML. It was **started with the P2 form still
+unsigned**, on the owner's direction and recorded in `kb/75-phase-16-plan.md` rather than in a commit
+message; what it owed in exchange it paid, because every increment kept byte-identity and the form is
+re-runnable on any commit of the phase. A **chart** is now its categories, its series, its per-series
+number format, its title and its embedded workbook, written into DocMark as a GFM table a person can
+edit — categories down the first column, one column per series, an empty cell a *gap* and never a
+zero — and an edited table is **spliced inside the preserved `ppt/charts/chartN.xml`**, with
+`c:ptCount`, the sparse `c:pt@idx` and the `c:f` ranges kept consistent; a chart nobody touched
+produces no edit and no warning, and what cannot be spliced (a series added or removed, the kind, a
+`c:rich` title, an emptied axis, a multi-level axis) is refused by name. The chart's two copies of
+the truth — the caches and `ppt/embeddings/` — are both read, the cache is authoritative because it
+is what the slide shows, and a disagreement is warned rather than averaged; the workbook is preserved
+rather than rewritten, because the model holds cached columns and not a spreadsheet. A deck generated
+from Markdown gets a real chart part where it used to get a text box. **Comments** are read and
+written back in *both* formats through one IR node and one syntax — DocMark **1.3**, specification
+§11.3: a docx comment covers a range, a pptx comment is pinned to a point, a reply is the same
+container nested inside the one it answers, and DocMark names an author rather than carrying a
+package-local `authorId`, which is re-established on write by matching the name against the table the
+package already has. The pptx comment parts stay outside `rebuilt_parts` and are spliced; what a
+classic `p:cmLst` cannot hold is refused by name; PowerPoint's modern comments are preserved
+unchanged and named as not read. **SmartArt, OLE, transitions and animations** were confirmed end to
+end rather than assumed, with a `p:oleObj` fixture the corpus never had, in both the plain
+`p:graphicFrame` spelling and the `mc:AlternateContent` one PowerPoint actually writes. A **slide has
+a picture**: `--thumbnails` on the CLI and a `render_slides` tool on MCP, through headless
+LibreOffice and `pdftoppm`, with availability decided by *running* the renderer and requiring it to
+identify itself — an installed-but-mis-linked LibreOffice exits 0 and prints a loader error, and the
+installation's own library directory is derived and applied rather than hard-coded, which also fixed
+legacy `.doc` conversion on such a machine. `include_images=thumbnails` was renamed to `downscaled`,
+a documented breaking change, because one word had come to name two different pictures. And a
+**content-hash LRU cache** in `docsai-convert` makes an agent's four questions about one document
+cost one parse instead of four, with a hit indistinguishable from a miss: the report is cached with
+the tree, the asset store is replayed rather than bypassed, and the key covers the origin, the bytes
+and every conversion option. The phase's three criteria are met and measured, `21` decks round-trip
+byte for byte, `corpus/schema_gate.py` validates 363 parts of 42 packages with 0 invalid, and
+`corpus/render_gate.py` compares 67 pages with 0 failures. **Risk P2 is still OPEN** — no application
+of any kind but LibreOffice has opened any of it — and `kb/84-phase-16-close.md` records the close,
+the thirty things it carries forward, and the question the wire-cost measurement raises for Phase 17:
+the MCP session preamble now costs **2 124 tokens** where Phase 17's criterion budgets 2 000 for a
+whole agent loop, and whether the two are the same budget is Phase 17's to decide.
+Next is **Phase 17**: `apply_edits`, patch editing — and, first, the P2 form.
 
 ## 2. Documents you must read before implementing
 

@@ -250,12 +250,18 @@ is a visible change in the golden, never a silent one.
 Cost accepted: the embedded vocabulary adds a few MB to the binary. `tiktoken-rs` loads each
 encoding lazily through a singleton, so only the one we ask for is built at runtime.
 
-### 4.5 Image decoding for MCP thumbnails (plan v2, Phase 11)
+### 4.5 Image decoding for the MCP downscaled rung (plan v2, Phase 11)
 
-Phase 11 task 8 asks the MCP server for `include_images=none|refs|thumbnails|full`. Three of
-the four rungs are byte slicing and need nothing; **`thumbnails` needs a decoder and a
+Phase 11 task 8 asks the MCP server for `include_images=none|refs|downscaled|full`. Three of
+the four rungs are byte slicing and need nothing; **the downscaled rung needs a decoder and a
 resizer**, which is the one place in the project that has to understand an image rather than
 carry it.
+
+*(The rung was called `thumbnails` when Phase 11 wrote it and until Phase 16-G, when
+`render_slides` arrived and the word came to name two different pictures: this rung serves
+downscaled copies of the pictures a document **embeds**, `render_slides` a raster of a **whole
+slide**, which needs no decoder here at all. The old value is refused rather than aliased.
+Architecture §6 and `kb/81-phase-16-thumbnails.md` carry the argument.)*
 
 | Option | What it costs | Verdict |
 |---|---|---|

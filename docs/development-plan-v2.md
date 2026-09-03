@@ -295,17 +295,32 @@ Tasks:
 2. SmartArt, OLE, animations, transitions: sidecar raw + stub, confirmed end to end.
 3. Comments (`ppt/comments/*`) as a DocMark extension, sharing syntax with the docx comments
    item carried over from the v1 backlog.
-4. **Slide thumbnails**: `--thumbnails` / MCP `include_images=thumbnails` renders each slide to
-   PNG via headless LibreOffice (skipped with a warning when absent). For a vision model this is
-   the cheapest useful representation of a slide (analysis §6.6).
+4. **Slide thumbnails**: `--thumbnails` on the CLI and an MCP `render_slides` tool render each
+   slide to PNG via headless LibreOffice plus `pdftoppm` (skipped with a warning when either is
+   absent). For a vision model this is the cheapest useful representation of a slide (analysis
+   §6.6). *(Phase 16-G did not put this on `include_images`: that rung means «downscaled copies of
+   the pictures the document embeds», which is a different picture, so it was renamed
+   `include_images=downscaled` and the slide raster got a tool of its own.)*
 5. Content-hash LRU cache in `docsai-convert` so repeated MCP calls on the same deck do not
    re-parse it (pure optimisation; protocol stays stateless).
 
 Acceptance criteria:
-- [ ] Chart data readable as a table and editable through DocMark; chart survives round-trip.
-- [ ] Thumbnails generated for the corpus when LibreOffice is present; clean warning when not.
-- [ ] Cache demonstrably removes re-parsing in a repeated-call benchmark, and disabling it
-      changes no output.
+- [x] Chart data readable as a table and editable through DocMark; chart survives round-trip.
+      Measured at the phase close: retyping one number in the DocMark table changes exactly one
+      member of the written `.pptx` (`ppt/charts/chart1.xml`) and exactly one `c:v` inside it, and
+      21 decks round-trip byte for byte.
+- [x] Thumbnails generated for the corpus when LibreOffice is present; clean warning when not.
+      67 PNGs over the deck corpus with no environment variable set on a machine whose `soffice`
+      is mis-linked, and three distinct true warnings — LibreOffice absent, LibreOffice installed
+      but not running, `pdftoppm` absent — each exiting 1.
+- [x] Cache demonstrably removes re-parsing in a repeated-call benchmark, and disabling it
+      changes no output. 20 uncached reads against 1 cached over 20 `outline_document` calls, and
+      `disabling_the_cache_changes_no_output` compares the DocMark, the assets and the report over
+      four documents × four fidelity levels × three conversions.
+
+**Phase 16 is closed** (`kb/84-phase-16-close.md`). It was started with risk **P2** still open, on
+the owner's direction; every increment kept byte-identity, so `docs/spikes/P2-powerpoint-gate.md`
+is re-runnable on any commit of the phase — and it is still unsigned.
 
 ## Phase 17 — `apply_edits`: patch editing (4–5 weeks)
 

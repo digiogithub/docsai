@@ -355,7 +355,7 @@ pub enum ShapeKind {
     TextBox { body: Vec<Block> },
     Picture(ImageRef),               // reuses the existing image model unchanged
     Table(Table),
-    Chart(ChartRef),                 // embedded workbook + raw chart XML (Phase 16 fills it)
+    Chart(ChartRef),                 // categories + series + title + embedded workbook + raw XML
     Group(Vec<Shape>),
     Raw(RawShape),                   // kind + sidecar payload + the text it shows
 }

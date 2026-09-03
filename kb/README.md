@@ -97,6 +97,7 @@ Practical difference between the two folders:
 | [81 — Phase 16 G](81-phase-16-thumbnails.md) | Slide thumbnails through LibreOffice, the word «thumbnail» taken back from the image rung, and a renderer probe that runs the tool instead of trusting the file |
 | [82 — Phase 16 E](82-phase-16-comments.md) | Comments read from both formats into one IR node, DocMark 1.3 and the anchor-plus-container syntax, and the `w:commentReference` that was becoming a raw fragment |
 | [83 — Phase 16 F](83-phase-16-comment-write.md) | Comments written back: the deck's comment parts spliced and still byte-identical, the docx thread through `w14:paraId`, the author table matched by name, and `p:cm/p:pos` proved to be master units and not EMU |
+| [84 — Phase 16 close](84-phase-16-close.md) | The three criteria answered with re-run evidence, the thirty things carried forward, the three places a budget or a golden moved — and risk P2 still open, with what that means for Phase 17 |
 
 ## Status in one line
 
@@ -153,6 +154,23 @@ the vendored ECMA-376 XSDs (17 decks, 34 packages, 322 parts, 0 invalid) and the
 headless LibreOffice. What stays open is in [`72-phase-15-close.md`](72-phase-15-close.md) and
 [`73-phase-15-carried.md`](73-phase-15-carried.md): the P2 PowerPoint gate is **prepared and unrun**,
 because running it needs PowerPoint and a person.
+
+**Phase 16 is closed, and P2 is still that open item**: charts, embedded objects, comments,
+thumbnails and the cache. A chart is now its categories, series, format codes, title and embedded
+workbook, written into DocMark as a GFM table a person can edit and spliced back inside the
+preserved `ppt/charts/chartN.xml` — a gap stays a gap, a chart nobody touched produces no edit, and
+what cannot be spliced is refused by name. Comments read and write back in **both** formats through
+one IR node and one syntax (DocMark **1.3**, spec §11.3), with the pptx comment parts spliced rather
+than regenerated. SmartArt, OLE, transitions and animations were confirmed end to end with the
+`p:oleObj` fixture the corpus never had. `--thumbnails` and the MCP `render_slides` tool draw a
+slide through headless LibreOffice and `pdftoppm`, deciding availability by *running* the renderer
+— which is what makes it work on a machine whose `soffice` exits 0 with a loader error — and
+`include_images=thumbnails` became `downscaled`, a documented breaking change. A content-hash LRU
+cache makes an agent's four questions about one document cost one parse, with a hit
+indistinguishable from a miss. Twenty-one decks round-trip byte for byte; the schema gate validates
+363 parts of 42 packages with 0 invalid; the render gate compares 67 pages with 0 failures. What
+stays open is in [`84-phase-16-close.md`](84-phase-16-close.md), thirty items, the unsigned P2 form
+first among them.
 
 **Plan v1 is delivered and deprecated.** Active plan:
 [`docs/development-plan-v2.md`](../docs/development-plan-v2.md) — agent-native primitives
