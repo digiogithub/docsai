@@ -99,6 +99,7 @@ Practical difference between the two folders:
 | [83 — Phase 16 F](83-phase-16-comment-write.md) | Comments written back: the deck's comment parts spliced and still byte-identical, the docx thread through `w14:paraId`, the author table matched by name, and `p:cm/p:pos` proved to be master units and not EMU |
 | [84 — Phase 16 close](84-phase-16-close.md) | The three criteria answered with re-run evidence, the thirty things carried forward, the three places a budget or a golden moved — and risk P2 still open, with what that means for Phase 17 |
 | [85 — Phase 17 plan](85-phase-17-plan.md) | `apply_edits`: the nine operations, etags, the transaction, and the reading of the 2k-token budget decided before anyone is losing |
+| [86 — Phase 17 A](86-phase-17-operations.md) | The operation set specified before it is written: ten names, what each does to ids, why a selector is not a target, the nineteen refusals, and 118 tokens for one edit |
 
 ## Status in one line
 
