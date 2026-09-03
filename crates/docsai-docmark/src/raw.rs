@@ -115,8 +115,25 @@ fn collect_inlines(inlines: &[Inline], options: &Options, out: &mut Vec<RawSidec
                 collect_inlines(content, options, out)
             }
             Inline::Footnote(footnote) => collect_blocks(&footnote.blocks, options, out),
+            // A comment holds blocks like a footnote does, and its anchor holds
+            // the inlines it covers: a raw fragment can be in either.
+            Inline::Comment(comment) => {
+                collect_inlines(comment.covered(), options, out);
+                collect_comment(comment, options, out);
+            }
             _ => {}
         }
+    }
+}
+
+fn collect_comment(
+    comment: &docsai_model::text::Comment,
+    options: &Options,
+    out: &mut Vec<RawSidecar>,
+) {
+    collect_blocks(&comment.blocks, options, out);
+    for reply in &comment.replies {
+        collect_comment(reply, options, out);
     }
 }
 

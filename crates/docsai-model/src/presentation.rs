@@ -31,7 +31,7 @@ use crate::addressing::{Addressing, NodeId};
 use crate::assets::AssetId;
 use crate::image::{Flip, ImageRef, RawId};
 use crate::style::{FontProps, ParaProps, StyleCatalog};
-use crate::text::{Block, DocumentMeta, RawFragment, Table};
+use crate::text::{Block, Comment, DocumentMeta, RawFragment, Table};
 use crate::units::{Point, Size};
 
 /// A presentation.
@@ -335,6 +335,15 @@ pub struct Slide {
     /// things to the writer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<Block>>,
+    /// The comments pinned to this slide, in source order (spec §11.3).
+    ///
+    /// The same [`Comment`] a `.docx` carries inline: a slide comment is
+    /// anchored at a point rather than over a range, and that is the whole of
+    /// the difference. Reached through the slide's own `comments`
+    /// relationship, never by the number in a part name — the rule that binds
+    /// a notes page to its slide binds a comment part too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub comments: Vec<Comment>,
     /// `p:sld@show="0"`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,

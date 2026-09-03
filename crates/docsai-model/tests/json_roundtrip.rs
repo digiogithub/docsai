@@ -465,6 +465,25 @@ fn round_trips_a_presentation_using_every_shape_kind() {
             ),
         ],
         notes: Some(vec![Block::Paragraph(Paragraph::text("hablar despacio"))]),
+        // A slide comment with a reply: the anchor is a point, the thread is
+        // nesting, and both have to survive JSON (spec §11.3).
+        comments: vec![Comment {
+            author: Some("Ada Lovelace".into()),
+            initials: Some("AL".into()),
+            date: Some("2026-05-04T09:12:00Z".into()),
+            anchor: CommentAnchor::Point(Point::new(
+                Length::from_emu(1_200_000),
+                Length::from_emu(900_000),
+            )),
+            blocks: vec![Block::Paragraph(Paragraph::text("¿Confirmamos la cifra?"))],
+            replies: vec![Comment {
+                author: Some("Grace Hopper".into()),
+                resolved: true,
+                blocks: vec![Block::Paragraph(Paragraph::text("Confirmada."))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
         hidden: true,
         section: Some("Cierre".into()),
         raw: vec![RawId::new("raw-0009")],

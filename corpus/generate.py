@@ -2597,6 +2597,8 @@ def build_pptx(
     extra_parts: dict[str, bytes] | None = None,
     extra_overrides: list[tuple[str, str]] | None = None,
     extra_defaults: dict[str, str] | None = None,
+    comment_authors: list[tuple[int, str, str]] | None = None,
+    comments: dict[int, str] | None = None,
     macro_enabled: bool = False,
 ) -> None:
     """Assemble a .pptx package.
@@ -2612,9 +2614,16 @@ def build_pptx(
     because that is PowerPoint's habit. It is only a habit: the relationship is
     what binds a note to a slide, and the `notes-crossed` fixture proves it by
     disagreeing with the numbering.
+
+    ``comment_authors`` are ``(id, name, initials)`` for `ppt/commentAuthors.xml`,
+    a deck-wide part hanging off `ppt/presentation.xml`; ``comments`` maps a
+    slide number to the body of its `p:cmLst`. The two are separate parts
+    because PresentationML keeps them apart: a comment names its author by a
+    number that only the author list explains.
     """
     media = media or {}
     slide_rels = slide_rels or {}
+    comments = comments or {}
     notes = notes or {}
     notes_for = notes_for or {index: index for index in notes}
     order = order or list(range(1, len(slides) + 1))
@@ -2678,12 +2687,34 @@ def build_pptx(
         parts[part] = (XML_DECL + body).encode()
         overrides.append((f"/{part}", f"{PML_TYPE}.slide+xml"))
         entries = [("rIdLayout", "slideLayout", "../slideLayouts/slideLayout1.xml")]
+        if index in comments:
+            entries.append(("rIdComments", "comments", f"../comments/comment{index}.xml"))
         entries.extend(slide_rels.get(index, []))
         if index in notes_for:
             entries.append(
                 ("rIdNotes", "notesSlide", f"../notesSlides/notesSlide{notes_for[index]}.xml")
             )
         parts[f"ppt/slides/_rels/slide{index}.xml.rels"] = rels_part(entries)
+
+    if comment_authors:
+        parts["ppt/commentAuthors.xml"] = (XML_DECL + (
+            f'<p:cmAuthorLst {P_NS}>'
+            + "".join(
+                f'<p:cmAuthor id="{ident}" name="{name}" initials="{initials}"'
+                f' lastIdx="1" clrIdx="{ident}"/>'
+                for ident, name, initials in comment_authors
+            )
+            + "</p:cmAuthorLst>"
+        )).encode()
+        overrides.append(("/ppt/commentAuthors.xml", f"{PML_TYPE}.commentAuthors+xml"))
+        presentation_rels.append(("rIdCmAuthors", "commentAuthors", "commentAuthors.xml"))
+    for index, body in sorted(comments.items()):
+        part = f"ppt/comments/comment{index}.xml"
+        parts[part] = (XML_DECL + f'<p:cmLst {P_NS}>{body}</p:cmLst>').encode()
+        overrides.append((f"/{part}", f"{PML_TYPE}.comments+xml"))
+        parts[f"ppt/comments/_rels/comment{index}.xml.rels"] = rels_part([
+            ("rIdSlide", "slide", f"../slides/slide{index}.xml"),
+        ])
 
     if notes:
         parts["ppt/notesMasters/notesMaster1.xml"] = (XML_DECL + NOTES_MASTER).encode()
@@ -3673,6 +3704,92 @@ def pptx_ole_embedded() -> None:
     )
 
 
+# PowerPoint's modern comment part: a Microsoft extension, not ECMA-376, and
+# the schema `p:cmLst` cannot express. It is here so the reader's refusal has a
+# file to refuse; nothing in this project ever parses it.
+MODERN_COMMENT = (
+    '<p188:cmLst xmlns:p188="http://schemas.microsoft.com/office/powerpoint/2018/8/main">'
+    '<p188:cm id="{2C4C5A31-0000-0000-0000-000000000001}" authorId="{AAAAAAAA-0000-0000-0000-000000000001}"'
+    ' created="2026-02-03T10:15:00.000">'
+    "<p188:txBody><a:bodyPr xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"/>"
+    "<a:p xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">"
+    "<a:r><a:t>Hilo moderno con respuestas.</a:t></a:r></a:p></p188:txBody>"
+    "</p188:cm>"
+    "</p188:cmLst>"
+)
+
+
+def pptx_comments_slide() -> None:
+    """Comments on a slide: `ppt/comments/*` plus `ppt/commentAuthors.xml`
+    (Phase 16-E, spec §11.3).
+
+    Three facts the reader has to get right, one per shape of the file:
+
+    * **slide 1** carries two comments by two different authors, each pinned to
+      its own point. The author is a number in the comment and a name in a
+      separate deck-wide part, so a reader that never opens the author list
+      would produce two anonymous comments and no error.
+    * **slide 2** carries a comment whose `authorId` the author list does not
+      define. It is kept, unattributed, and warned: a comment attributed to
+      nobody in particular would be worse than one attributed to no one.
+    * **slide 2** also carries PowerPoint's modern comment part beside the
+      classic one, which is what PowerPoint itself writes. It is not read, the
+      refusal names the schema, and the part comes back byte for byte.
+
+    Both slides have real prose in their bodies: a fixture whose text is one
+    word makes the `standard` residue of `{.slide}` look enormous, and the
+    corpus budget is measured over exactly this."""
+    comment = (
+        '<p:cm authorId="{author}" dt="{dt}" idx="{idx}">'
+        '<p:pos x="{x}" y="{y}"/>'
+        "<p:text>{text}</p:text>"
+        "</p:cm>"
+    )
+    slide1_comments = (
+        comment.format(
+            author=1, dt="2026-02-03T09:12:00Z", idx=1, x=1200000, y=900000,
+            text="La cifra de ingresos viene del cierre provisional.",
+        )
+        + comment.format(
+            author=2, dt="2026-02-03T10:04:00Z", idx=2, x=4600000, y=2400000,
+            text="De acuerdo, pero conviene fechar el dato en el pie.",
+        )
+    )
+    slide2_comments = comment.format(
+        author=7, dt="2026-02-03T11:30:00Z", idx=1, x=2000000, y=1500000,
+        text="Falta el desglose por region.",
+    )
+    build_pptx(
+        "comments-slide.pptx",
+        [
+            title_body_slide("Cierre del trimestre", [
+                ("Los ingresos crecen un doce por ciento respecto al trimestre anterior.", 0),
+                ("La rotacion de clientes se mantiene plana desde noviembre.", 0),
+                ("El margen bruto mejora dos puntos gracias al cambio de proveedor.", 0),
+                ("La tesoreria cubre catorce meses de gasto corriente.", 0),
+            ]),
+            title_body_slide("Pendientes de revision", [
+                ("El desglose por region llega la semana que viene.", 0),
+                ("Falta confirmar el dato de rotacion con el equipo comercial.", 0),
+                ("La auditoria revisa el criterio de reconocimiento de ingresos.", 0),
+                ("El consejo pide una comparativa con el mismo trimestre del ano pasado.", 0),
+            ]),
+        ],
+        comment_authors=[(1, "Ada Lovelace", "AL"), (2, "Grace Hopper", "GH")],
+        comments={1: slide1_comments, 2: slide2_comments},
+        slide_rels={
+            2: [("rIdModernComments", "comments", "../comments/modernComment_1.xml")],
+        },
+        extra_parts={
+            "ppt/comments/modernComment_1.xml": (XML_DECL + MODERN_COMMENT).encode(),
+        },
+        extra_overrides=[
+            ("/ppt/comments/modernComment_1.xml", "application/vnd.ms-powerpoint.comments+xml"),
+        ],
+        title="Comentarios de revision",
+    )
+
+
 def pptx_macro_enabled() -> None:
     """A `.pptm`: the same deck as `basic-slides`, plus a macro project and the
     macro-enabled main content type. Read as its macro-free equivalent — the
@@ -3962,6 +4079,7 @@ GENERATORS = [
     pptx_charts_multi_series,
     pptx_smartart_fallback,
     pptx_ole_embedded,
+    pptx_comments_slide,
     pptx_macro_enabled,
     pptx_forty_slides,
     office_default_template,

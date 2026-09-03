@@ -324,6 +324,19 @@ fn write_inline(
 ) -> Result<(), WriteError> {
     match inline {
         Inline::Text(t) => write_text_runs(t, out),
+        // `office:annotation` is the ODF form of a comment and this writer does
+        // not produce one: comments are read by the OOXML side (spec §11.3) and
+        // written back by no writer yet. The commented text survives.
+        Inline::Comment(comment) => {
+            ctx.report.warn(Warning::Degraded {
+                what: match comment.author.as_deref() {
+                    Some(author) => format!("comment by {author}"),
+                    None => "comment".into(),
+                },
+                why: "the .odt writer does not write comments".into(),
+            });
+            write_inlines(comment.covered(), ctx, out)?;
+        }
         Inline::Styled { content, props } => {
             let parent = props.style.as_ref().map(|s| s.as_str());
             let style = ctx.auto.text_style(parent, &props.direct);

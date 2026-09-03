@@ -14,14 +14,14 @@ use docsai_model::image::{
     SimpleBorder, WrapMode, WrapSide,
 };
 use docsai_model::list::ListId;
-use docsai_model::report::ConversionReport;
+use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{Align, FontProps, StyleId, Underline, VertAlign};
 use docsai_model::text::{
-    Block, BreakKind, FieldKind, Footnote, HeaderFooter, HeaderScope, Heading, Inline, List,
-    ListItem, Orientation, ParaFormat, Paragraph, RawFragment, RunProps, Section, Table, TableCell,
-    TableRow, TextBox, TextDocument,
+    Block, BreakKind, Comment, CommentAnchor, FieldKind, Footnote, HeaderFooter, HeaderScope,
+    Heading, Inline, List, ListItem, Orientation, ParaFormat, Paragraph, RawFragment, RunProps,
+    Section, Table, TableCell, TableRow, TextBox, TextDocument,
 };
-use docsai_model::units::{Length, Size};
+use docsai_model::units::{Length, Point, Size};
 use docsai_model::{ConversionReport as Report, Document};
 
 use crate::attrs::Attrs;
@@ -118,6 +118,9 @@ pub fn parse_with_base(
 
     // Attach footnote definitions collected from the body.
     attach_footnotes(&mut sections, &parser.footnotes);
+    // …and then the comment containers, the same way and for the same reason
+    // (spec §11.3 rule 3).
+    attach_comments(&mut sections, &mut parser);
 
     let mut doc = Document::Text(TextDocument {
         addressing: fm.addressing,
@@ -205,6 +208,8 @@ fn partition_structure(
             ParsedBlock::Footer(f) => footers.push(f),
             ParsedBlock::Section { attrs, blocks } => sections.push((attrs, blocks)),
             ParsedBlock::Normal(b) => body.push(b),
+            // Filed under its `ref=` already; it is not part of the flow.
+            ParsedBlock::Comment => {}
         }
     }
     (headers, footers, body, sections)
@@ -253,6 +258,127 @@ fn attach_footnotes(sections: &mut [Section], footnotes: &BTreeMap<u32, Vec<Bloc
         for f in &mut section.footers {
             rewrite_blocks(&mut f.blocks, footnotes);
         }
+    }
+}
+
+/// Binds every anchor span to the container that carries what was said, and
+/// keeps the containers that nothing pointed at (spec §11.3).
+fn attach_comments(sections: &mut Vec<Section>, parser: &mut BodyParser<'_>) {
+    // Unconditional: an anchor whose container is missing has to be found and
+    // reduced to its text, and that is exactly the case where the map is empty.
+    {
+        for section in sections.iter_mut() {
+            bind_blocks(&mut section.blocks, parser);
+            for header in &mut section.headers {
+                bind_blocks(&mut header.blocks, parser);
+            }
+            for footer in &mut section.footers {
+                bind_blocks(&mut footer.blocks, parser);
+            }
+        }
+    }
+    // Whatever no anchor claimed, plus the containers that never named one.
+    let mut orphans: Vec<Comment> = std::mem::take(&mut parser.unanchored_comments);
+    for (token, comment) in std::mem::take(&mut parser.comments) {
+        parser.report.warn(Warning::Degraded {
+            what: format!("comment `{token}`"),
+            why: "no anchor in the document refers to it; it is kept unanchored".into(),
+        });
+        orphans.push(comment);
+    }
+    if orphans.is_empty() {
+        return;
+    }
+    if sections.is_empty() {
+        sections.push(Section::default());
+    }
+    let last = sections.last_mut().expect("a section exists");
+    for comment in orphans {
+        // Written back as `[]{.comment ref=…}`: an empty anchor is the form an
+        // unanchored comment already has (spec §11.3 rule 2), so the document
+        // that comes out of this parses to the same one.
+        last.blocks
+            .push(Block::Paragraph(Paragraph::new(vec![Inline::Comment(
+                Box::new(comment),
+            )])));
+    }
+}
+
+/// Replaces the placeholder inside every anchor by the comment it names.
+fn bind_blocks(blocks: &mut [Block], parser: &mut BodyParser<'_>) {
+    for block in blocks.iter_mut() {
+        match block {
+            Block::Paragraph(p) => bind_inlines(&mut p.content, parser),
+            Block::Heading(h) => bind_inlines(&mut h.paragraph.content, parser),
+            Block::List(list) => {
+                for item in &mut list.items {
+                    bind_blocks(&mut item.blocks, parser);
+                }
+            }
+            Block::Table(table) => {
+                for row in &mut table.rows {
+                    for cell in &mut row.cells {
+                        bind_blocks(&mut cell.blocks, parser);
+                    }
+                }
+            }
+            Block::TextBox(text_box) => bind_blocks(&mut text_box.blocks, parser),
+            Block::Image(_) | Block::Raw(_) => {}
+        }
+    }
+}
+
+pub(crate) fn bind_inlines(inlines: &mut Vec<Inline>, parser: &mut BodyParser<'_>) {
+    let mut out = Vec::with_capacity(inlines.len());
+    for mut inline in std::mem::take(inlines) {
+        match &mut inline {
+            Inline::Styled { content, .. } | Inline::Link { content, .. } => {
+                bind_inlines(content, parser);
+            }
+            Inline::Footnote(note) => bind_blocks(&mut note.blocks, parser),
+            Inline::Comment(comment) => {
+                let token = anchor_token(comment);
+                match token.and_then(|token| parser.comments.remove(&token).map(|c| (token, c))) {
+                    Some((_, found)) => {
+                        let anchor = std::mem::take(&mut comment.anchor);
+                        **comment = found;
+                        comment.anchor = anchor;
+                    }
+                    None => {
+                        // An anchor whose container is not in the document.
+                        // The text is the document and survives; the fact that
+                        // it was under review does not.
+                        let token = anchor_token(comment).unwrap_or_default();
+                        parser.report.warn(Warning::Degraded {
+                            what: format!("comment anchor `{token}`"),
+                            why: "no `.comment` container declares it; only its text is kept"
+                                .into(),
+                        });
+                        let mut covered = match std::mem::take(&mut comment.anchor) {
+                            CommentAnchor::Span(content) => content,
+                            _ => Vec::new(),
+                        };
+                        bind_inlines(&mut covered, parser);
+                        out.append(&mut covered);
+                        continue;
+                    }
+                }
+            }
+            _ => {}
+        }
+        out.push(inline);
+    }
+    *inlines = out;
+}
+
+/// The `ref=` token an unbound anchor is carrying, when it still is one.
+fn anchor_token(comment: &Comment) -> Option<String> {
+    match comment.blocks.first() {
+        Some(Block::Paragraph(p)) => match p.content.first() {
+            Some(Inline::Text(text)) => text.strip_prefix('\u{2}').map(str::to_string),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -309,9 +435,15 @@ fn rewrite_inlines(inlines: &mut [Inline], footnotes: &BTreeMap<u32, Vec<Block>>
 #[allow(clippy::large_enum_variant)]
 enum ParsedBlock {
     Normal(Block),
+    /// A `.comment` container: kept in [`BodyParser::comments`] rather than in
+    /// the flow, because the flow is what the document says.
+    Comment,
     Header(HeaderFooter),
     Footer(HeaderFooter),
-    Section { attrs: Attrs, blocks: Vec<Block> },
+    Section {
+        attrs: Attrs,
+        blocks: Vec<Block>,
+    },
 }
 
 pub(crate) struct BodyParser<'a> {
@@ -319,6 +451,14 @@ pub(crate) struct BodyParser<'a> {
     assets: &'a mut dyn AssetStore,
     pub(crate) report: &'a mut Report,
     footnotes: BTreeMap<u32, Vec<Block>>,
+    /// `::: {.comment ref=c1}` containers by their `ref=` token (spec §11.3).
+    /// Collected as they are met and bound to their anchors afterwards, the
+    /// same two-phase shape footnote definitions already use: a definition is
+    /// written at the foot of the document and its anchor is not.
+    pub(crate) comments: BTreeMap<String, Comment>,
+    /// Containers that named no anchor. Kept — a comment nobody can point at is
+    /// still what somebody wrote — and appended at the end of the document.
+    pub(crate) unanchored_comments: Vec<Comment>,
     styles: docsai_model::StyleCatalog,
     /// The attribute-set dictionary declared in the front matter (spec §3.7).
     attr_sets: BTreeMap<String, Attrs>,
@@ -341,6 +481,8 @@ impl<'a> BodyParser<'a> {
             assets,
             report,
             footnotes: BTreeMap::new(),
+            comments: BTreeMap::new(),
+            unanchored_comments: Vec::new(),
             styles: fm.styles.clone(),
             attr_sets: fm.attr_sets.clone(),
         }
@@ -374,8 +516,11 @@ impl<'a> BodyParser<'a> {
                 self.footnotes.insert(n, blocks);
                 continue;
             }
-            if let Some(parsed) = self.parse_container_or_block(chunk, chunk_line)? {
-                out.push(parsed);
+            match self.parse_container_or_block(chunk, chunk_line)? {
+                // A comment container contributes nothing to the block flow:
+                // `parse_fence` has already filed it under its `ref=`.
+                Some(ParsedBlock::Comment) | None => {}
+                Some(parsed) => out.push(parsed),
             }
         }
         // Re-parse more carefully with list grouping
@@ -456,6 +601,54 @@ impl<'a> BodyParser<'a> {
         Ok(Some(ParsedBlock::Normal(Block::Paragraph(para))))
     }
 
+    /// One `::: {.comment}` container: its attributes, its blocks, and the
+    /// replies nested inside it (spec §11.3 rules 1 and 5).
+    pub(crate) fn parse_comment(
+        &mut self,
+        attrs: &Attrs,
+        body: &str,
+        line: usize,
+    ) -> Result<Comment, ParseError> {
+        let mut own = String::new();
+        let mut replies = Vec::new();
+        let mut rest = body;
+        // A nested `.comment` fence is a reply; anything else is the comment's
+        // own prose. The two cannot collide: prose does not open a `:::`.
+        loop {
+            let Some(at) = next_fence_start(rest) else {
+                own.push_str(rest);
+                break;
+            };
+            let (head, tail) = rest.split_at(at);
+            let (child_attrs, child_body, after) = split_one_fence(tail, line)?;
+            let child_attrs = self.expanded(child_attrs);
+            if child_attrs.has_class("comment") {
+                own.push_str(head);
+                replies.push(self.parse_comment(&child_attrs, child_body, line)?);
+                rest = after;
+                continue;
+            }
+            // Some other container inside a comment: not a reply, so it stays
+            // part of what the comment says and the block parser handles it.
+            let consumed = rest.len() - after.len();
+            own.push_str(&rest[..consumed]);
+            rest = after;
+        }
+        Ok(Comment {
+            id: attrs.id_ref().map(NodeId::new),
+            author: attrs.get("author").map(str::to_string),
+            initials: attrs.get("initials").map(str::to_string),
+            date: attrs.get("date").map(str::to_string),
+            resolved: attrs.get("resolved") == Some("true"),
+            anchor: match comment_pos(attrs) {
+                Some(pos) => CommentAnchor::Point(pos),
+                None => CommentAnchor::Unanchored,
+            },
+            blocks: self.parse_normal_blocks(&own, line)?,
+            replies,
+        })
+    }
+
     fn parse_fence(&mut self, text: &str, line: usize) -> Result<ParsedBlock, ParseError> {
         let mut lines = text.lines();
         let first = lines.next().unwrap_or("");
@@ -497,6 +690,23 @@ impl<'a> BodyParser<'a> {
         if attrs.has_class("section") {
             let blocks = self.parse_normal_blocks(&body, line + 1)?;
             return Ok(ParsedBlock::Section { attrs, blocks });
+        }
+        if attrs.has_class("comment") {
+            let comment = self.parse_comment(&attrs, &body, line + 1)?;
+            let token = attrs.get("ref").unwrap_or_default().to_string();
+            if token.is_empty() {
+                // A container with no `ref=` in a text document is a comment
+                // whose anchor did not survive a hand edit. Kept, and said
+                // (spec §11.3, *Reading a document with comments back*).
+                self.report.warn(Warning::Degraded {
+                    what: "comment".into(),
+                    why: "no `ref=`: nothing in the document is anchored to it".into(),
+                });
+                self.unanchored_comments.push(comment);
+            } else {
+                self.comments.insert(token, comment);
+            }
+            return Ok(ParsedBlock::Comment);
         }
         if attrs.has_class("raw") {
             let raw = parse_raw_block(&attrs, &body, self.base_dir.as_deref(), line)?;
@@ -1289,6 +1499,39 @@ fn try_parse_bracket(
                     i,
                 )));
             }
+            // A comment's anchor (spec §11.3 rule 2). The container that
+            // holds what was said is elsewhere in the document, so the node is
+            // a placeholder until `attach_comments` binds the two.
+            if attrs.has_class("comment") {
+                let content = if inner.is_empty() {
+                    Vec::new()
+                } else {
+                    parse_inlines_inner(&inner, ctx)?
+                };
+                match attrs.get("ref") {
+                    Some(token) => {
+                        let mut comment =
+                            Comment::new(vec![Block::Paragraph(Paragraph::new(vec![
+                                Inline::Text(format!("\u{2}{token}")),
+                            ]))]);
+                        comment.anchor = CommentAnchor::Span(content);
+                        return Ok(Some((Inline::Comment(Box::new(comment)), i)));
+                    }
+                    None => {
+                        ctx.report.warn(Warning::Degraded {
+                            what: "comment anchor".into(),
+                            why: "no `ref=`: it names no comment, so only its text is kept".into(),
+                        });
+                        return Ok(Some((
+                            Inline::Styled {
+                                content,
+                                props: RunProps::default(),
+                            },
+                            i,
+                        )));
+                    }
+                }
+            }
             let content = if inner.is_empty() {
                 Vec::new()
             } else {
@@ -1909,6 +2152,28 @@ pub(crate) fn split_top_level(text: &str) -> Vec<&str> {
         }
     }
     chunks
+}
+
+/// The byte offset of the next line that opens a `:::` container, if any.
+fn next_fence_start(text: &str) -> Option<usize> {
+    let mut at = 0usize;
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with(":::") && !line.trim().trim_start_matches(':').is_empty() {
+            return Some(at);
+        }
+        at += line.len();
+    }
+    None
+}
+
+/// `pos="x,y"` on a comment container, in the units of spec §11.2 rule 7.
+fn comment_pos(attrs: &Attrs) -> Option<Point> {
+    let value = attrs.get("pos")?;
+    let (x, y) = value.split_once(',')?;
+    Some(Point::new(
+        Length::parse(x.trim())?,
+        Length::parse(y.trim())?,
+    ))
 }
 
 pub(crate) fn split_one_fence(text: &str, line: usize) -> Result<(Attrs, &str, &str), ParseError> {

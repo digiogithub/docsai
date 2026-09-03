@@ -196,6 +196,7 @@ Paragraph with style and direct formatting. {.Quote align=center space-after=12p
 | page or column break | `[]{.break kind=page}` / `[]{.break kind=column}` |
 | hyperlink | `[text](https://...)` — with attributes if styled: `[text](url){.Hyperlink}` |
 | footnote | `[^1]` + definition at the end (Pandoc/GFM footnotes syntax) |
+| comment anchor | `[text]{.comment ref=c1}` + its `::: {.comment}` container at the end (§11.3) |
 | dynamic field | `[value]{.field field=PAGE}`, with `instr="…"` in `full` mode |
 
 ### 3.3 Lists
@@ -570,16 +571,20 @@ are additions: no document written against the draft becomes invalid.
 
 ---
 
-## 11. Committed future versions (1.1 and 1.2)
+## 11. Committed future versions (1.1, 1.2 and 1.3)
 
-The two bumps scheduled by [`development-plan-v2.md`](development-plan-v2.md), each finalised by
-the phase that implements it (1.1 in Phases 10–11, 1.2 in Phase 14). Both sections are normative
-now; anything a phase has not implemented yet says so where it is described. Rationale:
-[`technical-analysis-presentations.md`](technical-analysis-presentations.md) §6.
+The bumps scheduled by [`development-plan-v2.md`](development-plan-v2.md), each finalised by
+the phase that implements it (1.1 in Phases 10–11, 1.2 in Phase 14, 1.3 in Phase 16). Every
+section is normative now; anything a phase has not implemented yet says so where it is described.
+Rationale: [`technical-analysis-presentations.md`](technical-analysis-presentations.md) §6.
 
-**Compatibility contract for both bumps**: additive only. A 1.0 document parses under 1.1/1.2
-unchanged; ids are assigned on the next write. A 1.1/1.2 document read by a 1.0 parser loses
+**Compatibility contract for every bump**: additive only. A 1.0 document parses under 1.1/1.2/1.3
+unchanged; ids are assigned on the next write. A 1.1/1.2/1.3 document read by a 1.0 parser loses
 addressing metadata but stays valid CommonMark — principle §0.1 holds.
+
+**A version describes what a file actually contains**, never what its writer can produce: ids make
+a document 1.1 (§11.1), the presentation profile makes a deck 1.2 (§11.2), and a comment makes
+either of them 1.3 (§11.3).
 
 ### 11.1 DocMark 1.1 — addressing, sidecar, `agent` fidelity
 
@@ -609,6 +614,7 @@ the remaining bullets stay a sketch until Phase 11 implements them.
   | table row | the `::: {.row}` of a complex table (§3.4); rows of a GFM table have no attribute slot and are reached by relative path |
   | image | its attribute block — `![alt](p){#n6 width=…}` |
   | footnote | the **reference**, `[^1]{#n9}`, which is where the note sits in the flow |
+  | comment | its `::: {.comment}` container (§11.3), not its anchor: the anchor is a range, and a comment on a slide has none |
   | sheet | the sheet heading's attribute block (§4) |
   | section | the `::: {.section}` container, so only in a multi-section document |
   | raw block | its existing `{#r7}` (§7), unchanged |
@@ -937,3 +943,164 @@ are not written: `data=` names the workbook, the table states what the chart plo
 copied into the document would be a second copy that a hand edit could contradict.
 
 The `.odp` reader (Phase 18) consumes this profile but does not change it.
+
+### 11.3 DocMark 1.3 — comments
+
+Fourth addition, and the first that belongs to **no single document class**. A `.docx` anchors a
+comment over a *range* of text; a `.pptx` pins one to a *point* on a slide. Plan v2 Phase 16
+task 3 says the two share one syntax, so it is designed once, here, and both readers produce the
+same node. **Normative** as of plan v2 Phase 16-E, which reads comments; what 16-E does not do is
+named under *Not yet implemented* at the end of this section.
+
+A comment is not what a document says. It is what somebody said *about* it, and that difference
+decides almost every rule below.
+
+#### The form
+
+````markdown
+---
+docmark: "1.3"
+source-format: docx
+next-id: 42
+---
+
+Ship the reconciliation by [Friday]{.comment ref=c1}, before the board pack goes out.
+
+::: {#n9 .comment author="Ada Lovelace" date="2026-05-04T09:12:00Z" initials=AL ref=c1}
+Thursday is the real deadline — the pack is printed overnight.
+
+::: {#n10 .comment author="Grace Hopper" date="2026-05-04T10:01:00Z" initials=GH}
+Agreed, moving it.
+:::
+:::
+````
+
+On a slide there is no range to mark, so there is no anchor and no `ref=`:
+
+````markdown
+## Q3 results {#n1 .slide layout=L1}
+
+- Revenue up 12 %
+
+::: {#n7 .comment author="Ada Lovelace" date="2026-05-04T09:12:00Z" initials=AL pos="1200000emu,2.5cm"}
+This chart is the one they will ask about.
+:::
+````
+
+#### The six rules
+
+1. **A comment is a `::: {.comment}` container, always.** It holds what the comment says, as
+   blocks, and it is the one place the comment exists. The container is written whether the
+   comment is anchored over text, pinned to a point, or anchored in a way this format cannot
+   express — a comment that lost its anchor is still a comment, and dropping it because its
+   anchor did not survive would delete what a reviewer wrote.
+2. **An anchor over text is a bracketed span in the flow**: `[the commented text]{.comment ref=c1}`,
+   with the same `ref=` as its container. The two halves are one node — the split is the format's,
+   not the model's — for the reason a footnote is split the same way: the comment's body is block
+   content and a span cannot hold blocks. A comment whose source anchored it at a point in the
+   text rather than over a range writes an empty span, `[]{.comment ref=c1}`, the form §3.2
+   already uses for a marker with no text under it.
+3. **`ref=` is a document-local token, not an identity.** The writer hands out `c1`, `c2`, … in
+   writing order; the parser uses it to put the two halves back together and then forgets it. It
+   is deliberately *not* the node id: `#id` is absent at the levels that write no ids, and an
+   anchor whose binding disappeared with the ids would be a span pointing at nothing. It is
+   deliberately *not* the source's own comment id either, for the reason rule 4 gives about
+   authors.
+4. **DocMark names an author; it does not carry the source's author table.** `author=` is the
+   display name and `initials=` the initials, written on every comment of a thread including
+   replies. PresentationML keeps its authors in a separate part and refers to them by number;
+   that number is a property of one package and means nothing in another, so it is resolved on
+   read and re-established on write. A comment whose source author id resolves to nothing keeps
+   its text, is written **without** `author=`, and the reader warns naming the unresolved id: an
+   anonymous comment is a true document, and a comment attributed to «Unknown» is not.
+5. **A thread is nesting.** A reply is a `::: {.comment}` inside the comment it replies to, after
+   that comment's own blocks, in the order the source records. A reply carries no `ref=`: the
+   anchor belongs to the thread, and a reply that claimed one would assert a second range nobody
+   selected. Replies nest to any depth the source expresses; a format with a flat reply list
+   reads as one level.
+6. **Comments are written at `full` and `agent`, and at no other level.** At `standard` and
+   `plain` a document that has comments writes none, and the loss is warned. Three reasons, and
+   any one of them is enough. A comment is not what the document *shows*, and `plain` is defined
+   as what a reader sees (§6). `standard` does not write back (§11.2 rule 6), so a comment written
+   there is one a hand edit would silently discard, and a review thread is exactly the content
+   whose silent loss is expensive. And the residue a `standard` deck may leak is *named* in
+   §11.2 — the `{.slide}` marker and the containers of rules 4 and 8 — so a comment container
+   there would both widen that list and spend a budget that is not this section's to spend.
+
+#### Comment attributes
+
+| Attribute | Meaning | Levels |
+|---|---|---|
+| `#id` | The comment's address (§11.1), on the **container**. Unlike a footnote, which is addressed at its reference, a comment is addressed where it lives: its anchor is a range rather than a point, and a comment pinned to a slide has no anchor at all, so the container is the only slot both document classes have | `full`, `agent` |
+| `.comment` | What the container is, and what the anchor span is | `full`, `agent` |
+| `ref=` | Binds an anchored comment to its span (rule 3). Absent on an unanchored comment, on a slide comment, and on every reply | `full`, `agent` |
+| `author=` | The display name of whoever wrote it. Absent when the source did not say, or said an author id nothing defines (rule 4) | `full`, `agent` |
+| `initials=` | The author's initials, when the source keeps them separately | `full`, `agent` |
+| `date=` | When it was written, as an ISO-8601 instant, copied from the source rather than reformatted | `full`, `agent` |
+| `resolved=true` | The thread is marked done by a reviewer. Present only when true, and only on the comment that opens the thread | `full`, `agent` |
+| `pos=` | Where on the surface it is pinned, as the `"x,y"` pair of §11.2 rule 7 in readable units. Only a slide comment has one | `full`, `agent` |
+
+#### Where the container is written
+
+| Document class | Position |
+|---|---|
+| Text document (§3) | After the body, with the footnote definitions, in the order the anchors appear. A comment is commentary on the document and belongs at its foot, not interleaved with the prose it is about — and interleaving it would put a `:::` fence between two paragraphs a plain viewer prints as one flow |
+| Deck (§11.2) | At slide level, after the slide's shapes **and after its notes**. A slide comment belongs to the slide, and the notes are part of what a reviewer commented on |
+
+#### Reading a document with comments back
+
+The parser is the mirror, and three of its answers are part of the format because a second reader
+has to give the same ones.
+
+- **An anchor with no definition keeps its text.** `[Friday]{.comment ref=c9}` where no container
+  declares `c9` reads as the words *Friday*, with a warning naming the reference. The text is the
+  document; the annotation is what was lost.
+- **A definition with no anchor is an unanchored comment**, kept, with a warning. It is what a
+  hand edit that deleted the commented sentence leaves behind, and refusing the file would throw
+  away the comment as well as the sentence.
+- **A `.comment` container directly inside another is a reply** (rule 5); anything else inside one
+  is the comment's own blocks. The two cannot collide: a comment's body is prose, and a nested
+  `:::` fence carrying `.comment` is not something prose produces.
+
+Input is tolerant here as everywhere else. `author=`, `initials=`, `date=` and `pos=` are each
+optional; a container carrying none of them is a comment by an unnamed author, which is a document
+somebody can type by hand. A `resolved=` value that is not `true` is not resolved.
+
+#### Version rule
+
+A document that carries **at least one comment** declares `docmark: "1.3"`; one that carries none
+declares what it declared before — 1.0, 1.1 or 1.2 — exactly as 1.1's rule ties the version to
+whether ids were actually written. So no existing document changes shape because this section
+exists, and the version keeps describing what is in the file rather than what the writer knows how
+to produce.
+
+**This is a version bump, and the two earlier additions were not.** The `.chart` data table of
+§11.2 grew inside a construct 1.2 had already defined, and a 1.2 reader that knew nothing of it
+still rendered the numbers. Comments are different on both counts. They add a construct to the
+*text* profile, where 1.2 added none, and a 1.1 reader has no rule for an unknown `:::` container
+in a text document at all — the presentation profile's «read it as a text box and warn» tolerance
+lives in §11.2 and does not reach §3. And the `ref=` binding is a **parsing obligation**: a reader
+that ignores it does not merely lose an attribute, it silently drops the fact that a span of the
+document was under review. A construct whose absence a consumer cannot distinguish from «this
+document has no comments» is exactly what the explicit version list of §11 exists to prevent.
+
+The bump stays additive in the direction that matters. A 1.0, 1.1 or 1.2 document parses unchanged
+under a 1.3 reader. A 1.3 document read by an older parser keeps its headings, lists, tables and
+images: the anchor span degrades to its own text under any parser that implements §3.2, and the
+container degrades to its blocks. Principle §0.1 holds.
+
+#### Not yet implemented
+
+- **Writing comments back** is plan v2 Phase 16-F. Until it lands, a comment read out of a `.docx`
+  reaches DocMark and does not reach a `.docx` written from it, and the loss is warned like every
+  other. A deck is unaffected: its comment parts are preserved (architecture §9.4) and come back
+  byte for byte whether or not the writer understands them.
+- **PowerPoint's modern comments are not read.** Since 2021 PowerPoint also writes threaded,
+  text-anchored comments into `ppt/comments/modernComment_*.xml` under a Microsoft extension
+  schema that is not part of ECMA-376 and is not the `p:cmLst` this section maps. A deck carrying
+  them is warned, part by part, and the parts stay preserved. This is stated as a limitation
+  rather than guessed at: the modern part expresses replies and text anchors that the classic one
+  cannot, and reading it through the classic model would flatten both.
+- **A comment's own formatting is its blocks.** A `.docx` comment is a sequence of paragraphs and
+  reads as such; a `.pptx` comment is a single string and its line breaks become paragraphs. What
+  neither carries into this format is the *appearance* of the comment pane.

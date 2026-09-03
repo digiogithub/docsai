@@ -66,15 +66,25 @@ pub const DOCMARK_VERSION_ADDRESSED: &str = "1.1";
 /// level, ids or no ids.
 pub const DOCMARK_VERSION_PRESENTATION: &str = "1.2";
 
+/// Version declared by a document that carries at least one comment
+/// (spec §11.3).
+///
+/// Additive like [`DOCMARK_VERSION_ADDRESSED`] and for the same reason: the
+/// version says what is *in* the file, so a document with no comment keeps the
+/// version it had, whichever profile it is written in. Higher than the
+/// presentation profile because a deck with comments is written in both.
+pub const DOCMARK_VERSION_COMMENTS: &str = "1.3";
+
 /// Every specification version this build parses (spec §11).
 ///
-/// The list is explicit rather than a `starts_with('1')` test: a future 1.3
+/// The list is explicit rather than a `starts_with('1')` test: a future 1.4
 /// would otherwise be accepted silently and then read as if it were this
 /// profile, which is a worse failure than a refusal naming the version.
 pub const DOCMARK_VERSIONS: &[&str] = &[
     DOCMARK_VERSION,
     DOCMARK_VERSION_ADDRESSED,
     DOCMARK_VERSION_PRESENTATION,
+    DOCMARK_VERSION_COMMENTS,
 ];
 
 /// The three shapes a document can take.

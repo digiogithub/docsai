@@ -253,6 +253,21 @@ fn parse_slide(
         if trimmed.trim_start().starts_with(":::") {
             let (attrs, inner, _) = split_one_fence(trimmed, chunk.line)?;
             let attrs = parser.expanded(attrs);
+            if attrs.has_class("comment") {
+                // A slide comment is pinned to the slide, not anchored over
+                // text, so it never carries a `ref=` (spec §11.3 rule 2). One
+                // that does is a text-document comment in a deck: kept on the
+                // slide, and said.
+                if attrs.get("ref").is_some() {
+                    parser.report.warn(Warning::Degraded {
+                        what: "slide comment".into(),
+                        why: "it carries a `ref=`, which a slide has no anchor for".into(),
+                    });
+                }
+                let comment = parser.parse_comment(&attrs, inner, chunk.line)?;
+                slide.comments.push(comment);
+                continue;
+            }
             if attrs.has_class("notes") {
                 // An empty container is an empty notes page, which is not the
                 // same document as a slide with no notes page at all.

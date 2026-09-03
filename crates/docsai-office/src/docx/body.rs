@@ -1,6 +1,6 @@
 //! `word/document.xml` (and headers, footers and footnotes) → IR blocks.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use docsai_model::addressing::NodeId;
 use docsai_model::assets::AssetStore;
@@ -9,8 +9,8 @@ use docsai_model::list::ListId;
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{StyleCatalog, StyleId};
 use docsai_model::text::{
-    Block, BreakKind, FieldKind, Footnote, Heading, Inline, List, ListItem, ParaFormat, Paragraph,
-    RawFragment, RunProps, Table, TableCell, TableRow,
+    Block, BreakKind, Comment, CommentAnchor, FieldKind, Footnote, Heading, Inline, List, ListItem,
+    ParaFormat, Paragraph, RawFragment, RunProps, Table, TableCell, TableRow,
 };
 use docsai_model::units::Length;
 
@@ -33,6 +33,24 @@ pub struct Ctx<'a> {
     pub numbering: &'a Numbering,
     /// Footnote id → its blocks. Empty while reading `footnotes.xml` itself.
     pub footnotes: &'a BTreeMap<i64, Vec<Block>>,
+    /// The comments of the document (spec §11.3). Empty while reading
+    /// `comments.xml` itself: a comment cannot comment on a comment.
+    pub comments: &'a CommentIndex,
+}
+
+/// `word/comments.xml` and `word/commentsExtended.xml`, resolved into what the
+/// body walk needs: the comments that open a thread, and the ids of the ones
+/// that are already nested inside them as replies.
+#[derive(Debug, Default)]
+pub struct CommentIndex {
+    /// The comment behind each `w:id` that starts a thread, its replies
+    /// already attached.
+    pub roots: BTreeMap<i64, Comment>,
+    /// Ids that are a reply to another comment. Their `w:commentReference` in
+    /// the body is *not* a second anchor: the thread hangs off the comment it
+    /// answers, and emitting one here would say the document was commented on
+    /// twice.
+    pub replies: BTreeSet<i64>,
 }
 
 impl Ctx<'_> {
@@ -54,6 +72,11 @@ pub struct State<'a> {
     pub raw_seq: u32,
     /// Accepted tracked changes, reported once at the end.
     pub revisions: u32,
+    /// The comment ids already placed in the flow. Document-wide, because a
+    /// commented range may open in one paragraph and close in another: the
+    /// anchor is then cut at the paragraph end, and the `w:commentReference`
+    /// that follows must not put the same comment in a second time.
+    pub placed_comments: BTreeSet<i64>,
 }
 
 impl State<'_> {
@@ -86,8 +109,6 @@ const IGNORED: &[&str] = &[
     "bookmarkStart",
     "bookmarkEnd",
     "proofErr",
-    "commentRangeStart",
-    "commentRangeEnd",
     "permStart",
     "permEnd",
     "lastRenderedPageBreak",
@@ -375,6 +396,12 @@ enum Piece {
     FieldSeparate,
     FieldEnd,
     Instruction(String),
+    /// `w:commentRangeStart`, `w:commentRangeEnd` and `w:commentReference`,
+    /// carried out flat so the paragraph they bracket can be split into what
+    /// the comment covers and what it does not (spec §11.3 rule 2).
+    CommentStart(i64),
+    CommentEnd(i64),
+    CommentRef(i64),
     /// A `w:bookmarkStart` name, carried out so the paragraph it opens in can
     /// take it as its DocMark id. Internal hyperlinks and TOC/PAGEREF fields
     /// address headings by this name (e.g. `_Toc234329254`); dropping it
@@ -414,10 +441,50 @@ fn read_inlines_with_bookmarks(
     let mut out: Vec<Inline> = Vec::new();
     let mut bookmarks: Vec<String> = Vec::new();
     let mut fields: Vec<FieldBuilder> = Vec::new();
+    // One commented range still open in this paragraph: its `w:id`, and where
+    // in `out` its content starts.
+    let mut open: Vec<(i64, usize)> = Vec::new();
 
     for piece in pieces {
         match piece {
             Piece::Bookmark(name) => bookmarks.push(name),
+            // A comment marker inside a field's instruction or result would
+            // split a node the field owns. The field wins, and the comment is
+            // reported rather than dropped in silence.
+            Piece::CommentStart(id) | Piece::CommentEnd(id) | Piece::CommentRef(id)
+                if !fields.is_empty() =>
+            {
+                if st.placed_comments.insert(id) {
+                    st.report.warn(Warning::Degraded {
+                        what: format!("comment {id}"),
+                        why: "its anchor falls inside a field, which has no place for one".into(),
+                    });
+                }
+            }
+            Piece::CommentStart(id) => {
+                if !st.placed_comments.contains(&id) && !open.iter().any(|(open, _)| *open == id) {
+                    open.push((id, out.len()));
+                }
+            }
+            Piece::CommentEnd(id) => {
+                if let Some(at) = open.iter().position(|(open, _)| *open == id) {
+                    let (_, start) = open.remove(at);
+                    let covered = out.split_off(start);
+                    place_comment(id, covered, &mut out, ctx, st);
+                }
+            }
+            Piece::CommentRef(id) => {
+                // The reference sits at the end of the range, so a range that
+                // was read has already placed the comment. One that was not is
+                // a comment anchored at a point rather than over a span.
+                if let Some(at) = open.iter().position(|(open, _)| *open == id) {
+                    let (_, start) = open.remove(at);
+                    let covered = out.split_off(start);
+                    place_comment(id, covered, &mut out, ctx, st);
+                } else if !st.placed_comments.contains(&id) {
+                    place_comment(id, Vec::new(), &mut out, ctx, st);
+                }
+            }
             Piece::FieldBegin => fields.push(FieldBuilder {
                 instruction: String::new(),
                 result: Vec::new(),
@@ -455,7 +522,67 @@ fn read_inlines_with_bookmarks(
     for field in fields {
         out.push(build_field(field));
     }
+
+    // A range that opened here and closes in a later paragraph. The anchor is
+    // cut at the paragraph end — a DocMark span cannot cross a block boundary
+    // — and the comment is placed all the same, because it is the annotation
+    // that matters and the loss is the extent of what it covers.
+    while let Some((id, start)) = open.pop() {
+        if st.placed_comments.contains(&id) {
+            continue;
+        }
+        let covered = out.split_off(start.min(out.len()));
+        st.report.warn(Warning::Degraded {
+            what: format!("comment {id}"),
+            why: "the commented range runs past the end of its paragraph; the anchor stops there"
+                .into(),
+        });
+        place_comment(id, covered, &mut out, ctx, st);
+    }
     (out, bookmarks)
+}
+
+/// `w:commentRangeStart` and friends carry their id in `w:id`; one without a
+/// readable id names no comment and is dropped where it stands.
+fn push_comment_marker(element: &Element, out: &mut Vec<Piece>, make: fn(i64) -> Piece) {
+    if let Some(id) = element.attr_i64("id") {
+        out.push(make(id));
+    }
+}
+
+/// Puts comment `id` into the flow, over `covered`.
+///
+/// Every path into the node goes through here, so the rules hold once: a reply
+/// never becomes an anchor of its own, an undefined id is warned rather than
+/// invented, and no comment is placed twice.
+fn place_comment(
+    id: i64,
+    covered: Vec<Inline>,
+    out: &mut Vec<Inline>,
+    ctx: &Ctx<'_>,
+    st: &mut State<'_>,
+) {
+    if !st.placed_comments.insert(id) {
+        out.extend(covered);
+        return;
+    }
+    if ctx.comments.replies.contains(&id) {
+        // Correct, not a loss: the reply is already inside the comment it
+        // answers (spec §11.3 rule 5).
+        out.extend(covered);
+        return;
+    }
+    let Some(comment) = ctx.comments.roots.get(&id) else {
+        st.report.warn(Warning::Degraded {
+            what: format!("comment {id}"),
+            why: "the body refers to it but no comment part defines it".into(),
+        });
+        out.extend(covered);
+        return;
+    };
+    let mut comment = comment.clone();
+    comment.anchor = CommentAnchor::Span(covered);
+    out.push(Inline::Comment(Box::new(comment)));
 }
 
 fn build_field(field: FieldBuilder) -> Inline {
@@ -514,10 +641,13 @@ fn collect_pieces(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut
                     collect_pieces(content, ctx, st, out);
                 }
             }
-            "commentReference" => st.report.warn(Warning::Degraded {
-                what: "w:commentReference".into(),
-                why: "comments are out of scope in v1".into(),
-            }),
+            // Comments are read since Phase 16-E (spec §11.3). The three
+            // markers are carried out of the walk untouched: which of them
+            // becomes a node, and what it covers, is decided once the whole
+            // paragraph is flat.
+            "commentRangeStart" => push_comment_marker(child, out, Piece::CommentStart),
+            "commentRangeEnd" => push_comment_marker(child, out, Piece::CommentEnd),
+            "commentReference" => push_comment_marker(child, out, Piece::CommentRef),
             "bookmarkStart" => {
                 if let Some(name) = child.attr("name") {
                     out.push(Piece::Bookmark(name.to_string()));
@@ -635,6 +765,28 @@ fn read_run(r: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, out: &mut Vec<Piece>
                 }
             }
             "footnoteRef" | "endnoteRef" | "separator" | "continuationSeparator" => {}
+            // Where a comment reference actually lives. Word writes it inside a
+            // run of its own, never as a child of `w:p`, so this arm — not the
+            // one in `collect_pieces` — is the one that fires on a real
+            // document. Until Phase 16-E it did not exist, and the reference
+            // fell through to the raw branch below: a comment marker became a
+            // raw fragment in the middle of a sentence, and the warning that
+            // claimed comments were «out of scope» never fired at all.
+            "commentRangeStart" => {
+                flush!();
+                push_comment_marker(child, out, Piece::CommentStart);
+            }
+            "commentRangeEnd" => {
+                flush!();
+                push_comment_marker(child, out, Piece::CommentEnd);
+            }
+            "commentReference" => {
+                // Outside the run's character style, like a footnote reference
+                // above: `CommentReference` only makes the marker small, and
+                // DocMark draws no marker at all.
+                flush!();
+                push_comment_marker(child, out, Piece::CommentRef);
+            }
             "fldChar" => {
                 flush!();
                 match child.attr("fldCharType") {
@@ -757,6 +909,7 @@ mod tests {
         styles: StyleCatalog,
         numbering: Numbering,
         footnotes: BTreeMap<i64, Vec<Block>>,
+        comments: CommentIndex,
     }
 
     fn read(xml: &str, fixture: &Fixture) -> (Vec<Block>, ConversionReport) {
@@ -770,6 +923,7 @@ mod tests {
             styles: &fixture.styles,
             numbering: &fixture.numbering,
             footnotes: &fixture.footnotes,
+            comments: &fixture.comments,
         };
         let mut assets = MemoryAssetStore::new();
         let mut report = ConversionReport::new();
@@ -778,6 +932,7 @@ mod tests {
             report: &mut report,
             raw_seq: 0,
             revisions: 0,
+            placed_comments: Default::default(),
         };
         let blocks = read_blocks(&root, &ctx, &mut st);
         (blocks, report)

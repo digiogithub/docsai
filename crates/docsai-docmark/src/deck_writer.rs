@@ -23,7 +23,7 @@ use docsai_model::assets::AssetStore;
 use docsai_model::image::{Flip, ImageRef};
 use docsai_model::presentation::{ChartRef, PhType, Presentation, Shape, ShapeKind, Slide};
 use docsai_model::report::{ConversionReport, Warning};
-use docsai_model::text::{Block, Table};
+use docsai_model::text::{Block, Comment, CommentAnchor, Table};
 
 use crate::attrs::Attrs;
 use crate::dict::AttrDict;
@@ -149,6 +149,12 @@ fn write_slide(
         write_notes(out, notes, writer, options, &location);
     }
 
+    // After the notes, and last on the slide: a reviewer commented on the whole
+    // of it, notes included (spec §11.3, *Where the container is written*).
+    for comment in &slide.comments {
+        write_comment(out, comment, writer, options);
+    }
+
     let report = writer.report_mut();
     for raw in &slide.raw {
         report.warn(Warning::RawBlockDropped {
@@ -217,6 +223,33 @@ fn write_notes(
         return;
     }
     push_block(out, &blockquote(&body));
+}
+
+/// One slide comment (spec §11.3).
+///
+/// A slide comment is pinned to a point rather than anchored over text, so it
+/// carries `pos=` and no `ref=`: there is no span in the body to bind to. The
+/// container itself is rendered by the text writer, because it is the same node
+/// a `.docx` carries.
+fn write_comment(out: &mut String, comment: &Comment, writer: &mut Writer, options: &Options) {
+    if !options.fidelity.addresses() {
+        writer.warn_comment_dropped(comment);
+        return;
+    }
+    let mut extra = Attrs::new();
+    if let CommentAnchor::Point(pos) = &comment.anchor {
+        // Geometry, in the units of rule 7 and at the same levels.
+        extra.set(
+            "pos",
+            format!(
+                "{},{}",
+                writer.drawing_length(pos.x),
+                writer.drawing_length(pos.y)
+            ),
+        );
+    }
+    let rendered = writer.render_comment(comment, None, extra);
+    push_block(out, &rendered);
 }
 
 /// A rendered run of blocks as a CommonMark blockquote.

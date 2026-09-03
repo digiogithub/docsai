@@ -10,8 +10,8 @@ use docsai_model::image::{Anchor, AxisPos, Flip, ImageRef};
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::style::{FontProps, ResolvedStyle, StyleCatalog, StyleId, Underline, VertAlign};
 use docsai_model::text::{
-    Block, BreakKind, HeaderFooter, Inline, List, Paragraph, RawFragment, RunProps, Section, Table,
-    TableCell, TextDocument,
+    Block, BreakKind, Comment, HeaderFooter, Inline, List, Paragraph, RawFragment, RunProps,
+    Section, Table, TableCell, TextDocument,
 };
 use docsai_model::units::Length;
 
@@ -33,6 +33,12 @@ pub struct Writer<'a> {
     report: ConversionReport,
     /// Rendered footnote definitions, emitted at the very end.
     footnotes: Vec<String>,
+    /// Rendered comment containers (spec 11.3), emitted after them.
+    comments: Vec<String>,
+    /// Behind `c1`, `c2`... - the token that binds an anchor span to its
+    /// container. Document-local and handed out in writing order, so it is
+    /// stable under `serialize(parse(md)) == md`.
+    comment_seq: u32,
     /// Node ids for this run (spec §11.1).
     ids: &'a mut IdSource,
     /// The attribute-set dictionary (spec §3.7). Shared rather than owned: the
@@ -64,6 +70,8 @@ impl<'a> Writer<'a> {
             assets,
             report: ConversionReport::new(),
             footnotes: Vec::new(),
+            comments: Vec::new(),
+            comment_seq: 0,
             ids,
             dict,
             para_style: styles.resolve(None),
@@ -128,6 +136,14 @@ impl<'a> Writer<'a> {
                 self.block(&definition);
             }
         }
+        // Comments come last, after the footnotes: both are commentary on the
+        // document, and a comment is the further from it of the two.
+        if !self.comments.is_empty() {
+            let containers = std::mem::take(&mut self.comments);
+            for container in containers {
+                self.block(&container);
+            }
+        }
         // A document always ends with exactly one newline.
         while self.out.ends_with("\n\n") {
             self.out.pop();
@@ -187,6 +203,73 @@ impl<'a> Writer<'a> {
     /// placeholder, written as ordinary Markdown (spec §11.2 rule 2).
     pub(crate) fn render_slide_blocks(&mut self, blocks: &[Block]) -> String {
         self.render_blocks(blocks, 0)
+    }
+
+    /// One `::: {.comment}` container, thread included (spec 11.3 rule 1).
+    ///
+    /// Shared by both document classes on purpose: a comment on a slide and a
+    /// comment on a paragraph are the same node, and rendering them twice is
+    /// how two spellings of the same container appear. `extra` is what only
+    /// one class knows - a slide comment's `pos=` - and `token` is the `ref=`
+    /// binding, absent on a slide comment and on every reply.
+    pub(crate) fn render_comment(
+        &mut self,
+        comment: &Comment,
+        token: Option<&str>,
+        extra: Attrs,
+    ) -> String {
+        let mark = self.ids.mark();
+        let mut attrs = Attrs::new();
+        let id = self.ids.take(comment);
+        if let Some(id) = id.clone() {
+            attrs.id(id);
+        }
+        attrs.class("comment");
+        attrs.set_opt("ref", token);
+        attrs.set_opt("author", comment.author.clone());
+        attrs.set_opt("initials", comment.initials.clone());
+        attrs.set_opt("date", comment.date.clone());
+        attrs.set_flag("resolved", comment.resolved);
+        attrs.merge(&extra);
+
+        let mut body = self.render_blocks(&comment.blocks, 0);
+        for reply in &comment.replies {
+            // A reply carries no `ref=`: the anchor belongs to the thread
+            // (spec 11.3 rule 5).
+            let rendered = self.render_comment(reply, None, Attrs::new());
+            if body.trim_end().is_empty() {
+                body = rendered;
+            } else {
+                body = format!("{}\n\n{rendered}", body.trim_end());
+            }
+        }
+        let rendered = if body.trim().is_empty() {
+            format!("::: {}\n:::", attrs.render_with(self.dict))
+        } else {
+            format!(
+                "::: {}\n{}\n:::",
+                attrs.render_with(self.dict),
+                body.trim_end()
+            )
+        };
+        self.ids
+            .record(id.as_deref(), NodeKind::Comment, &rendered, mark);
+        rendered
+    }
+
+    /// The loss a level that writes no comment has to declare.
+    pub(crate) fn warn_comment_dropped(&mut self, comment: &Comment) {
+        let level = self.options.fidelity;
+        self.report.warn(Warning::UnsupportedElement {
+            kind: "comment".into(),
+            location: match comment.author.as_deref() {
+                Some(author) => format!("by {author}"),
+                None => "by an unnamed author".into(),
+            },
+            action: format!(
+                "dropped: `{level}` writes what the document says, not what was said about it"
+            ),
+        });
     }
 
     /// Renders the slide heading, which *is* the title placeholder (spec §11.2
@@ -925,6 +1008,24 @@ impl<'a> Writer<'a> {
                     self.style_attrs(&mut attrs, props);
                     format!("{link}{}", attrs.render_with(self.dict))
                 }
+            }
+            Inline::Comment(comment) => {
+                if !self.options.fidelity.addresses() {
+                    // `standard` does not write back and `plain` writes what
+                    // the document shows, so neither carries an annotation
+                    // (spec 11.3 rule 6). The commented text is the document
+                    // and stays; the comment is a warned loss.
+                    self.warn_comment_dropped(comment);
+                    return self.render_inlines(comment.covered(), context);
+                }
+                self.comment_seq += 1;
+                let token = format!("c{}", self.comment_seq);
+                let container = self.render_comment(comment, Some(&token), Attrs::new());
+                self.comments.push(container);
+                let inner = self.render_inlines(comment.covered(), context);
+                let mut attrs = Attrs::new();
+                attrs.class("comment").set("ref", token);
+                format!("[{inner}]{}", attrs.render_with(self.dict))
             }
             Inline::Footnote(note) => {
                 self.report.stats.footnotes += 1;

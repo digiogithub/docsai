@@ -47,8 +47,11 @@ Known hard points of `.docx`:
   raw-blocks in v1.
 - **WMF/EMF images**: legacy Windows vector formats without simple multiplatform rendering
   support. Strategy: extract as-is + warning; optional conversion in later phases.
-- **Revisions/comments** (`w:ins`, `w:del`, `w:comment*`): out of scope for v1; documents with
-  revisions are accepted by taking the "accepted" version and emitting a warning.
+- **Revisions** (`w:ins`, `w:del`): out of scope for v1; documents with revisions are accepted by
+  taking the "accepted" version and emitting a warning.
+- **Comments** (`w:comment*`, `word/commentsExtended.xml`): out of scope for v1, **read since plan
+  v2 Phase 16-E** into the same IR node a `.pptx` slide comment uses, with the DocMark syntax of
+  specification §11.3. Written back from Phase 16-F.
 
 **`.xlsx` (SpreadsheetML)** — relevant parts: `xl/workbook.xml`, `xl/worksheets/sheet*.xml`,
 `xl/sharedStrings.xml`, `xl/styles.xml` (number formats, fonts, fills, borders — all via cross

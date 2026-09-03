@@ -11,13 +11,14 @@ mod numbering;
 mod styles;
 pub(crate) mod write;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek};
 
 use docsai_model::assets::AssetStore;
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::text::{
-    Block, HeaderFooter, HeaderScope, Margins, Orientation, PageGeometry, Section, TextDocument,
+    Block, Comment, HeaderFooter, HeaderScope, Margins, Orientation, PageGeometry, Section,
+    TextDocument,
 };
 use docsai_model::units::{Length, Size};
 use docsai_model::Document;
@@ -26,7 +27,7 @@ use crate::error::ReadError;
 use crate::package::{read_meta, Package, Relationships};
 use crate::xml::Element;
 
-use body::{read_blocks, read_blocks_of, Ctx, State};
+use body::{read_blocks, read_blocks_of, CommentIndex, Ctx, State};
 
 pub(crate) const DOCUMENT_PART: &str = "word/document.xml";
 
@@ -76,11 +77,15 @@ pub(crate) fn read_package(
         report: &mut report,
         raw_seq: 0,
         revisions: 0,
+        placed_comments: Default::default(),
     };
 
     // Footnotes first: the body needs their blocks to inline them, and they
     // themselves cannot contain footnote references.
     let footnotes = read_footnotes(package, &styles, &numbering, &document_rels, &mut state)?;
+    // Comments next, for the same reason and with the same rule: a comment
+    // cannot comment on a comment (spec §11.3).
+    let comments = read_comments(package, &styles, &numbering, &document_rels, &mut state)?;
 
     let source = package.text(DOCUMENT_PART)?;
     let root = Element::parse(DOCUMENT_PART, source.as_bytes())?;
@@ -97,6 +102,7 @@ pub(crate) fn read_package(
         styles: &styles,
         numbering: &numbering,
         footnotes: &footnotes,
+        comments: &comments,
     };
 
     let sections = read_sections(doc_body, &ctx, &mut state, package, &styles, &numbering)?;
@@ -210,6 +216,7 @@ fn build_section(
             styles,
             numbering,
             footnotes: ctx.footnotes,
+            comments: ctx.comments,
         };
         let header = HeaderFooter {
             scope: match element.attr("type") {
@@ -290,6 +297,7 @@ fn read_footnotes(
     let root = Element::parse(&part, source.as_bytes())?;
     let rels = package.relationships(&part);
     let empty = BTreeMap::new();
+    let empty_comments = CommentIndex::default();
     let ctx = Ctx {
         package,
         rels: &rels,
@@ -298,6 +306,7 @@ fn read_footnotes(
         styles,
         numbering,
         footnotes: &empty,
+        comments: &empty_comments,
     };
 
     let mut out = BTreeMap::new();
@@ -315,6 +324,179 @@ fn read_footnotes(
         out.insert(id, read_blocks(note, &ctx, state));
     }
     Ok(out)
+}
+
+/// `word/comments.xml` plus `word/commentsExtended.xml` (spec §11.3).
+///
+/// The two parts answer different questions and both are needed. The first says
+/// what each comment *is* — who wrote it, when, and its paragraphs. The second
+/// says how the comments relate to each other: `w15:commentEx` carries the
+/// `w15:done` flag and, through `w15:paraIdParent`, the thread. WordprocessingML
+/// joins them by **paragraph id** (`w14:paraId`), not by comment id, so the
+/// join is built here and never guessed from the order of the file.
+///
+/// A document with no comments part reads as a document with no comments: that
+/// is most documents, and it is not a warning.
+fn read_comments(
+    package: &Package,
+    styles: &docsai_model::StyleCatalog,
+    numbering: &numbering::Numbering,
+    document_rels: &Relationships,
+    state: &mut State<'_>,
+) -> Result<CommentIndex, ReadError> {
+    let part = match document_rels.first_of_kind("comments") {
+        Some(rel) => rel.target.clone(),
+        None => "word/comments.xml".to_string(),
+    };
+    let Some(bytes) = package.part(&part) else {
+        return Ok(CommentIndex::default());
+    };
+    let Ok(source) = std::str::from_utf8(bytes) else {
+        state.report.warn(Warning::Degraded {
+            what: format!("comments `{part}`"),
+            why: "the part is not UTF-8".into(),
+        });
+        return Ok(CommentIndex::default());
+    };
+    let root = Element::parse(&part, source.as_bytes())?;
+    let rels = package.relationships(&part);
+    let empty = BTreeMap::new();
+    let empty_comments = CommentIndex::default();
+    let ctx = Ctx {
+        package,
+        rels: &rels,
+        part: &part,
+        source,
+        styles,
+        numbering,
+        footnotes: &empty,
+        comments: &empty_comments,
+    };
+
+    // In file order, which is the order a thread was written in.
+    let mut order: Vec<i64> = Vec::new();
+    let mut comments: BTreeMap<i64, Comment> = BTreeMap::new();
+    // `w14:paraId` → the comment that paragraph belongs to.
+    let mut by_para: BTreeMap<String, i64> = BTreeMap::new();
+    for element in root.children_named("comment") {
+        let Some(id) = element.attr_i64("id") else {
+            continue;
+        };
+        for paragraph in element.children_named("p") {
+            if let Some(para_id) = paragraph.attr("paraId") {
+                by_para.insert(para_id.to_string(), id);
+            }
+        }
+        order.push(id);
+        comments.insert(
+            id,
+            Comment {
+                author: element
+                    .attr("author")
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                initials: element
+                    .attr("initials")
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                date: element.attr("date").map(str::to_string),
+                blocks: read_blocks(element, &ctx, state),
+                ..Default::default()
+            },
+        );
+    }
+
+    // `commentsExtended` is optional: Word 2010 and every producer that is not
+    // Word write comments without it, and those threads are simply flat.
+    let mut parent_of: BTreeMap<i64, i64> = BTreeMap::new();
+    let extended_part = match document_rels.first_of_kind("commentsExtended") {
+        Some(rel) => rel.target.clone(),
+        None => "word/commentsExtended.xml".to_string(),
+    };
+    if let Some(bytes) = package.part(&extended_part) {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            let extended = Element::parse(&extended_part, text.as_bytes())?;
+            for entry in extended.children_named("commentEx") {
+                let Some(para_id) = entry.attr("paraId") else {
+                    continue;
+                };
+                let Some(&id) = by_para.get(para_id) else {
+                    // A `w15:commentEx` for a paragraph no comment claims. It
+                    // says nothing about any comment this document holds, so
+                    // there is nothing to degrade and nothing to report.
+                    continue;
+                };
+                if entry.attr("done").is_some_and(|v| v == "1" || v == "true") {
+                    if let Some(comment) = comments.get_mut(&id) {
+                        comment.resolved = true;
+                    }
+                }
+                if let Some(parent) = entry.attr("paraIdParent").and_then(|p| by_para.get(p)) {
+                    if *parent != id {
+                        parent_of.insert(id, *parent);
+                    }
+                }
+            }
+        }
+    }
+
+    // The thread, built top-down from an explicit child list so a reply to a
+    // reply nests where it belongs rather than being flattened onto the root.
+    // A reply whose parent the document does not define is kept as a comment
+    // of its own — losing it would lose what someone wrote — and warned.
+    let mut children: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+    let mut roots: Vec<i64> = Vec::new();
+    for id in &order {
+        match parent_of.get(id) {
+            Some(parent) if comments.contains_key(parent) => {
+                children.entry(*parent).or_default().push(*id)
+            }
+            Some(parent) => {
+                state.report.warn(Warning::Degraded {
+                    what: format!("comment {id}"),
+                    why: format!(
+                        "it replies to comment {parent}, which this document does not define; \
+                         the reply is kept on its own"
+                    ),
+                });
+                roots.push(*id);
+            }
+            None => roots.push(*id),
+        }
+    }
+
+    let mut index = CommentIndex::default();
+    for id in roots {
+        let mut seen = BTreeSet::new();
+        if let Some(comment) = build_thread(id, &mut comments, &children, &mut seen, &mut index) {
+            index.roots.insert(id, comment);
+        }
+    }
+    Ok(index)
+}
+
+/// One comment with its replies attached, recursively.
+///
+/// `seen` is what makes a `w15:paraIdParent` cycle — which no producer writes
+/// and a damaged file might — terminate instead of recursing forever.
+fn build_thread(
+    id: i64,
+    comments: &mut BTreeMap<i64, Comment>,
+    children: &BTreeMap<i64, Vec<i64>>,
+    seen: &mut BTreeSet<i64>,
+    index: &mut CommentIndex,
+) -> Option<Comment> {
+    if !seen.insert(id) {
+        return None;
+    }
+    let mut comment = comments.remove(&id)?;
+    for child in children.get(&id).into_iter().flatten() {
+        if let Some(reply) = build_thread(*child, comments, children, seen, index) {
+            index.replies.insert(*child);
+            comment.replies.push(reply);
+        }
+    }
+    Some(comment)
 }
 
 #[cfg(test)]

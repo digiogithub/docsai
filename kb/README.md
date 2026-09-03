@@ -95,6 +95,7 @@ Practical difference between the two folders:
 | [79 — Phase 16 H](79-phase-16-cache.md) | The read cache: a hit indistinguishable from a miss, the key that carries the origin, and the asset store replayed |
 | [80 — Phase 16 D](80-phase-16-opaque.md) | SmartArt, OLE, transitions and animations proved through the whole loop; the `p:oleObj` fixture; a generated deck that no longer drops a transition in silence |
 | [81 — Phase 16 G](81-phase-16-thumbnails.md) | Slide thumbnails through LibreOffice, the word «thumbnail» taken back from the image rung, and a renderer probe that runs the tool instead of trusting the file |
+| [82 — Phase 16 E](82-phase-16-comments.md) | Comments read from both formats into one IR node, DocMark 1.3 and the anchor-plus-container syntax, and the `w:commentReference` that was becoming a raw fragment |
 
 ## Status in one line
 

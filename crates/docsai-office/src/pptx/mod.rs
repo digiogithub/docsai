@@ -39,6 +39,7 @@
 
 mod cascade;
 mod chart;
+mod comments;
 mod graphics;
 mod notes;
 mod order;
@@ -176,6 +177,11 @@ pub(crate) fn read_package(
     }
     cascade.add_default_text(&root, &mut report);
 
+    // Deck-wide, like the layouts and for the same reason: a comment refers to
+    // an author by a number that only `ppt/commentAuthors.xml` explains, and
+    // the table has to exist before the first slide asks it a question.
+    let authors = comments::Authors::read(package, &types, &rels, &mut report);
+
     let sections = read_sections(&root);
     let mut slides = Vec::new();
     // Deck-wide, because the raw ids are: every stub on every slide refers into
@@ -236,6 +242,7 @@ pub(crate) fn read_package(
             &entry,
             &sections,
             &cascade,
+            &authors,
             assets,
             &mut sink,
             &mut report,
@@ -421,6 +428,7 @@ fn read_slide(
     entry: &SlideEntry,
     sections: &BTreeMap<i64, String>,
     cascade: &Cascade,
+    authors: &comments::Authors,
     assets: &mut dyn AssetStore,
     sink: &mut raw::Sink,
     report: &mut ConversionReport,
@@ -473,12 +481,18 @@ fn read_slide(
         }
     }
 
+    // The comment parts are *read* and stay preserved: nothing here reaches
+    // `rebuilt_parts`, so a deck whose comments nobody touched still comes back
+    // byte for byte (spec §11.3, «Not yet implemented»).
+    let slide_comments = comments::read(package, types, part, rels, authors, report)?;
+
     Ok(Slide {
         id: None,
         layout,
         name: csld_name(&root),
         shapes,
         notes,
+        comments: slide_comments,
         hidden: root.attr("show") == Some("0"),
         section: sections.get(&entry.id).cloned(),
         raw: slide_raw,
@@ -1951,15 +1965,16 @@ mod tests {
             // read. A *degraded* warning is the package layer failing, and
             // there must be none — except where a fixture exists **to be** a
             // content-level loss: two chart fixtures carry a stale workbook and
-            // a multi-level category axis on purpose (Phase 16-A), and those
-            // warnings are the feature. They still have to be about the chart
-            // and nothing else.
+            // a multi-level category axis on purpose (Phase 16-A), and
+            // `comments-slide` carries a comment whose author the deck never
+            // defines (Phase 16-E). Those warnings are the feature. They still
+            // have to be about the object they name and nothing else.
             for warning in &report.warnings {
                 let Warning::Degraded { what, .. } = warning else {
                     continue;
                 };
                 assert!(
-                    what.starts_with("chart `"),
+                    what.starts_with("chart `") || what.starts_with("comment "),
                     "{name} degrades at the package layer: {warning:?}"
                 );
             }

@@ -13,7 +13,9 @@ use crate::addressing::{Addressing, Etag, EtagHasher, IdPolicy, NodeId};
 use crate::image::ImageRef;
 use crate::presentation::{LayoutCatalog, Shape, ShapeKind, Slide};
 use crate::sheet::Sheet;
-use crate::text::{Block, Footnote, Heading, Inline, List, Paragraph, Section, Table, TableRow};
+use crate::text::{
+    Block, Comment, Footnote, Heading, Inline, List, Paragraph, Section, Table, TableRow,
+};
 use crate::Document;
 
 /// The kinds of node that carry a stable id (spec §11.1).
@@ -27,6 +29,7 @@ pub enum NodeKind {
     TableRow,
     Image,
     Footnote,
+    Comment,
     Sheet,
     Slide,
     Shape,
@@ -51,6 +54,7 @@ impl NodeKind {
             NodeKind::TableRow => "row",
             NodeKind::Image => "image",
             NodeKind::Footnote => "footnote",
+            NodeKind::Comment => "comment",
             NodeKind::Sheet => "sheet",
             NodeKind::Slide => "slide",
             NodeKind::Shape => "shape",
@@ -165,6 +169,20 @@ addressable!(
     NodeKind::Footnote,
     |f: &Footnote, h: &mut EtagHasher| { hash_blocks(&f.blocks, h) }
 );
+// A comment's etag is what the *thread* says, replies included, and not what it
+// is anchored over: moving a comment does not change what was written, and an
+// edit to the text under it is already the anchoring node's own change.
+addressable!(
+    Comment,
+    NodeKind::Comment,
+    |c: &Comment, h: &mut EtagHasher| {
+        hash_blocks(&c.blocks, h);
+        for reply in &c.replies {
+            h.token("reply");
+            reply.hash_content(h);
+        }
+    }
+);
 addressable!(Slide, NodeKind::Slide, |s: &Slide, h: &mut EtagHasher| {
     for shape in &s.shapes {
         h.token("shape");
@@ -173,6 +191,10 @@ addressable!(Slide, NodeKind::Slide, |s: &Slide, h: &mut EtagHasher| {
     if let Some(notes) = &s.notes {
         h.token("notes");
         hash_blocks(notes, h);
+    }
+    for comment in &s.comments {
+        h.token("comment");
+        comment.hash_content(h);
     }
 });
 addressable!(Shape, NodeKind::Shape, |s: &Shape, h: &mut EtagHasher| {
@@ -305,6 +327,9 @@ pub fn for_each_addressable(doc: &Document, f: &mut dyn FnMut(&dyn Addressable))
                 if let Some(notes) = &slide.notes {
                     each_blocks(notes, f);
                 }
+                for comment in &slide.comments {
+                    each_comment(comment, f);
+                }
             }
         }
     }
@@ -371,6 +396,7 @@ fn each_inlines(inlines: &[Inline], f: &mut dyn FnMut(&dyn Addressable)) {
                 f(note);
                 each_blocks(&note.blocks, f);
             }
+            Inline::Comment(comment) => each_comment(comment, f),
             // An inline picture is as addressable as a block-level one: it is
             // the same `ImageRef`, and the serializer gives it the same
             // attribute block.
@@ -416,8 +442,33 @@ fn visit(doc: &mut Document, f: &mut dyn FnMut(&mut dyn Addressable)) {
                 if let Some(notes) = &mut slide.notes {
                     visit_blocks(notes, f);
                 }
+                for comment in &mut slide.comments {
+                    visit_comment(comment, f);
+                }
             }
         }
+    }
+}
+
+/// A comment and its thread: every comment takes an id, and its blocks are
+/// walked like any others so a paragraph inside one is addressable too.
+fn each_comment(comment: &Comment, f: &mut dyn FnMut(&dyn Addressable)) {
+    f(comment);
+    each_inlines(comment.covered(), f);
+    each_blocks(&comment.blocks, f);
+    for reply in &comment.replies {
+        each_comment(reply, f);
+    }
+}
+
+fn visit_comment(comment: &mut Comment, f: &mut dyn FnMut(&mut dyn Addressable)) {
+    f(comment);
+    if let crate::text::CommentAnchor::Span(content) = &mut comment.anchor {
+        visit_inlines(content, f);
+    }
+    visit_blocks(&mut comment.blocks, f);
+    for reply in &mut comment.replies {
+        visit_comment(reply, f);
     }
 }
 
@@ -567,6 +618,7 @@ fn visit_inlines(inlines: &mut [Inline], f: &mut dyn FnMut(&mut dyn Addressable)
                 f(note);
                 visit_blocks(&mut note.blocks, f);
             }
+            Inline::Comment(comment) => visit_comment(comment, f),
             Inline::Image(image) => f(image.as_mut()),
             _ => {}
         }
@@ -589,7 +641,7 @@ pub fn list_is_addressable(list: &List) -> bool {
 pub fn paragraph_is_container(paragraph: &Paragraph) -> bool {
     fn contains_container(inlines: &[Inline]) -> bool {
         inlines.iter().any(|inline| match inline {
-            Inline::Footnote(_) | Inline::Image(_) | Inline::Raw(_) => true,
+            Inline::Footnote(_) | Inline::Image(_) | Inline::Raw(_) | Inline::Comment(_) => true,
             Inline::Styled { content, .. } | Inline::Link { content, .. } => {
                 contains_container(content)
             }
@@ -666,6 +718,13 @@ fn hash_inlines(inlines: &[Inline], hasher: &mut EtagHasher) {
             Inline::Footnote(note) => {
                 hasher.token("fn");
                 note.hash_content(hasher);
+            }
+            Inline::Comment(comment) => {
+                // The covered text is hashed, the annotation is not: a
+                // paragraph's content is what it says, and a reply typed into
+                // a comment must not churn the etag of the sentence under it.
+                hasher.token("comment");
+                hash_inlines(comment.covered(), hasher);
             }
             Inline::Field { kind, cached, .. } => {
                 hasher.token("field");

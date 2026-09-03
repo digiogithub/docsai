@@ -10,10 +10,11 @@ use docsai_model::list::{ListCatalog, NumFormat};
 use docsai_model::presentation::{LayoutCatalog, SkeletonRef};
 use docsai_model::sheet::Workbook;
 use docsai_model::style::{DocDefaults, FontProps, ParaProps, Style, StyleCatalog, Underline};
-use docsai_model::text::{DocumentMeta, PageGeometry};
+use docsai_model::text::{Block, DocumentMeta, Inline, PageGeometry};
 use docsai_model::units::Length;
 use docsai_model::{
-    Document, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED, DOCMARK_VERSION_PRESENTATION,
+    Document, DOCMARK_VERSION, DOCMARK_VERSION_ADDRESSED, DOCMARK_VERSION_COMMENTS,
+    DOCMARK_VERSION_PRESENTATION,
 };
 
 use crate::dict::AttrDict;
@@ -39,13 +40,22 @@ pub fn write(
     }
 
     out.push_str("---\n");
-    let version = match (doc, next_id) {
-        // A deck declares the presentation profile whether or not it carries
-        // ids: its body is written as `## … {.slide}` at every level, so a
-        // version chosen by the ids alone would misdescribe it (spec §11.2).
-        (Document::Presentation(_), _) => DOCMARK_VERSION_PRESENTATION,
-        (_, Some(_)) => DOCMARK_VERSION_ADDRESSED,
-        (_, None) => DOCMARK_VERSION,
+    // A comment makes a document 1.3 (spec §11.3), whichever profile it is
+    // written in — but only at the levels that actually write one, because the
+    // version describes what is in the file and not what the writer knows how
+    // to produce. The same rule 1.1 applies to ids, one section up.
+    let version = if fidelity.addresses() && has_comment(doc) {
+        DOCMARK_VERSION_COMMENTS
+    } else {
+        match (doc, next_id) {
+            // A deck declares the presentation profile whether or not it
+            // carries ids: its body is written as `## … {.slide}` at every
+            // level, so a version chosen by the ids alone would misdescribe it
+            // (spec §11.2).
+            (Document::Presentation(_), _) => DOCMARK_VERSION_PRESENTATION,
+            (_, Some(_)) => DOCMARK_VERSION_ADDRESSED,
+            (_, None) => DOCMARK_VERSION,
+        }
     };
     scalar(out, "docmark", &quoted(version));
     scalar(out, "source-format", options.source_format.as_str());
@@ -100,6 +110,52 @@ pub fn write(
     write_attr_sets(out, dict);
 
     out.push_str("---\n\n");
+}
+
+/// Whether the document holds a comment anywhere (spec §11.3).
+///
+/// Cheap because it stops at the first one, and it has to be a walk rather than
+/// a flag on the document: a comment can arrive from a reader, from a parser or
+/// from an edit, and a flag would be a second truth to keep in step.
+fn has_comment(doc: &Document) -> bool {
+    fn in_blocks(blocks: &[Block]) -> bool {
+        blocks.iter().any(|block| match block {
+            Block::Paragraph(p) => in_inlines(&p.content),
+            Block::Heading(h) => in_inlines(&h.paragraph.content),
+            Block::List(list) => list.items.iter().any(|item| in_blocks(&item.blocks)),
+            Block::Table(table) => table
+                .rows
+                .iter()
+                .any(|row| row.cells.iter().any(|cell| in_blocks(&cell.blocks))),
+            Block::TextBox(text_box) => in_blocks(&text_box.blocks),
+            Block::Image(_) | Block::Raw(_) => false,
+        })
+    }
+    fn in_inlines(inlines: &[Inline]) -> bool {
+        inlines.iter().any(|inline| match inline {
+            Inline::Comment(_) => true,
+            Inline::Styled { content, .. } | Inline::Link { content, .. } => in_inlines(content),
+            Inline::Footnote(note) => in_blocks(&note.blocks),
+            _ => false,
+        })
+    }
+    match doc {
+        Document::Text(text) => text.sections.iter().any(|section| {
+            in_blocks(&section.blocks)
+                || section.headers.iter().any(|h| in_blocks(&h.blocks))
+                || section.footers.iter().any(|f| in_blocks(&f.blocks))
+        }),
+        Document::Workbook(_) => false,
+        Document::Presentation(deck) => deck.slides.iter().any(|slide| {
+            !slide.comments.is_empty()
+                || slide.shapes.iter().any(|shape| match &shape.kind {
+                    docsai_model::presentation::ShapeKind::Placeholder(ph) => in_blocks(&ph.body),
+                    docsai_model::presentation::ShapeKind::TextBox { body } => in_blocks(body),
+                    _ => false,
+                })
+                || slide.notes.as_deref().is_some_and(in_blocks)
+        }),
+    }
 }
 
 /// The front matter of a *selection* (spec §2.1): the minimum a partial

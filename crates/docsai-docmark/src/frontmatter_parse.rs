@@ -548,13 +548,15 @@ mod tests {
 
     #[test]
     fn a_version_this_build_does_not_know_is_refused_by_name() {
-        // Not `starts_with('1')`: a 1.3 read as if it were 1.2 is a silent
-        // misreading, and the caller cannot tell it happened.
-        let error = version_of("1.3").expect_err("1.3 is not committed");
+        // Not `starts_with('1')`: a 1.4 read as if it were 1.3 is a silent
+        // misreading, and the caller cannot tell it happened. 1.3 is committed
+        // since Phase 16-E (spec §11.3) and parses.
+        let error = version_of("1.4").expect_err("1.4 is not committed");
         assert!(
-            error.contains("unsupported docmark version `1.3`"),
+            error.contains("unsupported docmark version `1.4`"),
             "{error}"
         );
+        assert!(version_of("1.3").is_ok(), "1.3 is committed");
         assert!(version_of("2.0").is_err());
     }
 

@@ -288,6 +288,11 @@ fn write_inline(
         Inline::Field { instruction, .. } => Err(format!("the `{instruction}` field")),
         Inline::Image(_) => Err("an inline image".into()),
         Inline::Footnote(_) => Err("a footnote".into()),
+        // A PresentationML comment is a slide-level part, never a run: an
+        // inline comment can only have come from a text document, and there is
+        // no shape property to fold it into. Refused like the footnote above,
+        // so the caller keeps the body it already had and says what it kept.
+        Inline::Comment(_) => Err("a comment".into()),
         Inline::Raw(raw) => Err(format!("the raw fragment `{}`", raw.id.as_str())),
     }
 }

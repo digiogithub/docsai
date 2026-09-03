@@ -7,7 +7,7 @@ use crate::addressing::{Addressing, NodeId};
 use crate::image::{ImageRef, RawId};
 use crate::list::{ListCatalog, ListId};
 use crate::style::{FontProps, ParaProps, StyleCatalog, StyleId};
-use crate::units::{Length, Size};
+use crate::units::{Length, Point, Size};
 
 /// Document properties: `docProps/*` in OOXML, `meta.xml` in ODF.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -430,6 +430,89 @@ impl Footnote {
     }
 }
 
+/// A comment: what somebody said *about* a document, never what it says
+/// (spec §11.3).
+///
+/// **One node for both document classes.** A `.docx` anchors a comment over a
+/// range of inline content and a `.pptx` pins one to a point on a slide; the
+/// difference lives in [`CommentAnchor`] and nowhere else, so a consumer that
+/// only wants the thread never has to know which format it came from.
+///
+/// Where the node itself sits says how it was anchored, and the two agree by
+/// construction: a range comment is an [`Inline::Comment`] in the flow, at the
+/// start of what it covers; a slide comment is in `Slide::comments`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct Comment {
+    /// Stable address (spec §11.1), carried by the container rather than by the
+    /// anchor: the anchor is a range, and a slide comment has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<NodeId>,
+    /// Display name of whoever wrote it. `None` when the source did not say,
+    /// or named an author its own author table does not define — the reader
+    /// warns rather than inventing one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// The author's initials, when the source keeps them apart from the name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initials: Option<String>,
+    /// ISO-8601, verbatim from the source (no date library in the IR).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    /// Marked done by a reviewer. Only the comment that opens a thread has one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub resolved: bool,
+    /// How the source anchored it.
+    #[serde(skip_serializing_if = "CommentAnchor::is_unanchored")]
+    pub anchor: CommentAnchor,
+    /// What the comment says.
+    pub blocks: Vec<Block>,
+    /// The thread under it, in the order the source records.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replies: Vec<Comment>,
+}
+
+impl Comment {
+    pub fn new(blocks: Vec<Block>) -> Self {
+        Comment {
+            blocks,
+            ..Default::default()
+        }
+    }
+
+    /// The inline content the comment is anchored over, empty when it is not
+    /// anchored over text.
+    pub fn covered(&self) -> &[Inline] {
+        match &self.anchor {
+            CommentAnchor::Span(content) => content,
+            _ => &[],
+        }
+    }
+}
+
+/// The three shapes a comment's anchor takes, and there is no fourth.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "anchor", content = "data")]
+pub enum CommentAnchor {
+    /// Over the inline content the node carries: `w:commentRangeStart` …
+    /// `w:commentRangeEnd`. Empty when the source marked a point in the text
+    /// rather than a range — a bare `w:commentReference`.
+    Span(Vec<Inline>),
+    /// A point on a surface: `p:cm/p:pos`, in the EMU every other length in
+    /// this model uses.
+    Point(Point),
+    /// The source anchored it somewhere this model cannot express, or did not
+    /// anchor it at all. Never silent: whoever produced it warns.
+    #[default]
+    Unanchored,
+}
+
+impl CommentAnchor {
+    pub fn is_unanchored(&self) -> bool {
+        matches!(self, CommentAnchor::Unanchored)
+    }
+}
+
 /// Character formatting of a run: style reference plus direct deltas.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
@@ -533,6 +616,10 @@ pub enum Inline {
     },
     /// A footnote; its content is block-level.
     Footnote(Footnote),
+    /// A comment anchored over the content it carries (spec §11.3). Boxed for
+    /// the reason an inline image is: a `Comment` holds whole blocks, and
+    /// inlines are stored by value.
+    Comment(Box<Comment>),
     Field {
         kind: FieldKind,
         /// Last known displayed value.
@@ -555,6 +642,8 @@ impl Inline {
         match self {
             Inline::Text(t) => t.is_empty(),
             Inline::Styled { content, .. } => content.iter().all(|i| i.is_empty()),
+            // Never empty: even with nothing under it, a comment is content a
+            // writer must not drop.
             _ => false,
         }
     }
@@ -564,6 +653,13 @@ impl Inline {
             Inline::Text(t) => out.push_str(t),
             Inline::Styled { content, .. } | Inline::Link { content, .. } => {
                 for i in content {
+                    i.push_plain_text(out);
+                }
+            }
+            // The text a comment covers is the document's; what the comment
+            // says is not, and `plain_text` is what the document reads as.
+            Inline::Comment(comment) => {
+                for i in comment.covered() {
                     i.push_plain_text(out);
                 }
             }

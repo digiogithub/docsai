@@ -597,6 +597,19 @@ fn write_inlines(inlines: &[Inline], ctx: &mut WriterCtx<'_>, out: &mut String, 
                 write_inlines(content, ctx, out, &merged);
                 out.push_str("</w:hyperlink>");
             }
+            // Comments are read (spec §11.3) and not yet written: that is plan
+            // v2 Phase 16-F. The commented text is the document and survives;
+            // the annotation does not, and says so.
+            Inline::Comment(comment) => {
+                ctx.report.warn(Warning::Degraded {
+                    what: match comment.author.as_deref() {
+                        Some(author) => format!("comment by {author}"),
+                        None => "comment".into(),
+                    },
+                    why: "the .docx writer does not write comments back yet".into(),
+                });
+                write_inlines(comment.covered(), ctx, out, base);
+            }
             Inline::Footnote(note) => {
                 let id = ctx.next_footnote;
                 ctx.next_footnote += 1;
