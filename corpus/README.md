@@ -110,6 +110,91 @@ generator stays dependency-free.
 | `encrypted.doc` | FIB `fEncrypted` → clear `ReadError::Encrypted` |
 | `basic-text.expected.dmk.md` | Golden DocMark for the native path (`--use-loffice never`) |
 
+## Legacy PowerPoint binary (`ppt/`)
+
+Phase 19 fixtures, for a format this project **reads and never writes**. Nothing here round-trips,
+and nothing here ever will: `.ppt` converts out of the legacy format only.
+
+| File | Trait it isolates |
+|---|---|
+| `basic-slides.ppt` | Two slides, title and body — the legacy twin of `pptx/basic-slides.pptx`, so «fidelity equivalent to the pptx path» is measurable against a deck the corpus already pins with a golden |
+| `mixed-media.ppt` | Three slides, titles, bullets at two levels, and a picture: slide boundaries, text extraction, and a non-empty `Pictures` stream (225 bytes of BLIP) that the text path never touches |
+| `mixed-media.source.pptx` | The `.pptx` the deck above was converted from. **Not** a corpus deck: it lives here rather than in `pptx/` so that no gate reads it, and it exists so the recipe below is runnable and the legacy deck's content is reviewable as XML |
+| `truncated.ppt` | A `PowerPoint Document` stream cut in half, in a compound file that stays valid — see below |
+| `encrypted.ppt` | `CurrentUserAtom.headerToken` = `0xF3D1C4DF`, [MS-PPT] 2.3.2's «this document is encrypted» |
+
+### How they are produced, and what that costs
+
+A `.ppt` is an OLE2 compound file, not a ZIP, and nothing in this repository writes one. So the
+corpus's own rule — every byte comes from `generate.py`, and `--check` proves the checked-in tree is
+what it produces — is met two different ways here, and both are stated rather than implied.
+
+**The two ordinary decks are recorded, not synthesised.** Their bytes were produced once by headless
+LibreOffice (`--convert-to ppt`) and live in `generate.py` zlib-compressed and base64-encoded, the
+way the legacy `.doc` fixtures already live there. `--check` **regenerates** them — decompressing a
+constant is deterministic everywhere — so the digest is fixed by `generate.py` and not by the
+machine. **LibreOffice is a dependency of _refreshing_ that constant, not of running the generator
+or any gate.** The recipe is in `generate.py` beside the constants; a refresh under a different
+LibreOffice produces a different constant, which is a reviewed change to a source file rather than a
+machine-dependent digest.
+
+That LibreOffice's `.ppt` output is byte-deterministic was **measured before it was relied on**, not
+assumed: LibreOffice 24.2.7.2 wrote the same bytes twice in a row, again ninety-five seconds later,
+and again on a freshly created user profile. It embeds no timestamp and no UUID.
+
+The costs, both real:
+
+- The bytes are **not reviewable in a diff** the way a generated `.pptx`'s XML is. Provenance
+  written down is the compensation, and it is weaker.
+- The files are **large for what they carry**: ~600 KB each, of which about 95 % is a thumbnail
+  LibreOffice embeds in `\5SummaryInformation` (`PIDSI_THUMBNAIL`, 588 580 bytes) and which no
+  command-line option suppresses. Removing it would mean rewriting the compound file, i.e. writing
+  one, which this phase does not do.
+
+**The two fixtures that exist to be refused are derived**, by the [MS-CFB] surgery in `generate.py`.
+Every byte in which they differ from `basic-slides.ppt` is computed by this repository:
+`encrypted.ppt` differs in exactly **four** (asserted), `truncated.ppt` in the region it cuts.
+
+### Why the truncation is dangerous rather than decorative
+
+`truncated.ppt` is not a file cut short with `head -c`. The compound file is **intact and
+self-consistent** — the `cfb` crate opens it without a word and hands back a 5 632-byte
+`PowerPoint Document` stream — and what is gone is the second half of the stream that the format's
+own bookkeeping still points into:
+
+- `CurrentUserAtom.offsetToCurrentEdit` still addresses the `UserEditAtom` at 10 946, **5 314 bytes
+  past the end** of what exists. A reader that seeks there without a bounds check runs off the end.
+- The cut lands **inside** a record whose eight-byte header survives at 5 300 and declares a length
+  reaching to 7 164, so a walk that trusts `recLen` overruns on its own, with no seek at all.
+
+Both properties are **asserted in the generator**, so a refreshed constant that happened to make the
+cut land tidily between two records fails there rather than producing a fixture that tests nothing.
+
+### The honest caveat on `encrypted.ppt`
+
+The content behind that flag is **not ciphertext**. Nothing in this tree can write RC4-encrypted
+binary PowerPoint, and LibreOffice cannot either — `--convert-to ppt` with `EncryptFile` and a
+password was tried and produced a byte-identical plaintext file. What the fixture carries is the
+*declaration* a conforming reader is required to honour before it parses anything else. It proves
+the refusal. It proves nothing about decryption, and nothing in Phase 19 claims otherwise.
+
+### What can and cannot gate a `.ppt`
+
+Named here rather than left silent, because Phase 17 carried forward exactly this defect for
+spreadsheets:
+
+- `schema_gate.py` — **not applicable**. It validates OOXML parts against the ECMA-376 XSDs. A
+  `.ppt` is a binary record stream with no XML in it and no schema to validate against.
+- `render_gate.py` — **not applicable**. Its property is a round trip, and `.ppt` is read-only by
+  design. There is no written package to render against the one that was read.
+- `opc_check.py` — **not applicable**. There is no OPC package.
+- Golden DocMark — **not yet**. There is no `.ppt` reader until 19-B/19-D; the goldens arrive with
+  the reader that produces them.
+- `generate.py` — **this is the gate**, and it is the only one. It asserts each recorded deck's
+  `RT_Slide` count, its `Pictures` stream and its plaintext `headerToken`, and it asserts both
+  dangerous properties of the truncation. `--check` runs the generators, so CI runs those
+  assertions on every push.
+
 ## Spreadsheets (`xlsx/`)
 
 Generated in Phase 0 so the corpus is complete; consumed by **Phase 3**, when

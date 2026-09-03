@@ -1755,11 +1755,7 @@ def build_odt(
         "content.xml": content,
         "styles.xml": odf_styles_odt(extra_styles=styles_extra, header=header, footer=footer),
         "meta.xml": odf_meta(title),
-        "settings.xml": (
-            f'<?xml version="1.0" encoding="UTF-8"?>'
-            f"<office:document-settings {ODF_NS} office:version=\"1.3\">"
-            f"<office:settings/></office:document-settings>"
-        ).encode(),
+        "settings.xml": odf_settings(ODF_NS),
     }
     manifest_entries = [
         ("/", "application/vnd.oasis.opendocument.text"),
@@ -2347,6 +2343,951 @@ def ods_images_anchored() -> None:
 
 
 # --------------------------------------------------------------------------
+# ODP corpus (Phase 18)
+# --------------------------------------------------------------------------
+# One trait per file, named after the `corpus/pptx` deck it mirrors so that the
+# cross-conversion matrix of 18-E can pair the two sides by name. Where ODF has
+# no equivalent of a pptx trait — crossed notes, a stale autofit cache, a stale
+# chart workbook, `mc:AlternateContent`, a macro-enabled MIME type — there is no
+# file here and `corpus/README.md` says why. `presentation-classes.odp` is the
+# other direction: a trait ODF has and OOXML does not.
+
+ODP_NS = ODF_NS + (
+    ' xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"'
+    ' xmlns:anim="urn:oasis:names:tc:opendocument:xmlns:animation:1.0"'
+    ' xmlns:smil="urn:oasis:names:tc:opendocument:xmlns:smil-compatible:1.0"'
+)
+
+MIME_ODP = b"application/vnd.oasis.opendocument.presentation"
+
+# A 16:9 page, in the centimetres ODF measures in. The pptx corpus states the
+# same geometry in EMU; the unit is the difference, not the trait.
+ODP_PAGE_W = "28cm"
+ODP_PAGE_H = "15.75cm"
+ODP_TITLE_BOX = 'svg:x="1.4cm" svg:y="0.837cm" svg:width="25.2cm" svg:height="2.629cm"'
+ODP_OUTLINE_BOX = 'svg:x="1.4cm" svg:y="3.685cm" svg:width="25.2cm" svg:height="9.906cm"'
+
+# The one level ODF has above a page. OOXML has two (layout and master), and
+# `style:presentation-page-layout` is not the second: it is a naked list of
+# placeholder rectangles with no style of its own. Which side bends is 18-B's
+# question; the corpus only has to carry both shapes of it.
+ODP_PAGE_LAYOUTS = (
+    '<style:presentation-page-layout style:name="AL1T19">'
+    '<presentation:placeholder presentation:object="title" '
+    'svg:x="1.4cm" svg:y="0.837cm" svg:width="25.2cm" svg:height="2.629cm"/>'
+    '<presentation:placeholder presentation:object="outline" '
+    'svg:x="1.4cm" svg:y="3.685cm" svg:width="25.2cm" svg:height="9.906cm"/>'
+    "</style:presentation-page-layout>"
+    '<style:presentation-page-layout style:name="AL2T1">'
+    '<presentation:placeholder presentation:object="title" '
+    'svg:x="1.4cm" svg:y="0.837cm" svg:width="25.2cm" svg:height="2.629cm"/>'
+    "</style:presentation-page-layout>"
+)
+
+ODP_STYLES = (
+    '<style:default-style style:family="graphic">'
+    '<style:graphic-properties draw:fill="none" draw:stroke="none" '
+    'style:flow-with-text="false"/>'
+    '<style:paragraph-properties fo:margin-left="0cm" fo:margin-right="0cm"/>'
+    '<style:text-properties style:font-name="Liberation Sans" fo:font-size="18pt"/>'
+    "</style:default-style>"
+    '<style:style style:name="standard" style:family="graphic">'
+    '<style:graphic-properties draw:stroke="none" draw:fill="none"/>'
+    '<style:text-properties style:font-name="Liberation Sans" fo:font-size="18pt"/>'
+    "</style:style>"
+    '<style:style style:name="objectwitharrow" style:family="graphic" '
+    'style:parent-style-name="standard">'
+    '<style:graphic-properties draw:stroke="solid" svg:stroke-width="0.15cm" '
+    'svg:stroke-color="#000000" draw:marker-end-width="0.7cm"/>'
+    "</style:style>"
+) + ODP_PAGE_LAYOUTS
+
+# The presentation styles a master's placeholders and a page's frames inherit
+# from. They live in `styles.xml`'s automatic styles because that is where
+# LibreOffice puts them and where a master page can reference them.
+ODP_STYLES_AUTOMATIC = (
+    f'<style:page-layout style:name="PM1">'
+    f'<style:page-layout-properties fo:page-width="{ODP_PAGE_W}" '
+    f'fo:page-height="{ODP_PAGE_H}" fo:margin-top="0cm" fo:margin-bottom="0cm" '
+    f'fo:margin-left="0cm" fo:margin-right="0cm" style:print-orientation="landscape"/>'
+    f"</style:page-layout>"
+    f'<style:style style:name="dp-master" style:family="drawing-page">'
+    f'<style:drawing-page-properties draw:fill="none" '
+    f'presentation:background-visible="true" presentation:background-objects-visible="true" '
+    f'presentation:display-footer="true" presentation:display-page-number="false" '
+    f'presentation:display-date-time="true"/>'
+    f"</style:style>"
+    f'<style:style style:name="Default-title" style:family="presentation">'
+    f'<style:graphic-properties draw:fill="none" draw:stroke="none" '
+    f'draw:auto-grow-height="false" fo:min-height="2.629cm"/>'
+    f'<style:text-properties fo:font-size="40pt"/>'
+    f"</style:style>"
+    f'<style:style style:name="Default-subtitle" style:family="presentation">'
+    f'<style:graphic-properties draw:fill="none" draw:stroke="none" '
+    f'draw:auto-grow-height="false"/>'
+    f'<style:text-properties fo:font-size="24pt" fo:font-style="italic"/>'
+    f"</style:style>"
+    f'<style:style style:name="Default-outline1" style:family="presentation">'
+    f'<style:graphic-properties draw:fill="none" draw:stroke="none" '
+    f'draw:auto-grow-height="false" fo:min-height="9.906cm"/>'
+    f'<style:text-properties fo:font-size="28pt"/>'
+    f"</style:style>"
+    f'<style:style style:name="Default-notes" style:family="presentation">'
+    f'<style:graphic-properties draw:fill="none" draw:stroke="none" '
+    f'draw:auto-grow-height="true"/>'
+    f'<style:text-properties fo:font-size="14pt"/>'
+    f"</style:style>"
+)
+
+ODP_DEFAULT_MASTER = (
+    f'<style:master-page style:name="Default" style:page-layout-name="PM1" '
+    f'draw:style-name="dp-master">'
+    f'<draw:frame presentation:style-name="Default-title" '
+    f'draw:layer="backgroundobjects" {ODP_TITLE_BOX} '
+    f'presentation:class="title" presentation:placeholder="true">'
+    f"<draw:text-box/></draw:frame>"
+    f'<draw:frame presentation:style-name="Default-outline1" '
+    f'draw:layer="backgroundobjects" {ODP_OUTLINE_BOX} '
+    f'presentation:class="outline" presentation:placeholder="true">'
+    f"<draw:text-box/></draw:frame>"
+    f"</style:master-page>"
+)
+
+
+def odf_styles_odp(*, extra_styles: str = "", extra_automatic: str = "",
+                   masters: str = ODP_DEFAULT_MASTER) -> bytes:
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<office:document-styles {ODP_NS} office:version="1.3">'
+        f"<office:font-face-decls>"
+        f'<style:font-face style:name="Liberation Sans" '
+        f'svg:font-family="&apos;Liberation Sans&apos;"/>'
+        f"</office:font-face-decls>"
+        f"<office:styles>{ODP_STYLES}{extra_styles}</office:styles>"
+        f"<office:automatic-styles>{ODP_STYLES_AUTOMATIC}{extra_automatic}"
+        f"</office:automatic-styles>"
+        f"<office:master-styles>{masters}</office:master-styles>"
+        f"</office:document-styles>"
+    ).encode()
+
+
+def odf_settings(ns: str) -> bytes:
+    """A `settings.xml` with one configuration item in it.
+
+    Not decoration: ODF's grammar declares `office:settings` as one or more
+    `config:config-item-set`, so the empty `<office:settings/>` the `.odt` and
+    `.ods` fixtures carried is invalid ODF, and the RELAX NG arm of
+    `schema_gate.py` is what said so (Phase 18-A)."""
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<office:document-settings {ns} office:version="1.3">'
+        f"<office:settings>"
+        f'<config:config-item-set config:name="ooo:view-settings">'
+        f'<config:config-item config:name="VisibleAreaTop" config:type="int">0'
+        f"</config:config-item>"
+        f"</config:config-item-set>"
+        f"</office:settings></office:document-settings>"
+    ).encode()
+
+
+# The presentation automatic styles every page frame in this corpus references.
+# A fixture that needs one of its own adds it through `auto_styles`.
+ODP_CONTENT_AUTOMATIC = (
+    '<style:style style:name="dp1" style:family="drawing-page">'
+    '<style:drawing-page-properties presentation:background-visible="true" '
+    'presentation:background-objects-visible="true" '
+    'presentation:display-footer="true" presentation:display-page-number="false" '
+    'presentation:display-date-time="true"/>'
+    "</style:style>"
+    '<style:style style:name="pr-title" style:family="presentation" '
+    'style:parent-style-name="Default-title">'
+    '<style:graphic-properties draw:fill="none" draw:stroke="none"/>'
+    "</style:style>"
+    '<style:style style:name="pr-outline" style:family="presentation" '
+    'style:parent-style-name="Default-outline1">'
+    '<style:graphic-properties draw:fill="none" draw:stroke="none"/>'
+    "</style:style>"
+    '<style:style style:name="pr-subtitle" style:family="presentation" '
+    'style:parent-style-name="Default-subtitle">'
+    '<style:graphic-properties draw:fill="none" draw:stroke="none"/>'
+    "</style:style>"
+    '<style:style style:name="pr-notes" style:family="presentation" '
+    'style:parent-style-name="Default-notes">'
+    '<style:graphic-properties draw:fill="none" draw:stroke="none"/>'
+    "</style:style>"
+    '<style:style style:name="gr-plain" style:family="graphic" '
+    'style:parent-style-name="standard">'
+    '<style:graphic-properties draw:fill="none" draw:stroke="none"/>'
+    "</style:style>"
+)
+
+
+def build_odp(
+    name: str,
+    pages: str,
+    *,
+    title: str,
+    auto_styles: str = "",
+    styles_extra: str = "",
+    styles_automatic_extra: str = "",
+    masters: str = ODP_DEFAULT_MASTER,
+    pictures: dict[str, bytes] | None = None,
+    extra_parts: dict[str, tuple[bytes, str]] | None = None,
+    settings: str = "",
+) -> None:
+    """An `.odp` package. `extra_parts` maps a path to `(bytes, media type)`
+    and covers the two things a deck can carry that are not pictures: an
+    embedded chart sub-document and an OLE stream."""
+    pictures = pictures or {}
+    extra_parts = extra_parts or {}
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<office:document-content {ODP_NS} office:version="1.3">'
+        f"<office:scripts/>"
+        f"<office:font-face-decls>"
+        f'<style:font-face style:name="Liberation Sans" '
+        f'svg:font-family="&apos;Liberation Sans&apos;"/>'
+        f"</office:font-face-decls>"
+        f"<office:automatic-styles>{ODP_CONTENT_AUTOMATIC}{auto_styles}"
+        f"</office:automatic-styles>"
+        f"<office:body><office:presentation>{pages}"
+        f'<presentation:settings presentation:full-screen="false"/>{settings}'
+        f"</office:presentation></office:body></office:document-content>"
+    ).encode()
+    parts: dict[str, bytes] = {
+        "mimetype": MIME_ODP,
+        "content.xml": content,
+        "styles.xml": odf_styles_odp(
+            extra_styles=styles_extra,
+            extra_automatic=styles_automatic_extra,
+            masters=masters,
+        ),
+        "meta.xml": odf_meta(title),
+        "settings.xml": odf_settings(ODP_NS),
+    }
+    manifest_entries = [
+        ("/", "application/vnd.oasis.opendocument.presentation"),
+        ("content.xml", "text/xml"),
+        ("styles.xml", "text/xml"),
+        ("meta.xml", "text/xml"),
+        ("settings.xml", "text/xml"),
+    ]
+    for pic_name, data in sorted(pictures.items()):
+        parts[f"Pictures/{pic_name}"] = data
+        ext = Path(pic_name).suffix.lower()
+        manifest_entries.append(
+            (f"Pictures/{pic_name}", CONTENT_TYPE.get(ext, "application/octet-stream"))
+        )
+    for path, (data, media) in sorted(extra_parts.items()):
+        parts[path] = data
+        manifest_entries.append((path, media))
+    parts["META-INF/manifest.xml"] = odf_manifest(sorted(manifest_entries))
+    write_odf_package(ROOT / "odp" / name, parts)
+
+
+# --- page and frame helpers ------------------------------------------------
+
+
+def odp_page(
+    name: str,
+    shapes: str,
+    *,
+    master: str = "Default",
+    layout: str = "AL1T19",
+    style: str = "dp1",
+    notes: str = "",
+    extra: str = "",
+) -> str:
+    layout_attr = (
+        f' presentation:presentation-page-layout-name="{layout}"' if layout else ""
+    )
+    return (
+        f'<draw:page draw:name="{name}" draw:style-name="{style}" '
+        f'draw:master-page-name="{master}"{layout_attr}>'
+        f"{shapes}{extra}{notes}</draw:page>"
+    )
+
+
+def odp_frame(
+    inner: str,
+    *,
+    cls: str | None = None,
+    box: str = "",
+    style: str = "pr-title",
+    style_attr: str = "presentation",
+    layer: str = "layout",
+    placeholder: bool = False,
+    extra: str = "",
+) -> str:
+    attrs = [f'{style_attr}:style-name="{style}"', f'draw:layer="{layer}"']
+    if box:
+        attrs.append(box)
+    if cls is not None:
+        attrs.append(f'presentation:class="{cls}"')
+    if placeholder:
+        attrs.append('presentation:placeholder="true"')
+    if extra:
+        attrs.append(extra)
+    return f"<draw:frame {' '.join(attrs)}>{inner}</draw:frame>"
+
+
+def odp_text_box(paragraphs: str) -> str:
+    return f"<draw:text-box>{paragraphs}</draw:text-box>"
+
+
+def odp_title(text: str, *, box: str = ODP_TITLE_BOX) -> str:
+    return odp_frame(
+        odp_text_box(f"<text:p>{text}</text:p>"),
+        cls="title",
+        box=box,
+        style="pr-title",
+    )
+
+
+def odp_outline(items: list[tuple[str, int]], *, box: str = ODP_OUTLINE_BOX) -> str:
+    """An outline placeholder holding a `text:list`. ODF nests a level by
+    nesting a whole list inside the *item* above it, where OOXML flattens the
+    depth into `a:pPr@lvl`; that difference is the trait."""
+    def nest(index: int, level: int) -> tuple[str, int]:
+        out = []
+        while index < len(items):
+            text, depth = items[index]
+            if depth < level:
+                break
+            if depth > level:
+                inner, index = nest(index, level + 1)
+                if out:
+                    out[-1] = out[-1][: -len("</text:list-item>")] + inner + "</text:list-item>"
+                else:
+                    out.append(f"<text:list-item>{inner}</text:list-item>")
+                continue
+            out.append(f"<text:list-item><text:p>{text}</text:p></text:list-item>")
+            index += 1
+        return f"<text:list>{''.join(out)}</text:list>", index
+
+    body, _ = nest(0, 0)
+    return odp_frame(odp_text_box(body), cls="outline", box=box, style="pr-outline")
+
+
+def odp_notes(text: str) -> str:
+    lines = "".join(f"<text:p>{line}</text:p>" for line in text.split("\n"))
+    return (
+        f'<presentation:notes draw:style-name="dp1">'
+        f'<draw:page-thumbnail draw:layer="layout" svg:x="3.5cm" svg:y="1cm" '
+        f'svg:width="14cm" svg:height="7.875cm" presentation:class="page"/>'
+        f'<draw:frame presentation:style-name="pr-notes" draw:layer="layout" '
+        f'svg:x="3.5cm" svg:y="9.5cm" svg:width="14cm" svg:height="10cm" '
+        f'presentation:class="notes">{odp_text_box(lines)}</draw:frame>'
+        f"</presentation:notes>"
+    )
+
+
+def odp_title_body(name: str, title: str, bullets: list[tuple[str, int]],
+                   *, notes: str = "") -> str:
+    return odp_page(
+        name,
+        odp_title(title) + odp_outline(bullets),
+        notes=odp_notes(notes) if notes else "",
+    )
+
+
+# --- the fixtures ----------------------------------------------------------
+
+
+def odp_basic_slides() -> None:
+    """Two pages, title + outline, nothing else. The floor of the format, and
+    the `.odp` half of `pptx/basic-slides.pptx`."""
+    build_odp(
+        "basic-slides.odp",
+        odp_title_body("page1", "Informe trimestral",
+                       [("Ingresos al alza", 0), ("Costes estables", 0)])
+        + odp_title_body("page2", "Siguientes pasos", [("Cerrar el trimestre", 0)]),
+        title="Presentación básica",
+    )
+
+
+def odp_slide_order() -> None:
+    """The `.odp` answer to `pptx/slide-order.pptx`, and it is a different
+    question.
+
+    A deck has no `p:sldIdLst` here: `draw:page` order in `content.xml` *is* the
+    order, and there is no second list to disagree with it. What can still
+    mislead a reader is `draw:name`, so the names are crossed on purpose — the
+    first page is called `page3`. A reader that sorts by name, as it must for
+    `slideN.xml` on the OOXML side, gets this deck backwards."""
+    build_odp(
+        "slide-order.odp",
+        odp_title_body("page3", "Primera en el orden", [("Va la primera", 0)])
+        + odp_title_body("page1", "Segunda en el orden", [("Va en medio", 0)])
+        + odp_title_body("page2", "Tercera en el orden", [("Va la última", 0)]),
+        title="Orden de páginas",
+    )
+
+
+def odp_placeholders_cascade() -> None:
+    """A title and an outline that state no geometry at all: position and size
+    come from `style:presentation-page-layout`, and the text properties from the
+    master page's placeholder. One level of inheritance where OOXML has two — a
+    reader that emits any of it has failed the delta rule."""
+    build_odp(
+        "placeholders-cascade.odp",
+        odp_page(
+            "page1",
+            odp_frame(odp_text_box("<text:p>Todo heredado</text:p>"),
+                      cls="title", style="pr-title")
+            + odp_frame(
+                odp_text_box(
+                    "<text:list><text:list-item><text:p>Sin posición propia</text:p>"
+                    "</text:list-item><text:list-item><text:p>Sin tipografía propia"
+                    "</text:p></text:list-item></text:list>"
+                ),
+                cls="outline", style="pr-outline"),
+        ),
+        title="Cascada de páginas maestras",
+    )
+
+
+def odp_placeholders_empty() -> None:
+    """An empty placeholder is content: it holds a rectangle the layout gave it
+    and a person is expected to fill it. Both spellings of emptiness are here —
+    a `draw:text-box` with no paragraph at all, and one holding an empty
+    `text:p` — because a writer that rewrote one into the other would break byte
+    identity on a frame nobody edited."""
+    build_odp(
+        "placeholders-empty.odp",
+        odp_page(
+            "page1",
+            odp_title("Título con cuerpo vacío")
+            + odp_frame(odp_text_box(""), cls="outline", box=ODP_OUTLINE_BOX,
+                        style="pr-outline", placeholder=True)
+            + odp_frame(
+                odp_text_box("<text:p>Primera línea</text:p><text:p/>"
+                             "<text:p>Tras el hueco</text:p>"),
+                cls="text",
+                box='svg:x="1.4cm" svg:y="13.8cm" svg:width="25.2cm" svg:height="1.4cm"',
+                style="pr-outline"),
+        ),
+        title="Marcadores vacíos",
+    )
+
+
+def odp_presentation_classes() -> None:
+    """ODF has a trait OOXML does not, and this is it.
+
+    `presentation:class` names a frame's *role* from a closed vocabulary —
+    `title`, `subtitle`, `outline`, `text`, `graphic`, `object`, `notes`,
+    `header`, `footer`, `date-time`, `page-number` — where `p:ph` names a type
+    **and an index**, so two `outline` frames on an ODF page are
+    indistinguishable while `idx="1"` and `idx="2"` are not. The mapping is not
+    a bijection, and 18-B has to say which side bends; this is the file that
+    holds the ODF side of the question. No `corpus/pptx` deck mirrors it."""
+    row = 'svg:width="8.6cm" svg:height="2.4cm"'
+    frames = odp_title("El vocabulario de presentation:class")
+    for index, cls in enumerate(
+        ["subtitle", "outline", "text", "graphic", "object",
+         "header", "footer", "date-time", "page-number"]
+    ):
+        x = 1.4 + (index % 3) * 9.0
+        y = 3.7 + (index // 3) * 3.0
+        frames += odp_frame(
+            odp_text_box(f"<text:p>{cls}</text:p>"),
+            cls=cls,
+            box=f'svg:x="{x:.1f}cm" svg:y="{y:.1f}cm" {row}',
+            style="pr-outline",
+        )
+    # Two frames of the same class on one page: OOXML would distinguish them by
+    # `idx`, ODF has nothing to distinguish them by but document order.
+    frames += odp_frame(
+        odp_text_box("<text:p>Segundo outline, mismo class</text:p>"),
+        cls="outline",
+        box='svg:x="1.4cm" svg:y="12.8cm" svg:width="25.2cm" svg:height="2.4cm"',
+        style="pr-outline",
+    )
+    build_odp("presentation-classes.odp", odp_page("page1", frames, layout="AL2T1"),
+              title="Clases de presentación")
+
+
+def odp_bullets_levels() -> None:
+    """Nested `text:list` with both bullet kinds. ODF nests lists inside list
+    items; OOXML flattens depth into an attribute. Same document, two grammars,
+    and the DocMark in the middle has to be identical."""
+    numbered = (
+        '<text:list-style style:name="Lnum">'
+        '<text:list-level-style-number text:level="1" style:num-suffix="." '
+        'style:num-format="1"/>'
+        "</text:list-style>"
+    )
+    build_odp(
+        "bullets-levels.odp",
+        odp_page(
+            "page1",
+            odp_title("Niveles de viñeta")
+            + odp_outline([
+                ("Primer nivel", 0),
+                ("Segundo nivel", 1),
+                ("Tercer nivel", 2),
+                ("Vuelve al primero", 0),
+            ], box='svg:x="1.4cm" svg:y="3.685cm" svg:width="25.2cm" svg:height="7cm"')
+            + odp_frame(
+                odp_text_box(
+                    '<text:list text:style-name="Lnum">'
+                    "<text:list-item><text:p>Uno</text:p></text:list-item>"
+                    "<text:list-item><text:p>Dos</text:p></text:list-item>"
+                    "</text:list>"
+                ),
+                cls="text",
+                box='svg:x="1.4cm" svg:y="11cm" svg:width="25.2cm" svg:height="3cm"',
+                style="pr-outline"),
+        ),
+        auto_styles=numbered,
+        title="Viñetas y niveles",
+    )
+
+
+def odp_notes_speaker() -> None:
+    """`presentation:notes` is a child of the page it belongs to, not a part
+    with a relationship, which is why there is no `.odp` mirror of
+    `pptx/notes-crossed.pptx`: nothing here can be crossed."""
+    build_odp(
+        "notes-speaker.odp",
+        odp_title_body("page1", "Resultados", [("Crecimiento del 12 %", 0)],
+                       notes="Insistir en que el 12 % es interanual.\n"
+                             "No entrar en el desglose por región.")
+        + odp_title_body("page2", "Riesgos", [("Dependencia de un proveedor", 0)],
+                         notes="Si preguntan por el proveedor, remitir al anexo."),
+        title="Notas del ponente",
+    )
+
+
+def odp_reading_order() -> None:
+    """A page whose document order is not the order anybody reads it in, and
+    which additionally carries `draw:z-index` — ODF states the stacking order
+    explicitly where OOXML leaves it implicit in `spTree` order. The two can
+    disagree, and here they do."""
+    build_odp(
+        "reading-order.odp",
+        odp_page(
+            "page1",
+            odp_frame(odp_text_box("<text:p>Al pie de la página</text:p>"),
+                      cls="text", style="pr-outline",
+                      box='svg:x="1.4cm" svg:y="12.5cm" svg:width="6cm" svg:height="1.4cm"',
+                      extra='draw:z-index="3"')
+            + odp_frame(odp_text_box("<text:p>Cuerpo heredado</text:p>"),
+                        cls="outline", style="pr-outline", box=ODP_OUTLINE_BOX,
+                        extra='draw:z-index="1"')
+            + odp_frame(odp_text_box("<text:p>A la derecha</text:p>"),
+                        cls="text", style="pr-outline",
+                        box='svg:x="15cm" svg:y="5.2cm" svg:width="5cm" svg:height="1.4cm"',
+                        extra='draw:z-index="2"')
+            + odp_frame(odp_text_box("<text:p>El título va el cuarto</text:p>"),
+                        cls="title", style="pr-title", box=ODP_TITLE_BOX,
+                        extra='draw:z-index="0"')
+            + odp_frame(odp_text_box("<text:p>A la izquierda</text:p>"),
+                        cls="text", style="pr-outline",
+                        box='svg:x="1.4cm" svg:y="5.21cm" svg:width="5cm" svg:height="1.4cm"',
+                        extra='draw:z-index="4"'),
+        ),
+        title="Orden de lectura",
+    )
+
+
+def odp_raw_preserved() -> None:
+    """The things an ODF page can hold that the IR has no node for.
+
+    A `draw:g` group, a `draw:custom-shape` whose `draw:enhanced-geometry` is
+    the shape, a page transition expressed as drawing-page properties, and an
+    `anim:par` animation tree. The pptx deck of the same name carries the OOXML
+    spelling of all four (`p:grpSp`, `a:custGeom`, `p:transition`, `p:timing`),
+    which is what makes the pair worth having: the raw block is a different
+    fragment on each side and the DocMark stub around it must not be."""
+    group = (
+        '<draw:g draw:name="Grupo 1" xml:id="grupo1">'
+        '<draw:frame draw:style-name="gr-plain" draw:layer="layout" '
+        'svg:x="1.4cm" svg:y="6cm" svg:width="4cm" svg:height="1.4cm">'
+        "<draw:text-box><text:p>Dentro del grupo</text:p></draw:text-box></draw:frame>"
+        '<draw:frame draw:style-name="gr-plain" draw:layer="layout" '
+        'svg:x="6cm" svg:y="6cm" svg:width="4cm" svg:height="1.4cm">'
+        "<draw:text-box><text:p>También dentro</text:p></draw:text-box></draw:frame>"
+        "</draw:g>"
+    )
+    custom = (
+        '<draw:custom-shape draw:style-name="gr-plain" draw:layer="layout" '
+        'draw:name="Triángulo libre" svg:x="15cm" svg:y="6cm" '
+        'svg:width="4cm" svg:height="4cm">'
+        "<text:p>Etiqueta del triángulo</text:p>"
+        '<draw:enhanced-geometry svg:viewBox="0 0 21600 21600" '
+        'draw:type="isosceles-triangle" '
+        'draw:enhanced-path="M 10800 0 L 21600 21600 0 21600 Z N"/>'
+        "</draw:custom-shape>"
+    )
+    transition = (
+        '<style:style style:name="dp-fade" style:family="drawing-page">'
+        '<style:drawing-page-properties presentation:transition-type="automatic" '
+        'presentation:transition-style="fade-from-center" '
+        'presentation:transition-speed="slow" '
+        'presentation:background-visible="true" '
+        'presentation:background-objects-visible="true"/>'
+        "</style:style>"
+    )
+    animation = (
+        "<anim:par presentation:node-type=\"timing-root\">"
+        '<anim:seq presentation:node-type="main-sequence">'
+        '<anim:par smil:begin="indefinite">'
+        '<anim:set smil:begin="0s" smil:dur="1s" smil:targetElement="grupo1" '
+        'smil:attributeName="visibility" smil:to="visible"/>'
+        "</anim:par></anim:seq></anim:par>"
+    )
+    build_odp(
+        "raw-preserved.odp",
+        odp_page("page1", odp_title("Lo que no se modela") + group + custom,
+                 style="dp-fade", layout="AL2T1", extra=animation),
+        auto_styles=transition,
+        title="Preservación en bruto",
+    )
+
+
+def odp_tables_simple() -> None:
+    """A `table:table` on a page. The same IR `Table` the `.ods` reader fills,
+    reached through a drawing frame instead of a spreadsheet — which is exactly
+    what `p:graphicFrame` -> `a:tbl` is on the OOXML side."""
+    def cell(text: str) -> str:
+        return (
+            f'<table:table-cell office:value-type="string">'
+            f"<text:p>{text}</text:p></table:table-cell>"
+        )
+
+    table = (
+        '<table:table table:name="Tabla 1">'
+        '<table:table-column table:number-columns-repeated="2"/>'
+        f"<table:table-row>{cell('Región')}{cell('Ventas')}</table:table-row>"
+        f"<table:table-row>{cell('Norte')}{cell('1 200')}</table:table-row>"
+        f"<table:table-row>{cell('Sur')}{cell('980')}</table:table-row>"
+        "</table:table>"
+    )
+    build_odp(
+        "tables-simple.odp",
+        odp_page(
+            "page1",
+            odp_title("Ventas por región")
+            + odp_frame(table, style="gr-plain", style_attr="draw",
+                        box='svg:x="1.4cm" svg:y="4.5cm" svg:width="14cm" svg:height="5cm"'),
+            layout="AL2T1",
+        ),
+        title="Tabla simple",
+    )
+
+
+def odp_images_anchored() -> None:
+    """A picture with explicit geometry. ODF measures it in centimetres and
+    OOXML in EMU; the frame, the alt text and the aspect ratio are the same
+    trait, and the unit is what 18-E has to convert."""
+    picture = odp_frame(
+        '<draw:image xlink:href="Pictures/image1.png" xlink:type="simple" '
+        'xlink:show="embed" xlink:actuate="onLoad"/>'
+        "<svg:title>Gráfico de barras azul</svg:title>",
+        style="gr-plain",
+        style_attr="draw",
+        box='svg:x="4cm" svg:y="5cm" svg:width="3.175cm" svg:height="2.381cm"',
+        extra='draw:name="Imagen 1"',
+    )
+    build_odp(
+        "images-anchored.odp",
+        odp_page("page1", odp_title("Con imagen") + picture, layout="AL2T1"),
+        pictures={"image1.png": BLUE_PNG},
+        title="Imagen anclada",
+    )
+
+
+def odp_shapes_geometry() -> None:
+    """Free shapes with ODF's own geometry vocabulary: a `draw:rect` with
+    rounded corners, a `draw:custom-shape` naming a preset through
+    `draw:type`, and a `draw:line`. `draw:transform` states a rotation as an
+    affine matrix where OOXML states an angle in `a:xfrm@rot` — the same
+    picture, and not the same number."""
+    rect = (
+        '<draw:rect draw:style-name="gr-plain" draw:layer="layout" '
+        'draw:name="Rectángulo 1" svg:x="1.4cm" svg:y="5cm" '
+        'svg:width="6cm" svg:height="2.5cm" draw:corner-radius="0.4cm">'
+        "<text:p>Dentro del rectángulo</text:p></draw:rect>"
+    )
+    arrow = (
+        '<draw:custom-shape draw:style-name="gr-plain" draw:layer="layout" '
+        'draw:name="Flecha 1" '
+        'draw:transform="rotate (-0.5235987755982988) translate (9cm 6cm)" '
+        'svg:width="4cm" svg:height="1.6cm">'
+        "<text:p/>"
+        '<draw:enhanced-geometry svg:viewBox="0 0 21600 21600" '
+        'draw:type="right-arrow" '
+        'draw:enhanced-path="M 0 5400 L 12960 5400 12960 0 21600 10800 '
+        '12960 21600 12960 16200 0 16200 Z N"/>'
+        "</draw:custom-shape>"
+    )
+    line = (
+        '<draw:line draw:style-name="objectwitharrow" draw:layer="layout" '
+        'draw:name="Conector 1" svg:x1="16cm" svg:y1="6cm" '
+        'svg:x2="22cm" svg:y2="6cm"/>'
+    )
+    build_odp(
+        "shapes-geometry.odp",
+        odp_page("page1", odp_title("Formas libres") + rect + arrow + line,
+                 layout="AL2T1"),
+        title="Geometría de formas",
+    )
+
+
+def odp_chart_document(series: list[tuple[str, list[str]]], *,
+                       categories: list[str], legend: bool) -> bytes:
+    """An embedded chart sub-document.
+
+    The structural difference from OOXML is worth stating once: a `.pptx` chart
+    keeps its numbers in an embedded **workbook**, a whole second package, and
+    caches them in the chart part — which is what makes
+    `pptx/charts-stale-workbook.pptx` possible. An ODF chart holds a
+    `table:table` named `local-table` *inside itself*, so there is no second
+    copy and no way for one to go stale. That deck has no `.odp` mirror for
+    that reason, and `corpus/README.md` says so."""
+    columns = "".join(
+        f'<table:table-column/>' for _ in range(len(series) + 1)
+    )
+    header = (
+        "<table:table-header-rows><table:table-row>"
+        '<table:table-cell office:value-type="string"><text:p/></table:table-cell>'
+        + "".join(
+            f'<table:table-cell office:value-type="string">'
+            f"<text:p>{name}</text:p></table:table-cell>"
+            for name, _ in series
+        )
+        + "</table:table-row></table:table-header-rows>"
+    )
+    rows = ""
+    for index, category in enumerate(categories):
+        cells = (
+            f'<table:table-cell office:value-type="string">'
+            f"<text:p>{category}</text:p></table:table-cell>"
+        )
+        for _, values in series:
+            cells += (
+                f'<table:table-cell office:value-type="float" '
+                f'office:value="{values[index]}">'
+                f"<text:p>{values[index]}</text:p></table:table-cell>"
+            )
+        rows += f"<table:table-row>{cells}</table:table-row>"
+    local_table = (
+        f'<table:table table:name="local-table">{columns}{header}'
+        f"<table:table-rows>{rows}</table:table-rows></table:table>"
+    )
+
+    plotted = "".join(
+        f'<chart:series chart:style-name="ch-series" '
+        f'chart:values-cell-range-address="local-table.${chr(66 + index)}$2:'
+        f'.${chr(66 + index)}${1 + len(categories)}" '
+        f'chart:label-cell-address="local-table.${chr(66 + index)}$1" '
+        f'chart:class="chart:bar"/>'
+        for index in range(len(series))
+    )
+    legend_xml = (
+        '<chart:legend chart:legend-position="end" style:legend-expansion="high"/>'
+        if legend else ""
+    )
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<office:document-content {ODP_NS} office:version="1.3">'
+        f"<office:automatic-styles>"
+        f'<style:style style:name="ch-chart" style:family="chart">'
+        f'<style:graphic-properties draw:stroke="none" draw:fill="none"/>'
+        f"</style:style>"
+        f'<style:style style:name="ch-series" style:family="chart">'
+        f'<style:chart-properties chart:japanese-candle-stick="false"/>'
+        f"</style:style>"
+        f"</office:automatic-styles>"
+        f"<office:body><office:chart>"
+        f'<chart:chart chart:style-name="ch-chart" chart:class="chart:bar" '
+        f'svg:width="12cm" svg:height="8cm">'
+        f"<chart:title><text:p>Ventas por región</text:p></chart:title>"
+        f"{legend_xml}"
+        f"<chart:plot-area>"
+        f'<chart:axis chart:dimension="x" chart:name="primary-x"/>'
+        f'<chart:axis chart:dimension="y" chart:name="primary-y"/>'
+        f"{plotted}"
+        f"</chart:plot-area>"
+        f"{local_table}"
+        f"</chart:chart>"
+        f"</office:chart></office:body></office:document-content>"
+    )
+    return content.encode()
+
+
+def odp_chart_parts(name: str, series: list[tuple[str, list[str]]], *,
+                    categories: list[str], legend: bool
+                    ) -> dict[str, tuple[bytes, str]]:
+    """The three parts an embedded chart adds to the package: its own
+    `content.xml`, its own `styles.xml`, and the directory entry the manifest
+    needs so a consumer knows what the sub-document is."""
+    styles = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<office:document-styles {ODP_NS} office:version="1.3">'
+        f"<office:styles/></office:document-styles>"
+    ).encode()
+    return {
+        f"{name}/": (b"", "application/vnd.oasis.opendocument.chart"),
+        f"{name}/content.xml": (
+            odp_chart_document(series, categories=categories, legend=legend),
+            "text/xml",
+        ),
+        f"{name}/styles.xml": (styles, "text/xml"),
+    }
+
+
+def odp_charts_embedded() -> None:
+    """One series, drawn from the chart's own `local-table`. The `.odp` half of
+    `pptx/charts-embedded.pptx`."""
+    build_odp(
+        "charts-embedded.odp",
+        odp_page(
+            "page1",
+            odp_title("Ventas por región")
+            + odp_frame(
+                '<draw:object xlink:href="./Object 1" xlink:type="simple" '
+                'xlink:show="embed" xlink:actuate="onLoad"/>',
+                style="gr-plain", style_attr="draw",
+                box='svg:x="1.4cm" svg:y="4.5cm" svg:width="12cm" svg:height="8cm"',
+                extra='draw:name="Gráfico 1"'),
+            layout="AL2T1",
+        ),
+        extra_parts=odp_chart_parts(
+            "Object 1",
+            [("Ventas", ["1200", "980", "1440"])],
+            categories=["Norte", "Sur", "Este"],
+            legend=False,
+        ),
+        title="Gráfico incrustado",
+    )
+
+
+def odp_charts_multi_series() -> None:
+    """Two series and a legend: the DocMark data table gains a column, and the
+    reader has to keep the series names apart from the categories."""
+    build_odp(
+        "charts-multi-series.odp",
+        odp_page(
+            "page1",
+            odp_title("Ventas por región y año")
+            + odp_frame(
+                '<draw:object xlink:href="./Object 1" xlink:type="simple" '
+                'xlink:show="embed" xlink:actuate="onLoad"/>',
+                style="gr-plain", style_attr="draw",
+                box='svg:x="1.4cm" svg:y="4.5cm" svg:width="12cm" svg:height="8cm"',
+                extra='draw:name="Gráfico 1"'),
+            layout="AL2T1",
+        ),
+        extra_parts=odp_chart_parts(
+            "Object 1",
+            [("2025", ["1200", "980", "1440"]), ("2026", ["1310", "1015", "1502"])],
+            categories=["Norte", "Sur", "Este"],
+            legend=True,
+        ),
+        title="Gráfico de varias series",
+    )
+
+
+def odp_ole_embedded() -> None:
+    """`draw:object-ole` with the replacement image beside it.
+
+    ODF splits what OOXML keeps in one place: the OLE stream is a package
+    member of its own, and its preview lives under `ObjectReplacements/` rather
+    than as a relationship from the shape. Neither has a DocMark
+    representation, so both sides end as a raw block with a visible stub."""
+    build_odp(
+        "ole-embedded.odp",
+        odp_page(
+            "page1",
+            odp_title("Objeto incrustado")
+            + odp_frame(
+                '<draw:object-ole xlink:href="./Object 2" xlink:type="simple" '
+                'xlink:show="embed" xlink:actuate="onLoad"/>'
+                '<draw:image xlink:href="./ObjectReplacements/Object 2" '
+                'xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>',
+                style="gr-plain", style_attr="draw",
+                box='svg:x="4cm" svg:y="5cm" svg:width="6cm" svg:height="4cm"',
+                extra='draw:name="Objeto 1"'),
+            layout="AL2T1",
+        ),
+        extra_parts={
+            "Object 2": (b"docsai corpus OLE stream placeholder\n",
+                         "application/vnd.sun.star.oleobject"),
+            "ObjectReplacements/Object 2": (RED_PNG, "image/png"),
+        },
+        title="OLE incrustado",
+    )
+
+
+def odp_comments_slide() -> None:
+    """`office:annotation`: author, date and body, the `.odp` half of
+    `pptx/comments-slide.pptx`.
+
+    Where the annotation may sit is a finding, not a detail. ODF 1.3 admits
+    `office:annotation` in paragraph content and in a table cell, and **not** as
+    a child of `draw:page`, which is where a slide comment intuitively belongs
+    and where a first draft of this fixture put it. Two things then said so:
+    the RELAX NG arm of `schema_gate.py` («Did not expect element annotation
+    there») and LibreOffice, which opened that deck and dropped both comments
+    without a word. So the annotations live in the text they are about, which
+    is both legal and what survives a renderer.
+
+    The other half of the mirror: OOXML keeps comments in their own part with a
+    separate author table, so `pptx/comments-slide.pptx` can have the two fall
+    out of step. ODF writes the author into the annotation, so it cannot."""
+    def annotation(name: str, author: str, date: str, body: str) -> str:
+        return (
+            f'<office:annotation office:name="{name}" '
+            f'svg:x="24cm" svg:y="1cm" svg:width="3cm" svg:height="2cm">'
+            f"<dc:creator>{author}</dc:creator>"
+            f"<dc:date>{date}</dc:date>"
+            f"<text:p>{body}</text:p>"
+            f"</office:annotation>"
+        )
+
+    first = annotation("__Annot__1", "Ana Revisora", "2026-01-02T10:15:00",
+                       "Confirmar la cifra del norte antes del consejo.")
+    second = annotation("__Annot__2", "Luis Editor", "2026-01-02T11:40:00",
+                        "De acuerdo, lo verifico.")
+    build_odp(
+        "comments-slide.odp",
+        odp_page(
+            "page1",
+            odp_frame(
+                odp_text_box(
+                    f"<text:p>{first}Página comentada</text:p>"
+                ),
+                cls="title", box=ODP_TITLE_BOX, style="pr-title")
+            + odp_frame(
+                odp_text_box(
+                    "<text:list><text:list-item>"
+                    f"<text:p>Cifra pendiente de confirmar{second}</text:p>"
+                    "</text:list-item></text:list>"
+                ),
+                cls="outline", box=ODP_OUTLINE_BOX, style="pr-outline"),
+        ),
+        title="Comentarios de página",
+    )
+
+
+def odp_forty_slides() -> None:
+    """Not a trait but a **size**: forty pages, the `.odp` counterpart of
+    `pptx/forty-slides.pptx`. It is what a per-page cost or a streaming reader
+    is measured on; every other fixture here is too small to mean anything."""
+    pages = "".join(
+        odp_title_body(
+            f"page{index}",
+            f"Página {index}",
+            [(f"Punto {index}.1", 0), (f"Punto {index}.2", 0)],
+        )
+        for index in range(1, 41)
+    )
+    build_odp("forty-slides.odp", pages, title="Cuarenta páginas")
+
+
+# --------------------------------------------------------------------------
 # Legacy .doc fixtures (Phase 5)
 # --------------------------------------------------------------------------
 # Built by docsai_office::doc::test_fixture and embedded so generate.py stays
@@ -2731,8 +3672,14 @@ def build_pptx(
     comment_authors: list[tuple[int, str, str]] | None = None,
     comments: dict[int, str] | None = None,
     macro_enabled: bool = False,
+    subdir: str = "pptx",
 ) -> None:
     """Assemble a .pptx package.
+
+    ``subdir`` is the corpus directory the package lands in. It is `pptx` for
+    every deck of the deck corpus and only the Phase 19 legacy sources pass
+    anything else: those packages are the *input* to a `.ppt` conversion, not
+    decks the gates measure, and living outside `corpus/pptx` is what says so.
 
     ``slides`` are the `p:sld` bodies in file order (`slide1.xml` first).
     ``order`` is the presentation order as 1-based slide numbers; when it
@@ -2891,7 +3838,7 @@ def build_pptx(
         ("rId3", "extended-properties", "docProps/app.xml"),
     ], root=True)
 
-    write_package(ROOT / "pptx" / name, parts)
+    write_package(ROOT / subdir / name, parts)
 
 
 NOTES_MASTER = (
@@ -3969,6 +4916,1030 @@ def pptx_forty_slides() -> None:
 
 
 # --------------------------------------------------------------------------
+# Legacy .ppt fixtures (plan v2 Phase 19-A)
+# --------------------------------------------------------------------------
+#
+# A `.ppt` is an OLE2 compound file, not a ZIP, and nothing in this repository
+# writes one. The corpus rule — every byte is produced by this script, and
+# `--check` proves the checked-in tree is what it produces — therefore has to be
+# met a different way here, and the way is stated rather than implied:
+#
+# * The two *ordinary* decks are **recorded**, not synthesised. Their bytes were
+#   produced once by headless LibreOffice (`--convert-to ppt`) from a `.pptx`
+#   this script generates, and they live in this file zlib-compressed and
+#   base64-encoded, exactly as the legacy `.doc` fixtures live here. `--check`
+#   **regenerates** them: decompressing a constant is deterministic on every
+#   Python this project supports, so the digest of the written file is fixed by
+#   this file and not by the machine. LibreOffice is a dependency of *refreshing*
+#   the constant — a step a person takes deliberately, with the recipe below —
+#   and not a dependency of running the generator or the gates. That is the cost
+#   and it is paid knowingly: the bytes cannot be reviewed in a diff the way the
+#   XML of a `.pptx` can, so their provenance is written down instead.
+#
+#   The recipe, reproducible by anyone with the same LibreOffice:
+#
+#       python3 corpus/generate.py
+#       soffice --headless --convert-to ppt --outdir /tmp/ppt \
+#           corpus/pptx/basic-slides.pptx corpus/ppt/mixed-media.source.pptx
+#       python3 -c 'import base64,zlib,sys,textwrap; \
+#           print(textwrap.fill(base64.b64encode(zlib.compress(open(sys.argv[1],"rb").read(),9)).decode(),76))' \
+#           /tmp/ppt/basic-slides.ppt
+#
+#   Measured here before it was relied on: LibreOffice 24.2.7.2 writes the same
+#   bytes twice in a row, ninety-five seconds apart, and again on a freshly
+#   created user profile. It embeds no timestamp and no UUID. That is what makes
+#   *recording* the output honest; it is not a promise about another version, and
+#   a refresh under a different LibreOffice will produce a different constant,
+#   which is a reviewed change to this file and not a machine-dependent digest.
+#
+# * The two fixtures that exist to be **refused** are *derived* from the first
+#   deck by the compound-file surgery below. They are computed, not recorded:
+#   this script owns every byte in which they differ from their base, and the
+#   difference is one paragraph of readable code each.
+#
+# None of this is a `.ppt` writer. Phase 19 is read-only and stays read-only; the
+# code here writes fixtures, lives in the corpus generator, and reaches no crate
+# and no shipped binary.
+
+
+def ppt_mixed_media_source() -> None:
+    """The `.pptx` that `mixed-media.ppt` was converted from.
+
+    It is not part of the deck corpus and no gate measures it: it lands in
+    `corpus/ppt/` rather than `corpus/pptx/` precisely so that the round-trip,
+    schema and render gates — which read `corpus/pptx` — do not pick it up. It
+    exists so the recipe above is runnable by someone who wants to refresh the
+    recorded bytes, and so the content of the legacy deck is reviewable as XML
+    even though the legacy deck itself is not.
+
+    Three slides, because one slide cannot show a slide boundary; titles and
+    body text, because that is what the degraded native route has to recover;
+    and a picture on the last slide, because a `.ppt` keeps its bitmaps in a
+    `Pictures` stream of its own that the text path never touches.
+    """
+    picture = (
+        "<p:pic>"
+        '<p:nvPicPr><p:cNvPr id="4" name="Imagen 1" descr="Rectángulo azul"/>'
+        '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>'
+        '<p:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+        f'<p:spPr>{xfrm(1524000, 2286000, px(120), px(90))}'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        "</p:pic>"
+    )
+    build_pptx(
+        "mixed-media.source.pptx",
+        [
+            title_body_slide("Legado en binario", [
+                ("Primera viñeta", 0),
+                ("Segunda viñeta", 0),
+            ]),
+            title_body_slide("Segunda diapositiva", [
+                ("Nivel cero", 0),
+                ("Nivel uno", 1),
+            ]),
+            slide(
+                shape(2, "Title 1", a_p("Con imagen"), ph=ph("title")) + picture
+            ),
+        ],
+        media={"image1.png": BLUE_PNG},
+        slide_rels={3: [("rIdImg", "image", "../media/image1.png")]},
+        title="Mixta para .ppt",
+        subdir="ppt",
+    )
+
+
+# --------------------------------------------------------------------------
+# The recorded bytes. See the recipe above for how to refresh them.
+# --------------------------------------------------------------------------
+
+BASIC_SLIDES_PPT_Z = (
+    "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"
+    "eqM+qC+6Bd2K+qH+aAC6Dd2O7kAD0Z1oELoLDUZ3oyFoKBqG7kH3ovvQcHQ/egA9iB5CD6MRaCR6"
+    "BI1Co9GjaAwai8ah8WgCegxNRI+jJ9CT6Ck0CU1GU9BU9DSahp5Bz6Lp6Dn0PHoBvYhmoJfQy+gV"
+    "NBPNQrPRq+g19Dqag+aiN9A8NB8tQG+ihWgRWoyWoKVoGXoLvY3+h95B76L30PtoOVqBVqIP0Cr0"
+    "IVqNPkJr0Fq0Dq1HH6NP0Ab0KdqINqHN6DP0OdqCvkBfoq3oK7QNfY2+QdvRt+g7tAPtRLvQbpSK"
+    "9qDv0Q/oR/QT2ov2of3oAPoZ/YJ+Rb+h31EQBRI5/1E8SkCJKAvKirKhJHQCyo5yoJwoF8qNklEK"
+    "yoPyonwoPyqACqJCqDAqgoqiE1ExdBIqjkqgkqgUOhmdgkqjMuhUVBaVQ+VRBVQRVUKV0WnodFQF"
+    "nYGqomroTFQdnYXORuegc9F56Hx0AboQXYRqoJroYlQL1UZ1UF10CboU1UP1UQN0GbocXYGuRA1R"
+    "I3QVaoyaoKboatQMNUfXoBboWtQSXYdaoevRDehG1Bq1QW1RO9QedUAd0U2oE+qMuqCuqBvqjnqg"
+    "nuhm1Av1Rn1QX3QLuhX1Q/3RAHQbuh3dgQaiO9EgdBcajO5GQ9BQNAzdg+5F96Hh6H70AHoQPYQe"
+    "RiPQSPQIGoVGo0fRGDQWjUPj0QT0GJqIHkdPoCfRU+j3YDAY0pTItBDq/xdCCCH/F0IIIf8XQggh"
+    "/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8X"
+    "Qggh/xdCCPm/MkEIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0II"
+    "IeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk"
+    "/0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdC"
+    "CCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0II+b8yQQgh"
+    "5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/"
+    "Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh/xdCCCH/F0II"
+    "If8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/"
+    "F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQgj5vzJBCCHk/0IIIeT/Qggh5P9C"
+    "CCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh"
+    "5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8X"
+    "Qggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0II"
+    "If8XQggh/xdCCCH/F0IIIf8XQggh/xdCCPm/MkEIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk"
+    "/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9C"
+    "CCHk/0IIIeT/Qggh5P9CCCHk/0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh"
+    "/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8XQggh/xdCCCH/F0IIIf8X"
+    "Qggh/xdCCCH/F0II+b8yQQgh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0IIIeT/Qggh5P9CCCHk/0II"
+    "IeT/Qggh5P9/NL///rt9/vbbb7+kwbTNdEt//fVXW8SEm+lbxFreRS5Ci823FdZy4TOOJ710ZiYG"
+    "73xvyl1I20fvIlvduxVvYn4Nk14OuEWZ2SMhhPz/Lzd/3Cmmp3mXeosDM14XLL21vE4YbbPe8Obq"
+    "vvm+AsgXfyZjiJkSb0jf3rmZ3jC+jaaXFd45GeSMigAh5P9/n5q/OdW2bdteeeWVJ598ct68eXv2"
+    "7PG55ccffzx58mSWrl692pmqxbB27drHHnts0qRJW7Zs8frtF198MWXKlFdffXXv3r1mjHympqa+"
+    "9tprEyZMmDVr1o4dO7zJePfdd8eOHfvcc8999913Fo/Pli2GXbt2sS4xEDPTXid/++23x4wZ88IL"
+    "L7j5tmj9+vWkfOHChRYDId966y1Czpw586effmIOXy0xfF2wYMHu3btJ5zPPPPPUU0998skn3p36"
+    "4IMPlixZ4uLh88CBA0uXLiUHpk+f/tlnn3m3G50z8n8h5P9/E/83L/r5559vvfXWhIQEdjMuLo7P"
+    "7NmzT5w40YL9+OOP11xzDTOzZMmSNWtWJho0aGBuCc2bN2dO0aJFCxYsyMSjjz5q8zdu3Jg/f/5A"
+    "mDp16thMHDV37tzMyZYtm22oV69ezP/+++/POussvhYvXpwAbP311193FW9n73xi4zly5HAxxMfH"
+    "DxgwgPmk5/TTT2d+iRIlcubMmZycjNvbRhcvXsyu2ebat2/PnE6dOlma2VyVKlUodPhKqWSOzXTL"
+    "li3LlSuXmJhoedK/f39X+tSoUSMpKYk8schXrlxZtmxZwpAzhLfMsfKrWbNm0TnjbYwIIeT/f6H5"
+    "mxfdcMMN7ODFF1+MZ3766afUoq+44grmUCFnqZn/I488Qt143759VIn5Wr9+fYvn9ttvx9Vt2nwV"
+    "52f6gQceYBq7puo7d+5c5lCvZs7ZZ5+NxxLP9u3bBw4ciJ1Sf+Zr165dFy1aZNVpZhYpUoQJbw8M"
+    "n1T4ieGiiy6iTk6b4uuvv6bYonAhDCVI586dSTnBWFS9evVSpUpRrvEVz2ctdu3DMF999RVfW7Ro"
+    "YWkmbZQCzJk/fz5f161bx3S+fPkogEgAxcp1113HnMcff9zC16xZkwLI/J9dKFSoUJ48eYiEjdJk"
+    "mDp1auXKla2JdNttt02bNs3WIm1EsnnzZleQCSHk/3+h/5upzpw5k72rV6+et1No//79VJudH7Zq"
+    "1SqYdumTiZtvvpmZZrY255dffuHzxRdfZP7s2bOZps7M9KpVq9zSSy+9lDnWQ+K9HurtFbeQgwYN"
+    "IiQlkQtpnnnhhRdSx962bdthY+jTpw8xfP7550w3btyYabzadpBo+dqvXz+mKXf4HDNmDHPefPNN"
+    "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"
+    "SAgh/z8W/3fG8tJLL/Xr18+enOPtEslgXW9H0O7du994440pU6bwmZqaetRm5ex006ZNh22G/NGZ"
+    "Y/08uPph+97N/zds2OCr//u6y7zP/5GZCyH//2v9P3hU4z99q0f3txx1f0XMxzL8tZmTmZTYUgqs"
+    "hQsX2g1lvgsQ9vXDDz986623vM92FkLI//9ylzui+79iliDe978ctXt7I/xriwA9e18I8e/2f3Hc"
+    "i9HoGyi8F6BVmggh/xdCCCH/F0IIIf//V+J9oL3vDenqDBFCyP//9f7vG+J+pMONhBBC/v9P9H+z"
+    "9/fee69FixYVKlQ49dRT69ata09vzsztBkIIIf//W1Xpo5/D4OvScf08TL/88sv2NpPbb7996NCh"
+    "9vj9jh07BtOGWXrHxngH3luvkb1ZzPsoiej5vvGoNqLVOyDHO1Q15lAc7365ML47GqIH+UQn1QJ4"
+    "H+ngfX6FBfs1DRfeJdttV+OFhJD//6Mxc6tVq1bp0qVtjpUIr7zyint5uveJE+k9sSfoeWxa9Pz0"
+    "Rux75/i6m1xs0cVHemEyKAq9L0E4IutOb7u6U0wI+f/ftv7/008/vfjii++9957N3Lx587PPPut9"
+    "W8q2bdueeeYZexxo37598+TJs2PHDuf2L730knsX2Lx58+bMmeMz52D4xWFz5869//77R48evWLF"
+    "Cm+Ajz766KGHHho+fLglwPvcni+//PKpp5669957n3/+eXsIp3NjFo0fP54GCNG6Nxf4PlNTU59+"
+    "+ukhQ4ZQQhEtMcyePdue/8nesY+bNm3ylkHu84MPPnjggQdGjhxpb5B8++23mWOZs2zZslmzZtnr"
+    "jGfOnMm+k7YXwkybNs3uGt6zZw+Rs90ZM2ZQRPKVVf7a52AIIeT/Mav09l7dxo0b20x74a+9DNee"
+    "omx9Po8//rgFaN68ea5cuSpXrlyqVKmCBQuyqEiRIual5cuXL1CggKvxWvyrVq0qU6YMwXKFYeL0"
+    "00+35+136dKFryVKlChbtqx7666thQPHx8cnJibmy5fPXjqA2VoCJk6cyJz8+fOTBiZq1Khhj5L2"
+    "evgPP/xwxhlnsJQwxYsXv/TSS3v16kVs9tov9o5FDz/8cNDzkB9L9qRJk1jEXrB6oUKF7r777mLF"
+    "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"
+    "Sy6xmN9//33rV7QCyLJ648aNdj1a/i/k/39a/d8CDB061NZ68sknvd7utb7PP/+c7RKmRo0af3n/"
+    "j1mf80P22ttZcXQ57/V/XyL/zv7fu3dvmzlr1qzMZIKvCeD2fdmyZfXr13fX+hcsWOBiOxb/d4kf"
+    "OXKkxXzZZZd5i1d32csO+yuvvFL+L+T/f2b93w0sdEYa3YG8e/duG79RsWJF7/y/0P+po9paGOO4"
+    "ceNGjBjxSBq4jX0y85577rH98mbXMfp/BuM//2T/t2EzwI84fvz4DDLBRvC6fj83pP/RRx8lqTYO"
+    "B7Jly0abwlvEO/+PObwnk/0/pJaag22iUqVKw4cPnzt37vLly9mXdevWLVmyxAaXqv4v5P9H7f+v"
+    "v/76Ufi/ja6HefPmRdch3YWJokWLEqZChQremtsR+f9hx/87/3cBMvB/2yPvHRPR2NKWLVtmUDf+"
+    "k/2fpTH9/5133vH5v/cO2fT8367LZCYTmjdvHvRcNeZIu+2222ywmZl/7ty527dvb7eWeHvMjtT/"
+    "g1E3r9lXMq1z586+u0scNr5U/i/k/xn7v3cYvM9Djq7/x43Ne+6553z1f2d927Ztsxqad1i78/+C"
+    "BQtSkwymc++n8//ixYu7G3hj+n961pdx/w951aBBg0vCXBqGCebgwOQVAVq3bn0c/T9Pnjzbt29P"
+    "b2cz8H+7BhrdfeTz/1tuuSXz/u/6f4g840xo1apVMO1Gks2bN7ObzvlZl5aCje2JftRD5v2/TJky"
+    "rmiLvgXMdvPLL7+cPHlynz59mjVrRgpr1apVp04dmga0O+T/Qv5/WP+P7qhxV9lo4x+F/0+cONF7"
+    "IdXrfi5md3cqp63XnaxOC9iXr94YjBpakyNHji1btgQ9wz8s/LJlyyySNm3auMgNbwvF5/9jx461"
+    "tSZNmuQzB19ueK9rH4v/2/2/sHjx4uCh90Fk3v+9zTdvJrgc5pcKHnoV3nsTnM//3UVwd+0mvSZh"
+    "165dnf+7q7HnnHPO/PnzvYOBoy8TZ8b/bYAQHu5tXUYXAS550c++sHGn8n8h/z+s/9tIbxzAnUd2"
+    "XrvRIHhjZvp/bNHKlSutHnjxxRcHo67/ms/cfffdFvPo0aNj+j8WHQyP6/AOm/Q9/wFmz57tPZF9"
+    "A5DMYbwNEO+NzyTensZja61atcrbvbNv3z73FErrjHJptg7t4+j/7dq1s/x3u+l2NgP/t1H0MGPG"
+    "DLdrLmHOqGkruQz0BrAneLDL69atczNXr15t1Xvr3vFmglXF3ZCe8ePHW2xU/m2wTc2aNe0A8I4a"
+    "jX4IZ2b830aNgj1owncYeIuAA2FsK+7+sq+//jpv3rwZ3P8r/xfyf+f/OExqamow7Q5Ndx65+zcx"
+    "E9fZaz5j7oGF2vN/vDfgwLnnnmsrUhu0M9oNHeTrd999Z3cH58mTx54s585r5/+UIN6Npuf/TZs2"
+    "DabdgkT8VrjYkw3Mx9544w23X5byvXv32uMFChUqtGvXLu/WL7roImtWrFmzxpJtWAyu0RF9uSS6"
+    "a4LwlshTTz3V7Ms9/tqta/5vZSVlVjDtQqp3ZzPj/87lbBOWCVicy4TXXnvN+ytYWUPCWFSgQAG7"
+    "f9Zlgt1aRbPCPSrEZQJh7AfC8Dds2GB7TRvKOtsHDx5sCXbjRaMf+waUKd7xP+54c8W01//ZEA0Z"
+    "t653973Hgx2WYIWUe85Px44dg57bHuX/Qv7v8/8sWbJYS9nXC/3YY4+5p3h9++23wUOfk2PP//G2"
+    "0L3dOzNnzrR18fl3333Xay/btm2jXeB9Pk/08x9wzmLFiuFdo0aNsh5+q+n5/N9sx24xdpXqBQsW"
+    "WHXU3WJst4i6BPTt29c9OsDXcnF1ZqzJbtp1a7mn5Vhd3XdXbHTOu4sU5cqVy7j/v3z58jg8+/Lw"
+    "ww+7u6Gxskz6v2XCPffc44154cKF9vw6ywRisHHyLtn9+/e33cHtfZkwb948W0Qme3uWvFnHr+/8"
+    "c8eOHdbZQqbZceI9zPg5rHlyFON/OGg59nLlyvXUU0/ZQ+TsMHAH4ZIlS+644w57pK13aFC9evUs"
+    "nU888YT8X8j/Y/p/y5YtrX/gxhtvZCIlJeXyyy/v0qULtSYbwmf9Ia53iM9hw4bhqLVq1bLRm4TB"
+    "sfGQGjVqMIHtuI6I22+/3Y0AvPTSS/v06dOvXz8aFNYwt1prdHeHPbyle/fu1NstWNGiRYkfk7Qe"
+    "IUu5dX1zmlvPc4UKFdq0adO1a1fmsDmzxA4dOlB8WAJIcOfOndkv82QLYL7ke+7lXXfdZdslN1q0"
+    "aMFe9OzZ09ayDcW8MO1qoXyuXbuWXSNL7Sk6uXPnvv766/naunVrdv+BBx5w27Kadvv27d98802L"
+    "v0iRIsxkK1bKmP9bZzhNKp//8xsxv3bt2g0aNLByhE1069atfv36SUlJ1qwgW8aMGWMFAcVup06d"
+    "yARvweG7Rm8Jc3dwJCcnU0kgE26++WZ75p71aFlVwV2E5Qhxj99kZwcMGMBvzdFF2WdNDLsWTE2A"
+    "nKHssMeKciSQYL5aztgzguz4savJQ4YMefbZZ11Fgh+xTJkyNqbLjjF7Xgc5TFHOAUZ4fizC2Cq0"
+    "8qxV64o2+b+Q//vq/3aNDMt1Y7a9YJveav+UKVOsshdzuB1nq7e6NX78eFw0OjAtDs5Wq8/7nqVj"
+    "3Qs2bodtmVFY5O4Rdq7+jy/hA+aiLvE2QblgD59/8MEH7UYzH1Zh9hVAluxx48a5RxN7oRSj8RI8"
+    "9GGnXmz1VatWWa9LzCyy+rY5j3U30bJgevr06fbIMgtWqVIli58WgT00Nfr5z9ZWwmmJDW+MzgRm"
+    "7ty5Mxh+GHLM5zPbs6xjZsLEiRNj/nZ16tRxXXbe9Nx555025CYaMnPp0qUEXrx4cQYDSps0aeKu"
+    "EFn/Dw0i5lCIWyvGgpEAt/VBgwa5Zwn6oAWxYsUKX9NG/i/k/+70oaWPDdrgk2D4QY58pdJ72WWX"
+    "UTRwRn/wwQfBQ9/fYV83bNhgPfwYHScpFWmcf+rUqV988UXQ8xywYPgJYBMmTKCORw0NO6Kad999"
+    "99lV15jvf7EXgljPs11bJBlXXXUVFftbbrnFdbnjlsRjvfScxTQWKL+uvPJKqpe0Al599VWL3E5w"
+    "UjVy5MjrrruO/SIBRGgreq9L+oYnUV8dO3Ys9VIaRFdffTV2QS65Z+AED/fwB4oeyh3zc/KfRpO9"
+    "/2Xw4MFW37ZIyDcy3N5yEgzfE03ro3HjxuwshYJVcfmcPHkysZEzvtQSFXG6p/fMnz+/R48eVIkt"
+    "E2bNmmU98JYJW7duxUhbtWrFHpEJAwcOdM++8zXBXCZQyacoJBOoITRt2pT8p30XnQku/JYtWx59"
+    "9FGaM6SBrZDh1NX5LawS7m4Qo5ZuJTItO3sr0PDhw9lxuwJikXMssci6FoPhRzNRzLFfFMF2lcF7"
+    "F8CcOXP4TWlusFEOFdqJzzzzjOtJU/1f/Kf8P+aN8FWrVg1GvYfR+9gW7zg974TvLXvuYY/2CF9f"
+    "/78vAdGvSnQJyOBBapl5RWDM1xRGJzs6DRlEnnGyY24rvZRbFnXs2NG6jNJby1v8ZZCeDDLBuXHM"
+    "V4C5a6a+yL25dyyZ4Huvbgav+vWVFNdee230MZn5wyAzG3WHtLc2Iv8X/xH/d3dlmv+73gOfmXuf"
+    "ZuZe6e6G00S/n8se7Rj0POHZPYDLwvtqht5xLzGj9fm5BfBW27xD+7wnvjeYbxO+kScZ71dMz/Em"
+    "2w1Qycxrf71Z9PLLL9v1XxtFaQNUvGWB70Fqdtk3enPpFQS+h9GllwlBz5PZjjoTojM2plG7Tbit"
+    "+N7JbleRpk2b5vzfjS/y1kAycxgEo95Q702nr9Eq/xf/nf4fNxBiyZIl9hqm0qVL04jO+MVVmcTO"
+    "Gnu/nrs1wI1XiW5ieP3kv/BWbrfLO3fuzJkzZ/HixX3jf440nocffvj0009/6qmnghmOO/pH5IxZ"
+    "+ldffRUXF2ePfkqv/n98kf+L/4j/26E+fPjw6BfvJicnWzfyUT/c0rUsPvzwQ7tSWaJEibVr19qi"
+    "L7/80p7H/uec1H//ImDOnDkvvfTS0ZV6ls+ffvqpXf3MmzevG6j/j84Zm5g5c6Y9YlT+L+T/x/1Q"
+    "79q1K/580kknFS1atEiRInwWK1aMZD/yyCPHeOS7Wpx7hwu13LPD2Hih4KH3/P43/T+YYdd95v1/"
+    "8+bNdrW0YMGCdrfaPzpjj0vOHLv/6/2/4t/q/65ved++fXv37v3pp5/cp3VEH+N5507e/fv3d+vW"
+    "zY11tOYAjfpj38S/w/+DaTe3Hp3XuXyeNGlSvXr1qDD/0/t/godeuvU+kujP8f8lS5ao/i/+3f7/"
+    "p53CroI6derUhx9+ePTo0a+88sqWLVv+C538f0lVWRl7jJm5ffv2xx9/fNy4cTbm9h/dkybk/4f1"
+    "598P5Xhdgc3gAYzij6gqe8f5KKuFkP//TdzJjfSLHuyn40T83Q7X6FG4Qsj/hRBCyP+FEELI/4UQ"
+    "Qsj/hRBCyP+FEEL+L4QQQv4vhBBC/i+EEEL+L4QQQv4vhBBC/i+EEEL+L4QQQv4vhBBC/i+EEEL+"
+    "L4QQQv4vhBBC/i+EEEL+L4QQQv4vhBBC/i+EEEL+L4QQQv4vhBBC/i+EEEL+L4QQQv4vhBBC/i+E"
+    "EPJ/IYQQ8n8hhBD/Ef//J9G6U0D8h2kc6MG/PoGSgbqB7vztFeh/ROsXDGRx9Z04vqc8eFe7xxp+"
+    "kGfYt4HnAnPLfxNrnQRUM96m4wK12X63QM9Aw0CbQOcjTn/eQHwgPhLnkZx+5wbStt8w0DXQ/qjz"
+    "LztbP9LTP5RP+SPTtQN9yfNepKB7+Fe4OtCb6V6Z3n5Rtp/I3yxHsP+h/KoUmW4U6BRoy5b7htPQ"
+    "+6jy/0j3/3dPuEb8+reG9zg01SmSC3WYbkuaukXyJX3Ksf2s/M12BPsfyq9tFWw6S6BJeDvdAq3D"
+    "x359tteBrfcKz+lDinowJ+PtH+n+F0VNf0mKbN+/r0eWnnOOYvuhc6VOnE3/H5p3TQg="
+)
+
+MIXED_MEDIA_PPT_Z = (
+    "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"
+    "EELo/4QQQuj/hBBC6P8+cvfuXfn7559/3jb5448//jTBhPy8a6JWJoQQ+v+/xvw92bvMuXPnDrID"
+    "fQ4hhND//x1ZAOx9z549U6ZMiYuLa9SoUXWTJk2avPXWW+vXr0ctQNah/xNC6P//JvMHNWrUsHkm"
+    "X758O3bsYBZACKH//8v8H8X7Z599FgkSGRlZunTpZs2axcbGduvWrX79+qlSpZIsICQkRLKAO3fu"
+    "0P8JIfT/f4f/37p1C4a/ZMmSq1evOhK6A2TR5cuX69SpI1lAyZIlLbUGQgih//+j/V+5vRTv/zCR"
+    "kT9SOyhUqJBkAd98840joRWIEELo/3+RM6ueWTUg0y2yVC+W60M6lZOrgZ2W0T76XmScj6wMMP37"
+    "779j6cyZM8X/x4wZg5+SL6jNJcuQ8NUuJCYSmmVw0QM3lEX6T9cMS99Woqoaph6qemLZozp2iY8e"
+    "puWgvERP5aEPjI8+vAp/H5gsnnaktvU03/V4LVeOflWoCOjXjNsT6uPxWq5kX06rZdeschKW/313"
+    "M8kavNz7jvuHfbpuou5Z/P3uu+/8/PyQYl26dBH/14Nym5u4ZjSWOFjsQt/QMtOt6blu6xqmj8nl"
+    "GqAl/3V10b+uFub20P6G8bePc16eSDlHHaOlnOD27BDyry//y8SuXbvWr1+/yTPr1q37/vvvLfYu"
+    "00ePHp0/f/7o0aOHDh2Kovu8efP27dsngzld7zIpfcHqp0yZMmzYsHfffXfFihXx8fFYevjw4cDA"
+    "QKRYq1at9PK/3LDnzp375JNPhg8fPmLEiBkzZmAXKsAjR45s27btypUrluxGNsT85cuXI3rY3bRp"
+    "0/bu3StLEcP9+/fv3r372rVrrk4obnzx4sWlS5cikth24sSJSIcbN248lF1bbOfq1atISQSFAHEg"
+    "U6dOxc9Lly5Zisdg586da9eu/fbbbz2Vrk+ePIltN2zYcPnyZV/K/2fPnt2+ffuFCxdk5vXr11ev"
+    "Xj1u3DicNcRnx44dkpiuZXWk/DoThKCnMILCNYP5p0+fdhtDBIXzgqPYs2ePHqbs4vz587hsRpjI"
+    "CZVrA4t++umnb775xnJCjx07hqA2btz466+/ein/45xitS1btty6dctyIOqsnTp1asGCBe+88w7O"
+    "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"
+)
+
+
+def _ppt_bytes(blob: str) -> bytes:
+    return zlib.decompress(base64.b64decode(blob))
+
+
+def _write_ppt(name: str, data: bytes) -> None:
+    out = ROOT / "ppt" / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+
+
+# --------------------------------------------------------------------------
+# Compound-file surgery, for the two fixtures that exist to be refused
+# --------------------------------------------------------------------------
+#
+# Enough of [MS-CFB] to move a boundary inside an existing file: the FAT, the
+# directory and the mini stream. It creates nothing — every file it touches is
+# one LibreOffice already wrote — and it asserts the shape it assumes rather
+# than trusting it, so a refreshed constant with a different layout fails loudly
+# here instead of producing a fixture that means something else.
+
+_CFB_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_FREESECT = 0xFFFFFFFF
+_ENDOFCHAIN = 0xFFFFFFFE
+_MAXREGSECT = 0xFFFFFFFA
+
+
+def _cfb_open(data: bytes) -> tuple[bytearray, int, list[int]]:
+    """``(bytes, sector size, DIFAT)`` for a compound file this script edits."""
+    b = bytearray(data)
+    assert bytes(b[:8]) == _CFB_SIGNATURE, "not a compound file"
+    sector = 1 << struct.unpack_from("<H", b, 30)[0]
+    assert sector == 512, f"unexpected sector size {sector}"
+    fat_count = struct.unpack_from("<I", b, 44)[0]
+    assert fat_count <= 109, "a DIFAT sector chain is not handled here"
+    assert struct.unpack_from("<I", b, 68)[0] >= _ENDOFCHAIN, "unexpected DIFAT chain"
+    difat = [struct.unpack_from("<I", b, 76 + 4 * i)[0] for i in range(fat_count)]
+    return b, sector, difat
+
+
+def _fat_slot(sector: int, difat: list[int], index: int) -> int:
+    per = sector // 4
+    return 512 + difat[index // per] * sector + 4 * (index % per)
+
+
+def _fat_get(b: bytearray, sector: int, difat: list[int], index: int) -> int:
+    return struct.unpack_from("<I", b, _fat_slot(sector, difat, index))[0]
+
+
+def _fat_set(b: bytearray, sector: int, difat: list[int], index: int, value: int) -> None:
+    struct.pack_into("<I", b, _fat_slot(sector, difat, index), value)
+
+
+def _cfb_chain(b: bytearray, sector: int, difat: list[int], start: int) -> list[int]:
+    out: list[int] = []
+    while start <= _MAXREGSECT:
+        assert start not in out, "cyclic sector chain"
+        out.append(start)
+        start = _fat_get(b, sector, difat, start)
+    return out
+
+
+def _cfb_entry(b: bytearray, sector: int, difat: list[int], name: str) -> int:
+    """File offset of the 128-byte directory entry named ``name``."""
+    start = struct.unpack_from("<I", b, 48)[0]
+    for sec in _cfb_chain(b, sector, difat, start):
+        for slot in range(sector // 128):
+            off = 512 + sec * sector + slot * 128
+            if b[off + 66] == 0:  # STGTY_INVALID
+                continue
+            length = struct.unpack_from("<H", b, off + 64)[0]
+            if bytes(b[off:off + max(0, length - 2)]).decode("utf-16le") == name:
+                return off
+    raise KeyError(name)
+
+
+def _cfb_stream(data: bytes, name: str) -> bytes:
+    """The content of a named stream, from either allocation."""
+    b, sector, difat = _cfb_open(data)
+    entry = _cfb_entry(b, sector, difat, name)
+    start = struct.unpack_from("<I", b, entry + 116)[0]
+    size = struct.unpack_from("<Q", b, entry + 120)[0]
+    if size >= struct.unpack_from("<I", b, 56)[0]:
+        chain = _cfb_chain(b, sector, difat, start)
+        return b"".join(
+            bytes(b[512 + s * sector:512 + (s + 1) * sector]) for s in chain)[:size]
+    mini = 1 << struct.unpack_from("<H", b, 32)[0]
+    root = _cfb_entry(b, sector, difat, "Root Entry")
+    chain = _cfb_chain(b, sector, difat, struct.unpack_from("<I", b, root + 116)[0])
+    whole = b"".join(bytes(b[512 + s * sector:512 + (s + 1) * sector]) for s in chain)
+    return whole[start * mini:start * mini + size]
+
+
+def _cfb_truncate_stream(data: bytes, name: str, keep: int) -> bytes:
+    """Cut a stream's content to ``keep`` bytes, leaving the container valid.
+
+    The point of the fixture is that the *file* stays consistent — [MS-CFB] has
+    no complaint to make about it, and a compound-file library opens it and
+    hands back a shorter stream without a word — while every offset the format's
+    own bookkeeping records still points where the bytes used to be. The dropped
+    sectors are freed **and zeroed**, so the truncated content is gone rather
+    than merely unreferenced.
+    """
+    b, sector, difat = _cfb_open(data)
+    entry = _cfb_entry(b, sector, difat, name)
+    start = struct.unpack_from("<I", b, entry + 116)[0]
+    size = struct.unpack_from("<Q", b, entry + 120)[0]
+    cutoff = struct.unpack_from("<I", b, 56)[0]
+    assert keep < size, f"{name} is already {size} bytes"
+    # Below the cutoff the stream would have to move into the mini stream, which
+    # is a different allocation entirely; keeping it above is not a detail.
+    assert keep >= cutoff, f"{keep} would push {name} into the mini stream"
+    chain = _cfb_chain(b, sector, difat, start)
+    kept = (keep + sector - 1) // sector
+    for dropped in chain[kept:]:
+        _fat_set(b, sector, difat, dropped, _FREESECT)
+        b[512 + dropped * sector:512 + (dropped + 1) * sector] = bytes(sector)
+    _fat_set(b, sector, difat, chain[kept - 1], _ENDOFCHAIN)
+    tail = kept * sector - keep
+    if tail:
+        last = 512 + chain[kept - 1] * sector
+        b[last + sector - tail:last + sector] = bytes(tail)
+    struct.pack_into("<Q", b, entry + 120, keep)
+    return bytes(b)
+
+
+def _cfb_patch_mini(data: bytes, name: str, at: int, blob: bytes) -> bytes:
+    """Overwrite ``blob`` at ``at`` inside a stream held in the mini stream."""
+    b, sector, difat = _cfb_open(data)
+    entry = _cfb_entry(b, sector, difat, name)
+    size = struct.unpack_from("<Q", b, entry + 120)[0]
+    cutoff = struct.unpack_from("<I", b, 56)[0]
+    assert size < cutoff, f"{name} is not in the mini stream"
+    assert at + len(blob) <= size, "patch runs past the stream"
+    mini = 1 << struct.unpack_from("<H", b, 32)[0]
+    root = _cfb_entry(b, sector, difat, "Root Entry")
+    chain = _cfb_chain(b, sector, difat, struct.unpack_from("<I", b, root + 116)[0])
+    at += struct.unpack_from("<I", b, entry + 116)[0] * mini
+    sec = chain[at // sector]
+    inner = at % sector
+    assert inner + len(blob) <= sector, "patch spans two sectors"
+    b[512 + sec * sector + inner:512 + sec * sector + inner + len(blob)] = blob
+    return bytes(b)
+
+
+# The PowerPoint Document stream is a flat sequence of records, each an eight
+# byte header (`recVer`/`recInstance`, `recType`, `recLen`) followed by
+# `recLen` bytes. Walking it is how the cut below is chosen, so that the cut
+# lands *inside* a record rather than tidily between two.
+def _ppt_records(stream: bytes) -> list[tuple[int, int, int]]:
+    """``(offset, recType, recLen)`` for the top-level records of a stream."""
+    out, off = [], 0
+    while off + 8 <= len(stream):
+        _, kind, length = struct.unpack_from("<HHI", stream, off)
+        out.append((off, kind, length))
+        off += 8 + length
+    return out
+
+
+# [MS-PPT] 2.3.2: the CurrentUserAtom's headerToken is what a reader consults
+# to learn whether a document is encrypted, before it parses anything else.
+_PPT_TOKEN_PLAIN = 0xE391C05F
+_PPT_TOKEN_ENCRYPTED = 0xF3D1C4DF
+# Record header (8) + size (4) — the token is the field right after them.
+_CURRENT_USER_TOKEN_AT = 12
+
+
+def _assert_ppt(data: bytes, *, slides: int, pictures: bool) -> bytes:
+    """The only gate a `.ppt` fixture can have, so it is not left ungated.
+
+    A `.ppt` is not a package: `schema_gate.py` has no XML to validate and
+    `render_gate.py`'s property is a round trip this phase will never have,
+    because Phase 19 is read-only. What is left is a structural assertion at
+    generation time, and `--check` runs the generators, so this is what stands
+    between the corpus and a recorded constant that quietly stopped being the
+    deck it claims to be — a LibreOffice that one day drops the picture, or
+    flattens two slides into one, fails here rather than in a reader test whose
+    expectations someone would then «fix».
+
+    `RT_Slide` is 0x03EE and `RT_MainMaster` is 0x03F8 ([MS-PPT] 2.13.24): a
+    slide is counted by its own container and not by anything derived.
+    """
+    found = sum(1 for _, kind, _ in _ppt_records(_cfb_stream(data, "PowerPoint Document"))
+                if kind == 0x03EE)
+    assert found == slides, f"expected {slides} RT_Slide containers, found {found}"
+    blips = len(_cfb_stream(data, "Pictures"))
+    assert bool(blips) == pictures, f"Pictures stream is {blips} bytes"
+    token = struct.unpack_from(
+        "<I", _cfb_stream(data, "Current User"), _CURRENT_USER_TOKEN_AT)[0]
+    assert token == _PPT_TOKEN_PLAIN, f"unexpected headerToken 0x{token:08X}"
+    return data
+
+
+def ppt_basic_slides() -> None:
+    """Two slides, title and body: the legacy twin of `pptx/basic-slides.pptx`.
+
+    Its value is the pairing. «With LibreOffice, fidelity equivalent to the
+    pptx path» is only measurable against a deck whose pptx form the corpus
+    already carries and already pins with a golden.
+    """
+    _write_ppt("basic-slides.ppt",
+               _assert_ppt(_ppt_bytes(BASIC_SLIDES_PPT_Z), slides=2, pictures=False))
+
+
+def ppt_mixed_media() -> None:
+    """Three slides, titles, bullets at two levels, and a picture."""
+    _write_ppt("mixed-media.ppt",
+               _assert_ppt(_ppt_bytes(MIXED_MEDIA_PPT_Z), slides=3, pictures=True))
+
+
+def ppt_truncated() -> None:
+    """A deck whose `PowerPoint Document` stream stops in the middle.
+
+    Not a file that merely *looks* truncated. The compound file is intact and
+    self-consistent, so nothing fails at open; what is gone is the second half
+    of the stream every offset in the format points into. Concretely, after the
+    cut:
+
+    * `CurrentUserAtom.offsetToCurrentEdit` still addresses the UserEditAtom
+      near the original end of the stream, thousands of bytes past what exists.
+      A reader that seeks there without checking runs off the end.
+    * The cut lands inside a record whose eight-byte header survives and
+      declares a length reaching well beyond it, so a walk that trusts `recLen`
+      reads past the end on its own, without any seek at all.
+
+    Both are the shape Phase 19-E has to refuse and Phase 20 will fuzz.
+    """
+    base = _ppt_bytes(BASIC_SLIDES_PPT_Z)
+    stream = _cfb_stream(base, "PowerPoint Document")
+    # Half the stream, rounded up to a whole sector so the allocation stays
+    # tidy and only the *content* is what changed. The two assertions are the
+    # fixture's whole point, and they are checked rather than assumed: a
+    # refreshed constant that happened to put a record boundary here would
+    # produce a file that no longer tests anything, and it would say so.
+    cut = -(-(len(stream) // 2) // 512) * 512
+    inside = [r for r in _ppt_records(stream) if r[0] < cut < r[0] + 8 + r[2]]
+    assert inside, f"the cut at {cut} falls between records, not inside one"
+    edit_at = struct.unpack_from(
+        "<I", _cfb_stream(base, "Current User"), _CURRENT_USER_TOKEN_AT + 4)[0]
+    assert edit_at > cut, "the UserEditAtom would survive the cut"
+    _write_ppt("truncated.ppt", _cfb_truncate_stream(base, "PowerPoint Document", cut))
+
+
+def ppt_encrypted() -> None:
+    """A deck that declares itself encrypted, and must be refused by name.
+
+    The honest caveat, because a fixture that overstates what it proves is
+    worse than none: the content behind this flag is **not** ciphertext.
+    Neither LibreOffice nor anything else in this tree can write RC4-encrypted
+    binary PowerPoint — `--convert-to ppt` with `EncryptFile` and a password was
+    tried and produces a byte-identical plaintext file — so what is generated
+    here is the declaration a reader is required to honour: `headerToken` set to
+    `0xF3D1C4DF`, which is [MS-PPT] 2.3.2's «this document is encrypted» and the
+    first thing a conforming reader looks at. It proves the refusal. It does not
+    prove anything about decryption, and nothing in this phase claims to.
+    """
+    base = _assert_ppt(_ppt_bytes(BASIC_SLIDES_PPT_Z), slides=2, pictures=False)
+    out = _cfb_patch_mini(base, "Current User", _CURRENT_USER_TOKEN_AT,
+                          struct.pack("<I", _PPT_TOKEN_ENCRYPTED))
+    token = struct.unpack_from(
+        "<I", _cfb_stream(out, "Current User"), _CURRENT_USER_TOKEN_AT)[0]
+    assert token == _PPT_TOKEN_ENCRYPTED, f"headerToken is 0x{token:08X}"
+    assert sum(1 for a, b in zip(base, out) if a != b) == 4, "the patch spread"
+    _write_ppt("encrypted.ppt", out)
+
+
+# --------------------------------------------------------------------------
 # The writer's embedded default template (plan v2 Phase 15-G)
 # --------------------------------------------------------------------------
 #
@@ -4191,6 +6162,23 @@ GENERATORS = [
     ods_formulas_basic,
     ods_merged_cells,
     ods_images_anchored,
+    odp_basic_slides,
+    odp_slide_order,
+    odp_placeholders_cascade,
+    odp_placeholders_empty,
+    odp_presentation_classes,
+    odp_bullets_levels,
+    odp_notes_speaker,
+    odp_reading_order,
+    odp_raw_preserved,
+    odp_tables_simple,
+    odp_images_anchored,
+    odp_shapes_geometry,
+    odp_charts_embedded,
+    odp_charts_multi_series,
+    odp_ole_embedded,
+    odp_comments_slide,
+    odp_forty_slides,
     doc_basic_text,
     doc_encrypted,
     pptx_basic_slides,
@@ -4214,6 +6202,11 @@ GENERATORS = [
     pptx_comments_slide,
     pptx_macro_enabled,
     pptx_forty_slides,
+    ppt_mixed_media_source,
+    ppt_basic_slides,
+    ppt_mixed_media,
+    ppt_truncated,
+    ppt_encrypted,
     office_default_template,
 ]
 
@@ -4226,7 +6219,7 @@ def digest_tree() -> dict[str, str]:
         out[str(TEMPLATE_PATH.relative_to(ROOT.parent))] = hashlib.sha256(
             TEMPLATE_PATH.read_bytes()
         ).hexdigest()
-    for sub in ("docx", "xlsx", "odt", "ods", "doc", "pptx"):
+    for sub in ("docx", "xlsx", "odt", "ods", "odp", "doc", "ppt", "pptx"):
         d = ROOT / sub
         if not d.exists():
             continue
