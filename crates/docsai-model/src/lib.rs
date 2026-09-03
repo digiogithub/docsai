@@ -178,6 +178,8 @@ pub enum Format {
     Xls,
     Odt,
     Ods,
+    /// OpenDocument presentation, the third ODF class (Phase 18).
+    Odp,
     Pptx,
     /// The DocMark pivot itself.
     DocMark,
@@ -193,6 +195,7 @@ impl Format {
             Format::Xls => "xls",
             Format::Odt => "odt",
             Format::Ods => "ods",
+            Format::Odp => "odp",
             Format::Pptx => "pptx",
             Format::DocMark => "docmark",
         }
@@ -212,6 +215,7 @@ impl Format {
             "xls" => Some(Format::Xls),
             "odt" => Some(Format::Odt),
             "ods" => Some(Format::Ods),
+            "odp" => Some(Format::Odp),
             "pptx" | "pptm" => Some(Format::Pptx),
             "docmark" | "dmk" | "md" | "markdown" => Some(Format::DocMark),
             _ => None,
@@ -225,7 +229,7 @@ impl Format {
 
     /// True when documents of this format become a [`Document::Presentation`].
     pub fn is_presentation(self) -> bool {
-        matches!(self, Format::Pptx)
+        matches!(self, Format::Pptx | Format::Odp)
     }
 }
 
@@ -248,6 +252,7 @@ mod tests {
             Format::Xls,
             Format::Odt,
             Format::Ods,
+            Format::Odp,
             Format::Pptx,
             Format::DocMark,
         ] {

@@ -174,7 +174,7 @@ pub fn read_document<R: Read + Seek>(
                 .map_err(ConvertError::Parse)?;
             (document, report)
         }
-        Format::Odt | Format::Ods => docsai_odf::read(format, reader, assets)?,
+        Format::Odt | Format::Ods | Format::Odp => docsai_odf::read(format, reader, assets)?,
         other => docsai_office::read(other, reader, assets)?,
     };
     docsai_model::validate::validate(&document).map_err(|errors| {
@@ -252,7 +252,7 @@ pub fn read_path_with_options(
         source,
     })?;
     let (document, report) = match format {
-        Format::Odt | Format::Ods => docsai_odf::read(format, file, assets)?,
+        Format::Odt | Format::Ods | Format::Odp => docsai_odf::read(format, file, assets)?,
         other => docsai_office::read(other, file, assets)?,
     };
     docsai_model::validate::validate(&document).map_err(|errors| {

@@ -93,11 +93,14 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
                 let mime = mime.trim();
                 let format = if mime.contains("opendocument.spreadsheet") {
                     Format::Ods
+                } else if mime.contains("opendocument.presentation") {
+                    Format::Odp
                 } else if mime.contains("opendocument.text") {
                     Format::Odt
                 } else {
                     match extension(hint).as_deref() {
                         Some("ods") => Format::Ods,
+                        Some("odp") => Format::Odp,
                         _ => Format::Odt,
                     }
                 };

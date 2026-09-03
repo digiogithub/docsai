@@ -63,7 +63,7 @@ pub fn read_blocks(parent: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Vec<B
     blocks
 }
 
-fn read_block(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Option<Block> {
+pub(crate) fn read_block(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Option<Block> {
     match element.name.as_str() {
         "p" => Some(Block::Paragraph(read_paragraph(element, ctx, st))),
         "h" => Some(read_heading(element, ctx, st)),
@@ -314,7 +314,7 @@ fn read_list(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>, level: u8) ->
     }
 }
 
-fn read_table(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Table {
+pub(crate) fn read_table(element: &Element, ctx: &Ctx<'_>, st: &mut State<'_>) -> Table {
     let style = element
         .attr("style-name")
         .or_else(|| element.attr_qualified("table:style-name"))

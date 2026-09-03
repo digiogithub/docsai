@@ -1,0 +1,73 @@
+{
+  "source-format": "odp",
+  "kind": "presentation",
+  "meta": {
+    "title": "Preservación en bruto",
+    "author": "docsai corpus",
+    "last-modified-by": "docsai corpus",
+    "created": "2026-01-01T00:00:00Z",
+    "modified": "2026-01-02T00:00:00Z",
+    "language": "es-ES",
+    "application": "docsai-corpus"
+  },
+  "styles": [],
+  "slides": [
+    {
+      "index": 0,
+      "name": "page1",
+      "title": "Lo que no se modela",
+      "layout": "AL2T1",
+      "layout-name": "AL2T1",
+      "shapes": 3,
+      "placeholders": 1,
+      "pictures": 0,
+      "tables": 0,
+      "charts": 0,
+      "raw-shapes": 2,
+      "has-notes": false,
+      "has-smart-art": false,
+      "has-ole": false,
+      "hidden": false
+    }
+  ],
+  "media": [],
+  "stats": {
+    "paragraphs": 1,
+    "headings": 0,
+    "lists": 0,
+    "tables": 0,
+    "images": 0,
+    "footnotes": 0,
+    "slides": 1,
+    "sheets": 0,
+    "cells": 0,
+    "formulas": 0,
+    "styles": 0
+  },
+  "warnings": [
+    {
+      "warning": "unsupported-element",
+      "kind": "style:style",
+      "location": "content.xml:3088",
+      "action": "raw-block"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "draw:g",
+      "location": "content.xml:3851",
+      "action": "raw-block"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "draw:custom-shape",
+      "location": "content.xml:4295",
+      "action": "raw-block"
+    },
+    {
+      "warning": "unsupported-element",
+      "kind": "anim:par",
+      "location": "content.xml:4651",
+      "action": "raw-block"
+    }
+  ]
+}

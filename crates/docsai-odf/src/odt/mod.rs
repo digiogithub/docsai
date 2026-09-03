@@ -1,6 +1,6 @@
 //! The `.odt` reader and writer (Phase 4).
 
-mod body;
+pub(crate) mod body;
 pub(crate) mod write;
 
 use std::io::{Read, Seek};
@@ -119,7 +119,7 @@ pub(crate) fn read_package(
     Ok((document, report))
 }
 
-fn read_meta(package: &Package) -> DocumentMeta {
+pub(crate) fn read_meta(package: &Package) -> DocumentMeta {
     let mut meta = DocumentMeta::default();
     let Ok(Some(root)) = package.optional_xml(META_PART) else {
         return meta;

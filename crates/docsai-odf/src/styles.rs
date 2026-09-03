@@ -35,6 +35,31 @@ pub struct OdfStyles {
     pub lists: ListCatalog,
     /// List style name → list id in the catalog.
     pub list_names: BTreeMap<String, ListId>,
+    /// Presentation and drawing-page styles, keyed by name (Phase 18-B).
+    ///
+    /// The two families a `.odp` inherits through and neither `.odt` nor `.ods`
+    /// has: a `draw:frame` on a page names a `presentation:style-name`, and a
+    /// `draw:page` names a `draw:style-name` of family `drawing-page`. They are
+    /// collected here rather than in [`StyleCatalog`] because they are read the
+    /// way every other ODF automatic style is read — parent plus delta — and
+    /// resolved into the IR at the point of use, never carried.
+    pub presentation: BTreeMap<String, PresentationStyle>,
+}
+
+/// A `style:style` of family `presentation` or `drawing-page`.
+#[derive(Debug, Clone, Default)]
+pub struct PresentationStyle {
+    /// `style:parent-style-name`, unresolved: the chain is walked at the point
+    /// of use so that a forward reference reads the same as a backward one.
+    pub parent: Option<String>,
+    pub font: FontProps,
+    pub para: ParaProps,
+    /// `draw:fill-color` when `draw:fill` is `solid`.
+    pub fill: Option<String>,
+    /// `style:drawing-page-properties` attributes, qualified and verbatim. The
+    /// page transition lives in here and has no IR node; the reader looks for
+    /// it rather than modelling it.
+    pub drawing_page: Vec<(String, String)>,
 }
 
 /// Subset of graphic-style properties the image model needs.
@@ -94,7 +119,55 @@ impl OdfStyles {
     pub fn graphic(&self, name: Option<&str>) -> Option<&GraphicStyle> {
         name.and_then(|n| self.graphic.get(n))
     }
+
+    /// Resolves a presentation (or drawing-page) style through its parent
+    /// chain, into the properties the IR holds.
+    ///
+    /// This is de-automatization for the third ODF family: the automatic style
+    /// a frame names is never carried, only the values it ends up with. The
+    /// walk is capped because `style:parent-style-name` is a name and a name
+    /// can point back at itself.
+    pub fn resolve_presentation(&self, name: Option<&str>) -> (FontProps, ParaProps) {
+        let mut chain: Vec<&PresentationStyle> = Vec::new();
+        let mut cursor = name;
+        for _ in 0..MAX_STYLE_DEPTH {
+            let Some(current) = cursor else { break };
+            let Some(style) = self.presentation.get(current) else {
+                break;
+            };
+            if chain.iter().any(|seen| std::ptr::eq(*seen, style)) {
+                break;
+            }
+            chain.push(style);
+            cursor = style.parent.as_deref();
+        }
+        // Nearest last: a child overrides the parent it names.
+        let mut font = FontProps::default();
+        let mut para = ParaProps::default();
+        for style in chain.iter().rev() {
+            font = style.font.over(&font);
+            para = style.para.over(&para);
+        }
+        (font, para)
+    }
+
+    /// The solid fill a presentation style resolves to, if any.
+    pub fn presentation_fill(&self, name: Option<&str>) -> Option<String> {
+        let mut cursor = name;
+        for _ in 0..MAX_STYLE_DEPTH {
+            let style = self.presentation.get(cursor?)?;
+            if style.fill.is_some() {
+                return style.fill.clone();
+            }
+            cursor = style.parent.as_deref();
+        }
+        None
+    }
 }
+
+/// Cap on a `style:parent-style-name` walk. A chain longer than this is either
+/// pathological or a cycle, and neither should cost more than a lookup.
+const MAX_STYLE_DEPTH: usize = 32;
 
 /// Reads named styles from `styles.xml` (and optional `office:styles` in content).
 pub fn read_named_styles(root: &Element, into: &mut OdfStyles) {
@@ -190,6 +263,31 @@ fn read_one_style(element: &Element, into: &mut OdfStyles, automatic: bool) {
             g.clip = gp.attr("clip").map(str::to_string);
         }
         into.graphic.insert(name.to_string(), g);
+        return;
+    }
+
+    if family == "presentation" || family == "drawing-page" {
+        let mut style = PresentationStyle {
+            parent: element.attr("parent-style-name").map(str::to_string),
+            ..Default::default()
+        };
+        if let Some(text) = element.child("text-properties") {
+            style.font = text_properties(text);
+        }
+        if let Some(para) = element.child("paragraph-properties") {
+            style.para = paragraph_properties(para);
+        }
+        if let Some(graphic) = element.child("graphic-properties") {
+            if graphic.attr("fill") == Some("solid") {
+                style.fill = graphic
+                    .attr("fill-color")
+                    .and_then(crate::format::hex_color);
+            }
+        }
+        if let Some(page) = element.child("drawing-page-properties") {
+            style.drawing_page = page.attrs.clone();
+        }
+        into.presentation.insert(name.to_string(), style);
         return;
     }
 

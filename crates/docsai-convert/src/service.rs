@@ -260,6 +260,7 @@ pub fn mime_type_for(format: Format) -> &'static str {
         Format::Xls => "application/vnd.ms-excel",
         Format::Odt => "application/vnd.oasis.opendocument.text",
         Format::Ods => "application/vnd.oasis.opendocument.spreadsheet",
+        Format::Odp => "application/vnd.oasis.opendocument.presentation",
         Format::Pptx => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         Format::DocMark => "text/markdown",
     }

@@ -159,6 +159,12 @@ pub const SUPPORT: &[FormatSupport] = &[
         note: "Phase 4",
     },
     FormatSupport {
+        format: Format::Odp,
+        read: true,
+        write: false,
+        note: "Phase 18-B reads a deck into the same presentation IR a .pptx reads into: pages, frames, presentation:class as a placeholder type, master pages and presentation page layouts as the IR's master and layout, notes, comments, tables, pictures and embedded charts, with every construct the IR has no node for kept as a stub over its own markup; the writer and the preserved package are 18-D",
+    },
+    FormatSupport {
         format: Format::Pptx,
         read: true,
         write: true,
@@ -227,6 +233,6 @@ mod tests {
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), total);
-        assert_eq!(total, 8);
+        assert_eq!(total, 9);
     }
 }
