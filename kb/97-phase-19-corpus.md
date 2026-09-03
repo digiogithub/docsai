@@ -16,8 +16,16 @@ evaluation 19-C, the native degraded route 19-D, the refusal path 19-E.
 
 - `corpus/generate.py` — a new *Legacy `.ppt` fixtures* section: two recorded decks, two derived
   refusal fixtures, a `.pptx` source deck, and enough of [MS-CFB] to move a boundary inside an
-  existing compound file. `build_pptx` gained one additive keyword, `subdir`, so a package can land
-  outside `corpus/pptx`. `digest_tree` covers `ppt/`, and the five generators are in `GENERATORS`.
+  existing compound file, strip an optional property out of it and compact what that frees.
+  `build_pptx` gained one additive keyword, `subdir`, so a package can land outside `corpus/pptx`.
+  The five generators are in `GENERATORS`.
+- `corpus/generate.py:digest_tree` — **a defect fixed**: it walked corpus directories with
+  `iterdir()`, so any *subdirectory* was invisible to `--check` and a fixture inside one would have
+  been written by the generator and then checked by nothing. It walks with `rglob("*")` now, keyed
+  by the path relative to `corpus/`. It finds one more file — `docx/assets/_raw/raw-0001.xml`, the
+  hand-maintained raw-block sidecar, which the generator does not write, so that key is inert
+  rather than a new check. Nothing else moved: for a flat directory `rglob` yields exactly what
+  `iterdir` did, under exactly the same key.
 - `corpus/ppt/` — `basic-slides.ppt`, `mixed-media.ppt`, `mixed-media.source.pptx`,
   `truncated.ppt`, `encrypted.ppt`.
 - `corpus/README.md` — the section that says how each fixture came to exist, what `--check` does
@@ -75,12 +83,53 @@ Both costs are real and neither is hidden:
 
 - The recorded bytes are **not reviewable in a diff**. Written-down provenance is the compensation
   and it is weaker than the XML of a generated `.pptx`.
-- ~600 KB per deck, of which about **95 % is a thumbnail** LibreOffice embeds in
-  `\5SummaryInformation` (`PIDSI_THUMBNAIL`, a 588 580-byte `VT_CF` property). No command-line
-  option suppresses it — `GenerateThumbnail=false` fused into a fresh profile's
-  `registrymodifications.xcu` was tried and had no effect — and removing it would mean rewriting the
-  compound file, which is writing one. Total added: **2.4 MB** across four `.ppt` files, three of
-  which are near-copies that delta-compress against each other.
+- Nothing else. The size cost was real and has been paid off — see the next section.
+
+## The thumbnail, and why the fixtures are 23 KB rather than 608 KB
+
+As first recorded, each deck was ~600 KB of which about **95 % was a preview bitmap**: LibreOffice
+embeds a `PIDSI_THUMBNAIL` — property 17, `VT_CF`, 588 344 bytes — in `\5SummaryInformation`. That
+would have been ~2.3 MB of permanent weight in every clone, for bytes **no increment of this phase
+reads**: 19-B hands the file to LibreOffice, 19-D walks `TextCharsAtom`/`TextBytesAtom` and the
+`Pictures` stream, and neither goes near the summary stream.
+
+LibreOffice cannot be talked out of writing it. `Common/Save/Document/GenerateThumbnail` set to
+`false` — both in a hand-written profile and fused into one LibreOffice had already created —
+changed nothing: that setting governs the *ODF package* thumbnail, not the OLE2 property. So it is
+removed by surgery, in `_ppt_deck()`, in three steps:
+
+1. `_property_set_without_thumbnail` rebuilds the property set without property 17 — **rebuilt, not
+   blanked**: the property count and every offset are restated, so what comes out is well-formed at
+   its new size (588 628 → **276 bytes**). The property is optional in [MS-OSHARED] 2.3.3.2.1.
+2. `_cfb_shrink_stream` writes it back, freeing and zeroing the 1 150 sectors it no longer needs.
+   It pads the stream to the **mini stream cutoff**, and that is not fussiness: a 276-byte stream
+   left in the FAT would, per [MS-CFB], have to live in the mini stream instead, and a reader would
+   take its start sector as a *mini*-sector index and hand back the wrong bytes.
+3. `_cfb_compact` renumbers the sectors still in use into a dense run at the front and truncates.
+   Freeing alone would not have shrunk the file at all — the directory of these files lives in the
+   **last two sectors**, so the freed 1 150 would have stayed as a hole in the middle. The
+   compaction is a *permutation of an existing container*, not a new one: no allocation policy is
+   invented, the FAT keeps the number of sectors it already had, and every stream's bytes are the
+   bytes they were.
+
+**608 KB → 23 KB, and `corpus/ppt/` in total is 116 KB** (was 2.4 MB).
+
+What did **not** change, asserted in `_ppt_deck()` on every run: `PowerPoint Document`, `Pictures`,
+`Current User`, `\1CompObj`, `\1Ole` and `\5DocumentSummaryInformation` are byte for byte the
+streams LibreOffice wrote. That is what keeps these fixtures files this project did not author — the
+recorded constant is still LibreOffice's exact output, and every deviation from it is code you can
+read rather than a blob you cannot.
+
+Verified rather than argued:
+
+| Check | Result |
+|---|---|
+| `cfb::open` on all four fixtures | opens, 8 entries each, expected stream lengths |
+| `soffice --convert-to pptx basic-slides.ppt` | 2 slides, all five text runs |
+| `soffice --convert-to pptx mixed-media.ppt` | 3 slides, all six text runs, `ppt/media/image1.png` present |
+| `truncated.ppt`'s two dangerous properties | **unchanged** — they are offsets *inside* the `PowerPoint Document` stream, whose content the strip never touches |
+| `encrypted.ppt` | still exactly 4 bytes from its base, still `0xF3D1C4DF` |
+
 
 ## The fixtures
 
@@ -153,8 +202,8 @@ for spreadsheets and it should not be repeated:
 ## Verification
 
 `python3 corpus/generate.py --check` passes; the corpus went from 143 to 148 generated files (this
-increment's five), and to 165 counting the concurrent Phase 18 `.odp` work sharing the same working
-copy. `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+increment's five), to 165 counting the concurrent Phase 18 `.odp` work sharing the same working
+copy, and to 166 once `digest_tree` started seeing subdirectories. `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo fmt --all -- --check`, `python3 corpus/schema_gate.py` and
 `LD_LIBRARY_PATH=/usr/lib/libreoffice/program python3 corpus/render_gate.py --require-renderer` were
 run; the numbers are in the increment's report. Nothing in `corpus/pptx/` moved, so the 21 decks
@@ -167,10 +216,21 @@ still round-trip byte-identical and the schema gate still validates the same par
 - **The recorded constants are version-pinned to LibreOffice 24.2.7.2 in provenance only.** If a
   future refresh changes them, the `_assert_ppt` structural assertions are what will catch a
   silently different deck.
+- **The compaction is only ever applied to a file LibreOffice wrote.** `_cfb_compact` assumes a
+  512-byte sector, no DIFAT sector chain and at most 109 FAT sectors, and asserts all three. It is
+  not a general compound-file rewriter and should not be used as one.
 - **`corpus/ppt/mixed-media.source.pptx` is an ungated `.pptx`.** That is deliberate and stated, but
   it is a package no gate validates. If it ever needs to be, it should move to `corpus/pptx/` and
   take a golden, an `.expected.inspect.json` and a token-budget line with it.
-- **`corpus/generate.py` is now shared by two concurrent phases.** The `subdir` keyword on
-  `build_pptx` is the only shared surface this increment touched.
+- **`corpus/generate.py` is shared by two concurrent phases, and the shared working copy bit
+  once.** The `subdir` keyword on `build_pptx` is the only shared surface this increment's code
+  touched, but the *history* is tangled: 19-A landed as `a100024e`, and the thumbnail strip that
+  followed it was sitting in the shared working copy when the Phase 18 agent committed, so
+  `corpus/generate.py`, `corpus/README.md` and the four `corpus/ppt/*.ppt` files of that follow-up
+  are inside **`4e1db8b2` "feat(corpus): Phase 18 A"** rather than a commit of this phase's. The
+  tree is correct and every gate is green; the attribution is not. Untangling it means rewriting
+  another agent's commit while that agent is still working, and separating it by path is impossible
+  anyway because both phases edit the same two files. It is recorded here rather than silently
+  fixed or silently left.
 
 [[95-phase-19-plan]] · [[08-phase-5-legacy-doc]] · [[93-phase-17-close]]
