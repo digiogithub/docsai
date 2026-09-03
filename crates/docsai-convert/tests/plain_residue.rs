@@ -44,6 +44,26 @@ fn decks() -> Vec<PathBuf> {
     paths
 }
 
+fn corpus_odp() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/odp")
+}
+
+/// The `.odp` corpus, measured with the same probe and against the same
+/// numbers (18-C). It is kept a separate list rather than folded into
+/// [`decks`] on purpose: mixing the two corpora would let a change on one
+/// side be paid for by the other, and the budget of 14-G is a claim about
+/// `.pptx` that stays exactly as it was measured.
+fn odp_decks() -> Vec<PathBuf> {
+    let dir = corpus_odp();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("odp"))
+        .collect();
+    paths.sort();
+    paths
+}
+
 fn name(deck: &Path) -> String {
     deck.file_stem().unwrap().to_string_lossy().into_owned()
 }
@@ -52,8 +72,17 @@ fn name(deck: &Path) -> String {
 fn docmark(deck: &Path, fidelity: Fidelity) -> String {
     let file = std::fs::File::open(deck).unwrap_or_else(|e| panic!("{}: {e}", deck.display()));
     let mut assets = MemoryAssetStore::new();
-    let (document, _) = docsai_office::read_pptx(file, &mut assets)
-        .unwrap_or_else(|e| panic!("{}: {e}", deck.display()));
+    // The reader is chosen by the extension and nothing downstream is told
+    // which one ran: residue is a property of DocMark-P, not of the package
+    // the deck came out of (18-C).
+    let odp = deck.extension().and_then(|e| e.to_str()) == Some("odp");
+    let (document, _) = if odp {
+        docsai_odf::read_odp(file, &mut assets)
+            .unwrap_or_else(|e| panic!("{}: {e}", deck.display()))
+    } else {
+        docsai_office::read_pptx(file, &mut assets)
+            .unwrap_or_else(|e| panic!("{}: {e}", deck.display()))
+    };
     assert!(
         matches!(document, Document::Presentation(_)),
         "{} is not a deck",
@@ -65,7 +94,7 @@ fn docmark(deck: &Path, fidelity: Fidelity) -> String {
             Fidelity::Full => IdPolicy::Assign,
             _ => IdPolicy::Never,
         },
-        source_format: Format::Pptx,
+        source_format: if odp { Format::Odp } else { Format::Pptx },
         ..Options::default()
     };
     let (markdown, _) = docsai_docmark::serialize(&document, &assets, &options);
@@ -404,6 +433,39 @@ fn the_deck_corpus_stays_inside_its_residue_budget() {
     assert!(
         prose <= 15.0,
         "{prose:.1} % residue over the decks that are documents, budget 15.0 %\n{table}"
+    );
+}
+
+/// The degradation rule over the `.odp` corpus (18-C).
+///
+/// The *kind* of syntax that leaks, not the ratio: DocMark-P does not know
+/// which package a deck came from, so an `.odp` may show a viewer exactly what
+/// a `.pptx` may show it and nothing more. The ratio deliberately stays a
+/// `.pptx` measurement — see [`the_deck_corpus_stays_inside_its_residue_budget`]
+/// and the note under it.
+#[test]
+fn an_odp_deck_leaks_what_a_pptx_deck_leaks_and_nothing_else() {
+    let decks = odp_decks();
+    assert!(decks.len() >= 17, "only {} odp decks found", decks.len());
+    let mut offenders = Vec::new();
+    for deck in &decks {
+        // `plain`: nothing at all.
+        let measured = measure(&docmark(deck, Fidelity::Plain));
+        if measured.residue() > 0 {
+            offenders.push(format!("{} at plain:\n{}", name(deck), measured.show()));
+        }
+        // `standard`: the slide marker and the containers, and nothing else.
+        for span in measure(&docmark(deck, Fidelity::Standard)).spans() {
+            if span.starts_with(":::") || is_slide_marker(span) {
+                continue;
+            }
+            offenders.push(format!("{} at standard: {span}", name(deck)));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "syntax an `.odp` deck is not allowed to show:\n\n{}",
+        offenders.join("\n\n")
     );
 }
 

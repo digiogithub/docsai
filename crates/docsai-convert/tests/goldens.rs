@@ -63,6 +63,10 @@ fn read(path: &Path, assets: &mut MemoryAssetStore) -> (Document, ConversionRepo
             let (document, report) = docsai_odf::read_ods(file, assets).unwrap_or_else(fail!());
             (document, report, Format::Ods)
         }
+        "odp" => {
+            let (document, report) = docsai_odf::read_odp(file, assets).unwrap_or_else(fail!());
+            (document, report, Format::Odp)
+        }
         "pptx" | "pptm" => {
             let (document, report) = docsai_office::read_pptx(file, assets).unwrap_or_else(fail!());
             (document, report, Format::Pptx)
@@ -216,6 +220,107 @@ fn the_pptx_corpus_matches_its_goldens() {
     decks.sort();
     assert!(decks.len() >= 17, "only {} decks found", decks.len());
     assert_goldens(&decks);
+}
+
+/// Phase 18-C: the `.odp` corpus is pinned by the same DocMark-P a `.pptx`
+/// writes. The deck writer has no idea which package the deck came from, and
+/// that is the whole claim of this increment.
+#[test]
+fn the_odp_corpus_matches_its_goldens() {
+    let decks = documents("odp", "odp");
+    assert!(decks.len() >= 17, "only {} odp decks found", decks.len());
+    assert_goldens(&decks);
+}
+
+/// The claim of 18-C stated as a test: **the deck writer does not know which
+/// package the deck came from.**
+///
+/// `Options::source_format` reaches the front matter — a deck says
+/// `source-format: odp` because it is true — and it reaches nothing else. So
+/// serialising the *same* `.odp` twice, once claiming each format, must give
+/// the same body, byte for byte. A branch on the dialect anywhere below the
+/// front matter fails here.
+#[test]
+fn the_deck_body_does_not_depend_on_the_package_it_came_from() {
+    fn body(markdown: &str) -> &str {
+        markdown
+            .strip_prefix("---\n")
+            .and_then(|rest| rest.find("\n---\n").map(|end| &rest[end + 5..]))
+            .unwrap_or(markdown)
+    }
+
+    for deck in documents("odp", "odp") {
+        let mut as_odp = MemoryAssetStore::new();
+        let (document, _, _) = read(&deck, &mut as_odp);
+        let base = Options {
+            fidelity: Fidelity::Full,
+            ids: docsai_model::addressing::IdPolicy::Assign,
+            assets_dir: "assets".into(),
+            raw: docsai_docmark::RawPolicy::Sidecar,
+            ..Options::default()
+        };
+        let (odp, _) = docsai_docmark::serialize(
+            &document,
+            &as_odp,
+            &Options {
+                source_format: Format::Odp,
+                ..base.clone()
+            },
+        );
+        let (pptx, _) = docsai_docmark::serialize(
+            &document,
+            &as_odp,
+            &Options {
+                source_format: Format::Pptx,
+                ..base
+            },
+        );
+        assert_eq!(
+            body(&odp),
+            body(&pptx),
+            "{}: the body changed with the source format",
+            deck.display()
+        );
+    }
+}
+
+/// A dropped raw-block names the dialect it actually came from (18-C).
+///
+/// The writer reads it off the fragment rather than off the source format,
+/// which is the only way the statement can be true for both packages — and a
+/// warning that named `pml` for ODF markup would be a false warning, which
+/// `AGENTS.md` §7 rule 3 forbids exactly as firmly as a missing one.
+#[test]
+fn a_dropped_raw_block_names_its_own_dialect() {
+    for (deck, expected) in [
+        (corpus_root().join("odp/raw-preserved.odp"), "odf"),
+        (corpus_root().join("pptx/raw-preserved.pptx"), "ooxml"),
+    ] {
+        let (_, report, _, _) = convert(&deck, Fidelity::Full);
+        let dialects: Vec<&str> = report
+            .warnings
+            .iter()
+            .filter_map(|w| match w {
+                docsai_model::Warning::RawBlockDropped { format, .. } => Some(format.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !dialects.is_empty(),
+            "{} no longer drops a slide-level raw fragment",
+            deck.display()
+        );
+        assert!(
+            dialects.iter().all(|d| *d == expected),
+            "{}: expected every dropped fragment to be {expected}, got {dialects:?}",
+            deck.display()
+        );
+    }
+}
+
+#[test]
+fn serialize_parse_is_identity_on_odp_goldens() {
+    assert_serialize_parse_identity(&documents("odp", "odp"));
 }
 
 #[test]

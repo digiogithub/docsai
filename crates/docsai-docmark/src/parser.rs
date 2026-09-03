@@ -1408,8 +1408,12 @@ fn try_parse_image(
         return Ok(None);
     }
     i += 1;
-    let (path, next) = read_link_dest(chars, i)?;
+    let (dest, next) = read_link_dest(chars, i)?;
     i = next;
+    // CommonMark's own title slot, `![alt](path "title")`. The levels that do
+    // not write back put the title there rather than in an attribute block, so
+    // a reader that only knew `title=` would lose it (spec §4.1).
+    let (path, native_title) = split_link_title(&dest);
     let mut attrs = Attrs::new();
     if i < chars.len() && chars[i] == '{' {
         if let Some(end) = find_closing_brace(chars, i + 1) {
@@ -1418,7 +1422,12 @@ fn try_parse_image(
             i = end + 1;
         }
     }
-    let img = ctx.load_image(&path, attrs, alt)?;
+    let mut img = ctx.load_image(&path, attrs, alt)?;
+    // The attribute block wins: at `full` it is where the title is written,
+    // and a document carrying both said the same thing twice.
+    if img.title.is_none() {
+        img.title = native_title;
+    }
     Ok(Some((img, i)))
 }
 
@@ -1582,6 +1591,41 @@ fn read_link_dest(chars: &[char], mut i: usize) -> Result<(String, usize), Parse
         i += 1; // )
     }
     Ok((path, i))
+}
+
+/// Splits a CommonMark link destination into the destination and its optional
+/// title: `path "title"` → `("path", Some("title"))`.
+///
+/// A quote that is not preceded by whitespace is part of the path — a file
+/// name may contain one — and an unterminated quote is not a title either.
+fn split_link_title(dest: &str) -> (String, Option<String>) {
+    let trimmed = dest.trim_end();
+    if !trimmed.ends_with('"') || trimmed.len() < 2 {
+        return (dest.to_string(), None);
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
+    // Walk back over the quoted run to its opening quote, honouring escapes.
+    let mut start = None;
+    let mut index = chars.len() - 1;
+    while index > 0 {
+        index -= 1;
+        if chars[index] == '"' && (index == 0 || chars[index - 1] != '\\') {
+            start = Some(index);
+            break;
+        }
+    }
+    let Some(start) = start.filter(|s| *s > 0) else {
+        return (dest.to_string(), None);
+    };
+    if !chars[start - 1].is_whitespace() {
+        return (dest.to_string(), None);
+    }
+    let title: String = chars[start + 1..chars.len() - 1].iter().collect();
+    let path: String = chars[..start].iter().collect();
+    (
+        path.trim_end().to_string(),
+        Some(title.replace("\\\"", "\"").replace("\\\\", "\\")),
+    )
 }
 
 fn find_closing_bracket(chars: &[char], mut i: usize) -> Option<usize> {

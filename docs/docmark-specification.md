@@ -307,6 +307,11 @@ Floating image with position and text wrap:
 Rules:
 - Alternative text (accessibility, `wp:docPr @descr` / `svg:desc`) goes in the standard Markdown
   alt field `![…]`, not in an attribute — so every viewer shows it.
+- **`title` follows the level.** At `full` and `agent` it is the `title=` attribute above, beside
+  everything else the writer has to put back. At `standard` and `plain` it is written in
+  CommonMark's own title slot, `![alt](path "title")`: the title is text somebody authored, an
+  attribute block at those levels is syntax a plain viewer prints, and dropping it would be a
+  silent loss. A parser accepts both and the attribute wins if a document carries both.
 - File name: `img-<hash8>.<ext>` (content hash → stable across conversions and with
   deduplication: N appearances of the same bitmap share a file, each with its own geometry
   attributes).
@@ -768,6 +773,18 @@ still a box the author placed.
 | `pos=` / `size=` | `"x,y"` and `"w,h"` in the units of rule 7 | `full`, `agent` |
 | `rotation=` / `flip=` | `a:xfrm@rot` in degrees, and `h` / `v` / `hv` | `full`, `agent` |
 | `raw=` | The raw-block (§7) holding the original markup | `full`, `agent` |
+
+`type=` carries the PresentationML placeholder keyword verbatim — `title`, `ctrTitle`, `subTitle`,
+`body`, `obj`, `chart`, `tbl`, `clipArt`, `dgm`, `media`, `pic`, `sldNum`, `dt`, `ftr`, `hdr`, and
+`sldImg` for the slide thumbnail on a notes page. **A dialect that names a placeholder role
+PresentationML does not name writes its own keyword there**, because the alternative is folding a
+distinction the file states into the nearest neighbour and losing it on every read. ODF's
+`presentation:class` is the case in hand: eleven of its values are the keywords above, `page` *is*
+`sldImg` and is written as one, and `text` — the second body class PresentationML has no word for —
+is written `type=text`. Such a placeholder is never the implicit heading or the implicit body of
+rule 1: it is neither a title type nor a body type, so it always writes its own `.ph` container and
+a round trip cannot quietly turn it into something else. A hand-written deck may say `type=text`,
+and it means exactly what an `.odp` means by it.
 
 Two consequences of rule 6 are worth stating, because both are losses and both are warned. At
 `standard` a stub keeps its container and loses the `raw=` reference: the reader still knows the

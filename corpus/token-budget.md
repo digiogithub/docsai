@@ -21,11 +21,11 @@ An update that inflates the total by more than 5 % is refused unless
 | `docx/headers-footers.docx` | 465 | 167 | 239 | 11 |
 | `docx/images-duplicated.docx` | 569 | 189 | 313 | 61 |
 | `docx/images-floating.docx` | 642 | 217 | 386 | 89 |
-| `docx/images-inline.docx` | 544 | 205 | 288 | 72 |
+| `docx/images-inline.docx` | 544 | 205 | 288 | 76 |
 | `docx/images-transformed.docx` | 621 | 196 | 365 | 68 |
-| `docx/images-vml.docx` | 480 | 141 | 240 | 27 |
+| `docx/images-vml.docx` | 480 | 141 | 240 | 31 |
 | `docx/long-report.docx` | 9083 | 8744 | 8698 | 8545 |
-| `docx/nested-lists.docx` | 701 | 238 | 272 | 77 |
+| `docx/nested-lists.docx` | 701 | 238 | 257 | 77 |
 | `docx/redundant-formatting.docx` | 528 | 156 | 206 | 35 |
 | `docx/repeated-formatting.docx` | 616 | 223 | 390 | 129 |
 | `docx/table-merged.docx` | 496 | 194 | 260 | 63 |
@@ -41,7 +41,7 @@ An update that inflates the total by more than 5 % is refused unless
 | `odt/images-floating.odt` | 564 | 173 | 267 | 54 |
 | `odt/images-inline.odt` | 460 | 126 | 171 | 16 |
 | `odt/images-transformed.odt` | 477 | 125 | 188 | 15 |
-| `odt/nested-lists.odt` | 720 | 171 | 195 | 37 |
+| `odt/nested-lists.odt` | 720 | 171 | 179 | 37 |
 | `odt/table-merged.odt` | 516 | 185 | 231 | 60 |
 | `odt/table-simple.odt` | 472 | 142 | 187 | 33 |
 | `xlsx/formulas-basic.xlsx` | 351 | 277 | 221 | 97 |
@@ -50,4 +50,4 @@ An update that inflates the total by more than 5 % is refused unless
 | `xlsx/merged-cells.xlsx` | 300 | 220 | 189 | 71 |
 | `xlsx/number-formats.xlsx` | 344 | 216 | 201 | 94 |
 | `xlsx/values-types.xlsx` | 335 | 234 | 219 | 114 |
-| **total** | **26624** | **16043** | **17433** | **10722** |
+| **total** | **26624** | **16043** | **17402** | **10730** |

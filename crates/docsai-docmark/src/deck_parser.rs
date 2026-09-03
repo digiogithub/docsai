@@ -30,7 +30,7 @@ use docsai_model::presentation::{
 use docsai_model::report::{ConversionReport, Warning};
 use docsai_model::text::Block;
 use docsai_model::units::{Length, Point, Size};
-use docsai_model::{Document, Format};
+use docsai_model::Document;
 
 use crate::attrs::Attrs;
 use crate::error::ParseError;
@@ -49,7 +49,7 @@ use crate::parser::{
 /// — it has no slides to find, only headings — which is why nothing here tries
 /// to guess one from `##` alone.
 pub fn looks_like_deck(fm: &FrontMatter, body: &str) -> bool {
-    if fm.source_format == Format::Pptx {
+    if fm.source_format.is_presentation() {
         return true;
     }
     if !fm.layouts.is_empty() || fm.skeleton.is_some() {

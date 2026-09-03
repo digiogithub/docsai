@@ -93,6 +93,12 @@ impl<'a> Writer<'a> {
         self.options.fidelity == Fidelity::Plain
     }
 
+    /// Whether this level writes the document back (spec §6): the one that
+    /// decides whether an attribute exists to carry what only a writer needs.
+    fn addresses(&self) -> bool {
+        self.options.fidelity.addresses()
+    }
+
     /// Whether appearance reaches the output. `agent` says no: it keeps the
     /// text, the structure and the addresses, and drops every measurement.
     fn formatting(&self) -> bool {
@@ -712,7 +718,11 @@ impl<'a> Writer<'a> {
             let names_definition = index == 0 && !self.plain();
             let mut pairs: Vec<(&str, String)> = Vec::new();
             if names_definition {
-                if let Some(def) = list.def.as_ref() {
+                // `list=` names the numbering definition the writer puts back;
+                // it says nothing a reader can use, so it belongs to the
+                // levels that write back and to no others (spec §6, and
+                // §11.2 rule 6 for a deck, where a viewer would print it).
+                if let Some(def) = list.def.as_ref().filter(|_| self.addresses()) {
                     pairs.push(("list", def.as_str().to_string()));
                 }
                 if let Some(id) = list_id.take() {
@@ -1226,8 +1236,19 @@ impl<'a> Writer<'a> {
                 .unwrap_or_else(|| format!("{}/missing", self.options.assets_dir)),
         };
 
+        // The image title is authored text — a tooltip somebody wrote — and
+        // CommonMark has a slot of its own for it. The levels that write back
+        // carry it in the attribute block with everything else they have to
+        // put back; the levels that do not use the native slot, because an
+        // attribute block is residue a plain viewer prints and dropping the
+        // title would be a silent loss (`AGENTS.md` §7 rule 3).
+        let native_title = match image.title.as_deref().filter(|_| !self.addresses()) {
+            Some(title) => format!(" \"{}\"", title.replace('\\', "\\\\").replace('"', "\\\"")),
+            None => String::new(),
+        };
+
         if self.plain() {
-            return format!("![{alt}]({path})");
+            return format!("![{alt}]({path}{native_title})");
         }
 
         let geometry = &image.geometry;
@@ -1236,9 +1257,14 @@ impl<'a> Writer<'a> {
             // An image is a leaf an agent can move, delete or re-caption, and
             // its geometry is exactly the part it cannot write. The address,
             // the alt text and the link survive; the EMUs do not.
-            attrs.set_opt("title", image.title.clone());
+            if self.addresses() {
+                attrs.set_opt("title", image.title.clone());
+            }
             attrs.set_opt("link", image.link.clone());
-            return format!("![{alt}]({path}){}", attrs.render_with(self.dict));
+            return format!(
+                "![{alt}]({path}{native_title}){}",
+                attrs.render_with(self.dict)
+            );
         }
 
         // `width`/`height` are mandatory except on two-cell sheet anchors,

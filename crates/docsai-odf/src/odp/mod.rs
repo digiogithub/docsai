@@ -238,7 +238,14 @@ pub(crate) fn read_package(
 ///   carries both — the very thing the reader is trying not to do. `Other`
 ///   keeps the keyword, which is what `Other` is for.
 /// * **`page`.** The slide thumbnail on a notes page. PresentationML spells it
-///   `sldImg`, which is not in [`PhType`] either, so there is nothing to map to.
+///   `sldImg`, which is not in [`PhType`] either — but it *is* a
+///   PresentationML keyword, and [`PhType::Other`] is documented as holding
+///   one. 18-C settled it there: DocMark-P writes the placeholder type into
+///   `type=`, and a construct both dialects name would otherwise reach the
+///   same field spelled two ways, which is precisely what normalising
+///   `chart:class` to the PresentationML plot name avoids. So `page` is read
+///   as `Other("sldImg")` and `text`, which PresentationML does not name at
+///   all, keeps its own word.
 fn ph_type_of(class: &str) -> PhType {
     match class {
         "title" => PhType::Title,
@@ -253,6 +260,7 @@ fn ph_type_of(class: &str) -> PhType {
         "footer" => PhType::Footer,
         "date-time" => PhType::DateTime,
         "page-number" => PhType::SlideNumber,
+        "page" => PhType::Other("sldImg".to_string()),
         other => PhType::Other(other.to_string()),
     }
 }
@@ -1368,6 +1376,20 @@ mod tests {
             .iter()
             .filter_map(|s| s.placeholder())
             .any(|ph| ph.ph_type == PhType::Other("text".into())));
+    }
+
+    /// The two classes PresentationML does not model, and the reason they are
+    /// spelled differently (18-C).
+    #[test]
+    fn the_two_unmodelled_classes_keep_the_word_the_dialects_share() {
+        // `text` has no PresentationML counterpart, so the ODF word is the
+        // only word there is.
+        assert_eq!(ph_type_of("text"), PhType::Other("text".into()));
+        // `page` does have one. DocMark-P writes `type=` for both dialects, so
+        // it is written the way both dialects can read it.
+        assert_eq!(ph_type_of("page"), PhType::Other("sldImg".into()));
+        // And what neither models is still kept verbatim.
+        assert_eq!(ph_type_of("handout"), PhType::Other("handout".into()));
     }
 
     #[test]

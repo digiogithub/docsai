@@ -142,7 +142,7 @@ fn write_slide(
         if implicit.contains(&i) {
             continue;
         }
-        write_shape(out, shape, writer, options, &location);
+        write_shape(out, deck, shape, writer, options, &location);
     }
 
     if let Some(notes) = &slide.notes {
@@ -155,11 +155,11 @@ fn write_slide(
         write_comment(out, comment, writer, options);
     }
 
-    let report = writer.report_mut();
     for raw in &slide.raw {
-        report.warn(Warning::RawBlockDropped {
+        let format = raw_dialect(deck, raw.as_str());
+        writer.report_mut().warn(Warning::RawBlockDropped {
             id: raw.as_str().to_string(),
-            format: "pml".into(),
+            format,
         });
     }
 
@@ -278,6 +278,7 @@ fn blockquote(body: &str) -> String {
 /// form of their own.
 fn write_shape(
     out: &mut String,
+    deck: &Presentation,
     shape: &Shape,
     writer: &mut Writer,
     options: &Options,
@@ -310,7 +311,7 @@ fn write_shape(
             return;
         }
         ShapeKind::Group(children) => {
-            write_group(out, shape, children, writer, options, location);
+            write_group(out, deck, shape, children, writer, options, location);
             return;
         }
         ShapeKind::Chart(chart) => {
@@ -421,9 +422,10 @@ fn write_shape(
         } else {
             // The stub stays — rule 8 keeps it at every level — but the bytes
             // it points at are not in this document.
+            let format = raw_dialect(deck, raw_id.as_str());
             writer.report_mut().warn(Warning::RawBlockDropped {
                 id: raw_id.as_str().to_string(),
-                format: "pml".into(),
+                format,
             });
         }
     }
@@ -668,6 +670,7 @@ fn write_table(
 /// Flattening it would lose the grouping silently, which rule 3 forbids.
 fn write_group(
     out: &mut String,
+    deck: &Presentation,
     shape: &Shape,
     children: &[Shape],
     writer: &mut Writer,
@@ -677,7 +680,7 @@ fn write_group(
     if options.fidelity == Fidelity::Plain {
         // No container, but the children still reach the reader in order.
         for child in children {
-            write_shape(out, child, writer, options, location);
+            write_shape(out, deck, child, writer, options, location);
         }
         return;
     }
@@ -695,7 +698,7 @@ fn write_group(
 
     let mut body = String::new();
     for child in children {
-        write_shape(&mut body, child, writer, options, location);
+        write_shape(&mut body, deck, child, writer, options, location);
     }
 
     let rendered = if body.trim().is_empty() {
@@ -726,6 +729,21 @@ fn push_block(out: &mut String, text: &str) {
     }
     out.push_str(text.trim_end_matches('\n'));
     out.push('\n');
+}
+
+/// The dialect a raw fragment came from, as its own `RawFragment` states it.
+///
+/// The deck writer does not know — and must not learn — which package a deck
+/// was read from: an `.odp` slide's animation subtree is `odf` and a `.pptx`
+/// one is `ooxml`, and the fragment is the only thing that can say so. A
+/// warning that named the wrong dialect would be a false warning, which
+/// `AGENTS.md` §7 rule 3 forbids exactly as firmly as a missing one.
+fn raw_dialect(deck: &Presentation, id: &str) -> String {
+    deck.raw
+        .iter()
+        .find(|fragment| fragment.id.as_str() == id)
+        .map(|fragment| fragment.format.clone())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn is_title(shape: &Shape) -> bool {

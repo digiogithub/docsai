@@ -72,12 +72,14 @@ Two of those blanks are carried defects rather than decisions:
 
 ## Golden files
 
-Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`, `pptx/`, and the
+Each corpus package (`docx/`, `xlsx/`, `odt/`, `ods/`, `pptx/`, `odp/`, and the
 degraded `doc/` fixtures) has its expected DocMark beside it as
-`<name>.expected.dmk.md` when a golden is maintained. The decks of `pptx/` also
-keep an `<name>.expected.inspect.json`: that one pins the IR seen from outside,
-the DocMark golden pins the text a person edits, and the two answer different
-questions. They are compared by the tests in
+`<name>.expected.dmk.md` when a golden is maintained. The decks of `pptx/` and
+`odp/` also keep an `<name>.expected.inspect.json`: that one pins the IR seen
+from outside, the DocMark golden pins the text a person edits, and the two
+answer different questions. The two deck corpora are pinned by the **same**
+writer — a `.odp` and a `.pptx` differ in their front matter and nowhere else
+in the body — which is what `goldens.rs` asserts directly. They are compared by the tests in
 `crates/docsai-convert/tests/goldens.rs` (OOXML/ODF) and
 `crates/docsai-convert/tests/doc_phase5.rs` (legacy `.doc`). To update OOXML/ODF
 goldens:
