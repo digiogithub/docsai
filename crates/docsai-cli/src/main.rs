@@ -225,6 +225,34 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Apply a closed set of operations to a document, all-or-nothing.
+    ///
+    /// The same function the `apply_edits` MCP tool calls, through the same
+    /// door: `docsai_mcp::edit::apply_edits`. The operation set is normative
+    /// and lives in `docs/edit-operations.md`; a refusal is typed, names both
+    /// sides, and exits 2.
+    Edit {
+        /// Document to edit, in place unless `--output` is given.
+        input: PathBuf,
+        /// The operations, as JSON: a list, or the request object that
+        /// carries one (`{"ops":1,"operations":[…],"dry_run":false}`).
+        /// `@file.json` reads them from a file, and `@-` from stdin.
+        #[arg(long, value_name = "JSON")]
+        ops: String,
+        /// Write the result here and leave the input untouched.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Do everything but replace the file. The report is identical.
+        #[arg(long)]
+        dry_run: bool,
+        /// How much of the source survives: `full` or `agent`.
+        #[arg(long, default_value = "full")]
+        fidelity: String,
+        /// Print the report as JSON on stdout (it is JSON either way; this
+        /// only spaces it out).
+        #[arg(long)]
+        json: bool,
+    },
     /// Show which formats this build can read and write.
     Formats {
         /// Print the matrix as JSON.
@@ -285,6 +313,22 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
             Ok(EXIT_OK)
         }
         Command::Validate { input, json } => run_validate(input, *json),
+        Command::Edit {
+            input,
+            ops,
+            output,
+            dry_run,
+            fidelity,
+            json,
+        } => run_edit(
+            input,
+            ops,
+            output.as_deref(),
+            *dry_run,
+            fidelity,
+            *json,
+            cli.verbose,
+        ),
         Command::Formats { json } => {
             print_formats(*json);
             Ok(EXIT_OK)
@@ -483,6 +527,86 @@ fn run_validate(input: &Path, json: bool) -> anyhow::Result<u8> {
     } else {
         EXIT_WARNINGS
     })
+}
+
+/// Runs `docsai edit`: the CLI door onto the operation set.
+///
+/// Everything below the argument parsing is [`docsai_mcp::edit::apply_edits`],
+/// which is also the whole of the `apply_edits` MCP tool. 17-E's rule is that
+/// neither door carries logic the other lacks, and the way to keep a rule like
+/// that is to leave one place for the logic to be: this function reads a file
+/// or a flag into a `serde_json::Value` and prints what comes back.
+#[allow(clippy::too_many_arguments)]
+fn run_edit(
+    input: &Path,
+    ops: &str,
+    output: Option<&Path>,
+    dry_run: bool,
+    fidelity: &str,
+    json: bool,
+    verbose: bool,
+) -> anyhow::Result<u8> {
+    let operations = read_ops(ops)?;
+    let path = input.to_string_lossy().into_owned();
+    let output_path = output.map(|p| p.to_string_lossy().into_owned());
+    let call = docsai_mcp::EditCall {
+        path: &path,
+        operations: &operations,
+        output_path: output_path.as_deref(),
+        dry_run,
+        fidelity: Some(fidelity),
+    };
+    match docsai_mcp::apply_edits(&call, &docsai_mcp::McpConfig::for_cli()) {
+        Ok(report) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report.value)?);
+            } else {
+                println!("{}", report.text);
+            }
+            let warnings = report.value.get("warnings").and_then(|w| w.as_array());
+            let count = warnings.map(Vec::len).unwrap_or(0);
+            if count > 0 && verbose {
+                for warning in warnings.into_iter().flatten() {
+                    eprintln!("docsai: warning: {warning}");
+                }
+            }
+            Ok(if count > 0 { EXIT_WARNINGS } else { EXIT_OK })
+        }
+        Err(failure) => {
+            let output = failure.output();
+            if json {
+                eprintln!("{}", serde_json::to_string_pretty(&output.value)?);
+            } else {
+                eprintln!("docsai: {failure}");
+            }
+            Ok(match failure {
+                // A refused request is the caller's input being wrong, which is
+                // what exit 2 has meant since architecture §5.
+                docsai_mcp::EditFailure::Refused(_) => EXIT_INPUT,
+                docsai_mcp::EditFailure::Convert(error) => {
+                    exit_code_for(&anyhow::anyhow!("{error}"))
+                }
+            })
+        }
+    }
+}
+
+/// `--ops`: inline JSON, `@path` for a file, `@-` for stdin.
+///
+/// The `@` is what keeps a shell out of the way of a JSON document; without it
+/// a caller with a real batch has to quote a page of braces.
+fn read_ops(ops: &str) -> anyhow::Result<serde_json::Value> {
+    let text = match ops.strip_prefix('@') {
+        None => ops.to_string(),
+        Some("-") => {
+            let mut buffer = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin().lock(), &mut buffer)?;
+            buffer
+        }
+        Some(path) => std::fs::read_to_string(path)
+            .map_err(|source| anyhow::anyhow!("--ops @{path}: {source}"))?,
+    };
+    serde_json::from_str(&text).map_err(|source| anyhow::anyhow!("--ops is not JSON: {source}"))
 }
 
 fn run_tokens(

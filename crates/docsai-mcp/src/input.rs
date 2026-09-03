@@ -153,7 +153,7 @@ pub struct IncomingAsset {
     pub content_type: Option<String>,
 }
 
-fn enforce_path_readable(path: &Path, config: &McpConfig) -> Result<(), ConvertError> {
+pub(crate) fn enforce_path_readable(path: &Path, config: &McpConfig) -> Result<(), ConvertError> {
     if path.as_os_str().is_empty() {
         return Err(ConvertError::Invalid("path is empty".into()));
     }

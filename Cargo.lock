@@ -426,8 +426,10 @@ dependencies = [
  "docsai-docmark",
  "docsai-mcp",
  "docsai-model",
+ "rmcp",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

@@ -222,6 +222,31 @@ pub struct RenderSlidesArgs {
     pub dpi: Option<u32>,
 }
 
+/// Arguments for `apply_edits`.
+///
+/// Written for size from the first line (17-A §13). `operations` is published
+/// as an array of anything rather than a schema of ten tagged variants: the
+/// full JSON Schema for [`docsai_convert::edit::Operation`] is over a thousand
+/// tokens, every session would pay it in `tools/list`, and the prose below says
+/// the same thing in a fortieth of them. The shapes are still checked — by
+/// [`crate::edit::parse_request`], which refuses an unknown field or a
+/// mistyped one by name, which a schema could only do at the client.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct ApplyEditsArgs {
+    pub path: String,
+    /// In order, all-or-nothing. `{op, target, …}`; target is an id (`n7`) or an index path (`doc/3`, `n7/2`), never a selector. Ops: replace_text+text, set_props+props, insert_after/insert_before+content (DocMark), delete, move+after|before, duplicate_slide, set_cell+cell,value, set_notes+content, replace_image+path|content_base64,filename,alt. Each also takes if_match (an etag).
+    pub operations: Vec<Value>,
+    /// Write here instead of replacing `path`.
+    #[serde(default)]
+    pub output_path: Option<String>,
+    /// All but the file replacement; same report.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
+    /// `full` (default) or `agent`.
+    #[serde(default)]
+    pub fidelity: Option<String>,
+}
+
 /// Arguments for `validate_docmark`.
 ///
 /// Two fields, and no more: the schema of every tool is in the preamble every

@@ -10,7 +10,10 @@ to make a test pass.
 Implementation began with 17-B (target resolution and the etag precondition,
 [`kb/87-phase-17-etags.md`](../kb/87-phase-17-etags.md)) and every operation applies as of 17-C
 and 17-D ([`kb/89-phase-17-transaction.md`](../kb/89-phase-17-transaction.md)), which added the
-transaction, `dry_run` and the change report. What is left is the doors (17-E).
+transaction, `dry_run` and the change report. **Both doors are open as of 17-E**
+([`kb/90-phase-17-doors.md`](../kb/90-phase-17-doors.md)): `docsai edit <in> --ops <json>` and the
+`apply_edits` MCP tool, over one function, with the equality asserted in
+`crates/docsai-cli/tests/two_doors.rs` rather than intended.
 Phase 17-A was the specification half of task 1 on purpose — the
 same discipline that produced §11.3 before a line of comment code, and that let Phase 14 write a
 parser that worked on the first run. The increments that implement it are 17-B (etags and the
@@ -547,10 +550,22 @@ that does not creates a `Cell` with neither. Clearing removes the entry.
 **A formula clears the cached value.** A spreadsheet part stores both the formula and the number
 it last evaluated to; writing a new formula over an old cached value would display a number that
 is simply wrong until something recalculates. So the cached value is cleared, and the workbook is
-asked to recalculate on load. Whether the writers can state that (`fullCalcOnLoad` in xlsx, the
-ODF equivalent) is an implementation question 17-E must answer; if a writer cannot, the operation
-emits `Warning::Degraded` naming the cell and saying the value will read as blank until the sheet
-recalculates. It does not invent a number.
+asked to recalculate on load. **17-E settled how, and the answer is that both writers can, so
+there is no warning** ([`kb/90-phase-17-doors.md`](../kb/90-phase-17-doors.md)):
+
+- **xlsx.** `xl/workbook.xml` gains `<calcPr calcId="0" fullCalcOnLoad="1"/>` — ECMA-376's own way
+  to ask the application to recalculate before it displays anything. It is written **only** when
+  the workbook actually contains a formula cell with no cached value, because forcing a
+  recalculation of a workbook that already carries every cached value would change values nobody
+  asked to change, `NOW()` first among them.
+- **ods.** No flag exists in ODF and none is needed. ODF keeps the cached result in
+  `office:value`, so a `table:formula` cell written without one has nothing to display and the
+  application computes it. Measured, not assumed: LibreOffice Calc returns `300` for a cell
+  written as `table:formula="of:=[.A1]*[.A2]"` with no `office:value` at all.
+
+The operation still does not invent a number, and it no longer emits a `Warning::Degraded` for a
+condition both writers now handle — a warning that survives the reason for it is a false warning
+(§0.5).
 
 **Refusals.** `WrongKind` for a target that is not a sheet — a paragraph, most obviously.
 `NotApplicableToClass` when the document is not a workbook. `CoveredCell` when the address falls
@@ -685,6 +700,7 @@ mismatch. The variants version 1 defines:
 | `UnsupportedOpsVersion { requested, speaks }` | the request's `ops` field asks for a version this server does not speak. |
 | `UnknownField { op, field, known }` | a key inside an operation that version 1 does not define, including an unknown `set_props` property. |
 | `MissingField { op, field }` | a required key absent, or the `after`/`before` pair of `move` given zero or two ways. |
+| `MalformedField { op, field, reason }` | a key version 1 *does* define, holding a value of a shape it does not: `{"text": 5}`. Added in 17-E, when the first door turned the set into a JSON wire; §1.1's «a refusal made more specific» keeps the version at 1, because before the variant existed the case refused as an untyped deserialization error. |
 | `MalformedTarget { target, reason }` | a target that is not §5.1's grammar. |
 | `UnknownTarget { target }` | no such id, or an index path that ran off the end of a sequence; the message names the segment that failed. |
 | `WrongKind { op, target, got, takes }` | the target resolves but its kind is not one the operation takes. |
@@ -852,8 +868,11 @@ Each names the increment that owns it.
 
 - ~~**The scope of an etag** — node, or node and subtree.~~ Decided in **17-B**: node *and*
   subtree, §7.
-- **Whether a writer can request recalculation** after `set_cell` writes a formula, and the
-  warning if it cannot. **17-E**, §6.7.
+- ~~**Whether a writer can request recalculation** after `set_cell` writes a formula, and the
+  warning if it cannot.~~ Decided in **17-E**: both can, so there is no warning. xlsx writes
+  `calcPr/@fullCalcOnLoad` when and only when a formula cell has no cached value; ods needs no
+  flag, because an ODF formula cell without `office:value` is already a request to compute it,
+  measured against LibreOffice Calc. §6.7.
 - ~~**The full response shape**, of which §5.6 fixes only the id-bearing part.~~ Decided in
   **17-D**: §5.6's four lists and nothing else. `changed` names **the target in canonical form**,
   which for a node that carries an id is that id — and for a paragraph of ordinary prose, which
@@ -865,9 +884,14 @@ Each names the increment that owns it.
   content, which the caller wrote, and not a textual diff, whose size is a function of the
   document rather than of the request. Measured: a two-operation batch's report is **31 tokens**
   (`crates/docsai-convert/tests/edit_transaction.rs::the_report_for_a_realistic_batch_is_small_enough_to_be_free`).
-- **The `apply_edits` tool schema**, written for size from the first line: 16-G spent the
+- ~~**The `apply_edits` tool schema**, written for size from the first line: 16-G spent the
   wire-cost gate's 5 % inflation allowance once already, and a new tool costs preamble tokens
-  before it costs anything else. **17-E**.
+  before it costs anything else.~~ Decided in **17-E**: `operations` is published as an array of
+  anything and the ten shapes are one line of prose, because the derived schema for the tagged
+  enum is over a thousand tokens and every session would pay it. Measured: **249 tokens** on the
+  session preamble, and the wire-cost suite moved 5 355 → 5 616 tokens, **+4.9 %**, inside the
+  gate's 5 % allowance and without the hatch (`crates/docsai-mcp/tests/goldens/wire-cost.md`).
+  §10.
 - **Selectors as targets**, refused in §5.2 against a literal reading of plan task 2. If the owner
   reads the plan as requiring them, it is a version 2 decision and not a patch. **17-H**.
 - **«Four document classes»**, read in §2 as text / workbook / presentation / docmark. **17-H**.

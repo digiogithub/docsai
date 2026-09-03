@@ -152,7 +152,22 @@ fn build_package(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
     );
 
-    package.insert(WORKBOOK_PART, workbook_xml(book, &sheet_parts).into_bytes());
+    // 17-E, `docs/edit-operations.md` §6.7: a formula cell with no cached value
+    // has nothing to display until something evaluates it, and `fullCalcOnLoad`
+    // is how ECMA-376 asks the application to. It is written **only** when such
+    // a cell exists, because forcing a recalculation of a workbook that already
+    // carries every cached value would change values nobody asked to change —
+    // a volatile `NOW()` most obviously.
+    let recalc = book.sheets.iter().any(|sheet| {
+        sheet
+            .cells
+            .values()
+            .any(|cell| cell.formula.is_some() && matches!(cell.value, CellValue::Empty))
+    });
+    package.insert(
+        WORKBOOK_PART,
+        workbook_xml(book, &sheet_parts, recalc).into_bytes(),
+    );
     content_types.override_part(
         "/xl/workbook.xml",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
@@ -532,7 +547,7 @@ fn cell_anchor_xml(tag: &str, a: &docsai_model::image::CellAnchor) -> String {
     )
 }
 
-fn workbook_xml(book: &Workbook, sheets: &[(String, String, bool)]) -> String {
+fn workbook_xml(book: &Workbook, sheets: &[(String, String, bool)], recalc: bool) -> String {
     let mut out = String::new();
     out.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     out.push_str(&format!(r#"<workbook xmlns="{NS_MAIN}" xmlns:r="{NS_R}">"#));
@@ -564,6 +579,10 @@ fn workbook_xml(book: &Workbook, sheets: &[(String, String, bool)]) -> String {
             out.push_str("</definedName>");
         }
         out.push_str("</definedNames>");
+    }
+    // CT_Workbook's sequence puts `calcPr` after `definedNames`.
+    if recalc {
+        out.push_str(r#"<calcPr calcId="0" fullCalcOnLoad="1"/>"#);
     }
     out.push_str("</workbook>");
     out

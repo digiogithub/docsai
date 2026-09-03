@@ -17,12 +17,15 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
+use serde_json::Value;
 
 use crate::config::McpConfig;
+use crate::edit::{EditCall, EditFailure};
 use crate::schema::slim;
 use crate::tools::{
-    self, ConvertFromMarkdownArgs, ConvertToMarkdownArgs, DocumentArgs, OutlineDocumentArgs,
-    ReadSelectionArgs, RenderSlidesArgs, SearchDocumentArgs, ToolOutput, ValidateDocmarkArgs,
+    self, ApplyEditsArgs, ConvertFromMarkdownArgs, ConvertToMarkdownArgs, DocumentArgs,
+    OutlineDocumentArgs, ReadSelectionArgs, RenderSlidesArgs, SearchDocumentArgs, ToolOutput,
+    ValidateDocmarkArgs,
 };
 
 /// The docsai MCP server (architecture §6).
@@ -163,6 +166,31 @@ impl DocsaiServer {
     }
 
     #[tool(
+        name = "apply_edits",
+        description = "Edit a document in place, all-or-nothing. Returns created ids and each changed node's new etag: no confirmation read needed."
+    )]
+    async fn apply_edits(
+        &self,
+        Parameters(args): Parameters<ApplyEditsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let config = Arc::clone(&self.config);
+        self.run_edit(move || {
+            let operations = Value::Array(args.operations.clone());
+            crate::edit::apply_edits(
+                &EditCall {
+                    path: &args.path,
+                    operations: &operations,
+                    output_path: args.output_path.as_deref(),
+                    dry_run: args.dry_run.unwrap_or(false),
+                    fidelity: args.fidelity.as_deref(),
+                },
+                &config,
+            )
+        })
+        .await
+    }
+
+    #[tool(
         name = "read_selection",
         description = "Part of a document as self-contained DocMark: the exact bytes it would write for those nodes, plus the front matter to write them back (next-id, partial, per-node etag). Selectors: s4, s7-s9, #n7, type:heading, text:foo."
     )]
@@ -200,6 +228,50 @@ impl DocsaiServer {
         match result {
             Ok(Ok(output)) => Ok(self.result(output)),
             Ok(Err(error)) => Ok(convert_error_result(error)),
+            Err(join_err) => Err(McpError::internal_error(
+                format!("tool task failed: {join_err}"),
+                None,
+            )),
+        }
+    }
+
+    /// The edit door, whose failures are not `ConvertError`s.
+    ///
+    /// A refusal (§8) crosses the wire as a **typed object**, not a sentence:
+    /// the tool result is an error result, and its one text block is the
+    /// refusal's JSON — `{"index":0,"op":"replace_text","refusal":"StaleEtag",
+    /// "target":"n7","expected":…,"actual":…,"message":…}`. A client that reads
+    /// only the message still gets a sentence; one that wants the two etags
+    /// does not have to parse English for them.
+    async fn run_edit<F>(&self, work: F) -> Result<CallToolResult, McpError>
+    where
+        F: FnOnce() -> Result<ToolOutput, EditFailure> + Send + 'static,
+    {
+        let timeout = self.config.timeout;
+        let join = tokio::task::spawn_blocking(work);
+        let result = if let Some(duration) = timeout {
+            match tokio::time::timeout(duration, join).await {
+                Ok(joined) => joined,
+                Err(_) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                        "tool timed out after {}s (DOCSAI_MCP_TIMEOUT_SECS)",
+                        duration.as_secs()
+                    ))]));
+                }
+            }
+        } else {
+            join.await
+        };
+        match result {
+            Ok(Ok(output)) => Ok(self.result(output)),
+            Ok(Err(failure)) => {
+                let output = failure.output();
+                let mut result = CallToolResult::error(vec![ContentBlock::text(output.text)]);
+                if self.config.structured {
+                    result.structured_content = Some(output.value);
+                }
+                Ok(result)
+            }
             Err(join_err) => Err(McpError::internal_error(
                 format!("tool task failed: {join_err}"),
                 None,
@@ -270,7 +342,7 @@ impl ServerHandler for DocsaiServer {
                  part as self-contained DocMark. The pictures a document embeds default to \
                  include_images=refs (names and sizes, no bytes); a picture of a whole slide \
                  is a different thing and comes from render_slides. Also: validate_docmark, \
-                 inspect_document, list_supported_formats. Prefer path mode on local machines; use \
+                 inspect_document, list_supported_formats, apply_edits. Prefer path mode on local machines; use \
                  content_base64 + filename when the client cannot share a filesystem path. \
                  Logs always go to stderr; stdout is reserved for MCP JSON-RPC.",
             )

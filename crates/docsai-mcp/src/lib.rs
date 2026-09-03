@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod config;
+pub mod edit;
 mod images;
 mod input;
 mod schema;
@@ -19,6 +20,7 @@ pub use config::{
     McpConfig, DEFAULT_MAX_INLINE_TOKENS, DEFAULT_MAX_INPUT_BYTES, DEFAULT_TIMEOUT_SECS,
     ENV_CACHE_BYTES, ENV_MAX_INLINE_TOKENS, ENV_MAX_INPUT_BYTES, ENV_STRUCTURED, ENV_TIMEOUT_SECS,
 };
+pub use edit::{apply_edits, EditCall, EditFailure};
 pub use images::ImagePolicy;
 pub use server::DocsaiServer;
 pub use tools::{validation_output, ToolOutput};
@@ -43,6 +45,7 @@ pub const TOOLS: &[&str] = &[
     "read_selection",
     "render_slides",
     "validate_docmark",
+    "apply_edits",
 ];
 
 /// Runs the MCP server on stdio until the client disconnects.
@@ -115,7 +118,7 @@ mod tests {
 
     #[test]
     fn the_tool_set_is_the_converters_the_primitives_and_the_renderer() {
-        assert_eq!(TOOLS.len(), 10);
+        assert_eq!(TOOLS.len(), 11);
         for expected in [
             "convert_to_markdown",
             "convert_from_markdown",
@@ -127,6 +130,7 @@ mod tests {
             "read_selection",
             "render_slides",
             "validate_docmark",
+            "apply_edits",
         ] {
             assert!(TOOLS.contains(&expected), "missing {expected}");
         }

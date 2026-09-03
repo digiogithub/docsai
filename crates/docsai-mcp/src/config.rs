@@ -52,6 +52,27 @@ pub struct McpConfig {
     pub cache: Option<Arc<ConvertCache>>,
 }
 
+impl McpConfig {
+    /// The settings a one-shot CLI command runs under.
+    ///
+    /// Not `from_env`: `DOCSAI_MCP_MAX_INPUT_BYTES` and
+    /// `DOCSAI_MCP_TIMEOUT_SECS` bound what a *server* will accept from a
+    /// client it does not trust, and applying them to `docsai edit` would make
+    /// the CLI refuse a large local file that `docsai convert` reads happily —
+    /// a difference between the two doors that has nothing to do with either's
+    /// logic. The cache is off for the reason `run_convert` gives: one shot
+    /// never reads the same document twice.
+    pub fn for_cli() -> Self {
+        McpConfig {
+            max_input_bytes: u64::MAX,
+            timeout: None,
+            structured: false,
+            max_inline_tokens: None,
+            cache: None,
+        }
+    }
+}
+
 impl Default for McpConfig {
     fn default() -> Self {
         Self::from_env()

@@ -117,6 +117,9 @@ docsai read report.docx --select s7-s9             # just those nodes, as DocMar
 docsai read report.docx --select '#n7,text:riesgo' # by id, or by what it says
 docsai search report.docx "riesgo"                 # where it says that, with context
 docsai search report.docx "riesgo" --json --limit 5 # machine-readable, capped
+docsai edit deck.pptx --ops @ops.json              # apply the operation set, all-or-nothing
+docsai edit deck.pptx --ops @ops.json --dry-run    # same report, the file untouched
+docsai edit deck.pptx --ops @ops.json -o out.pptx  # write elsewhere, leave the input alone
 docsai tokens report.docx                          # what the document costs an LLM
 docsai tokens report.docx --fidelity plain --json  # per-node costs, machine-readable
 docsai formats                                      # support matrix for this binary

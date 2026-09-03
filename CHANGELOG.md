@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every formula in every `.ods` this project wrote read as `Err:510`.** The ODS writer emits
+  formulas as `table:formula="of:=…"` but never declared the `of:` (OpenFormula) namespace on
+  `office:document-content`, and an undeclared prefix inside that attribute is not a formula at all.
+  A plain round trip of `corpus/ods/formulas-basic.ods` produced a spreadsheet whose every formula
+  cell displayed an error in LibreOffice. No test caught it because the ODS tests compare DocMark,
+  which round-trips the formula text perfectly whether or not any application can evaluate it, and
+  there is no render gate for spreadsheets. One namespace declaration.
 - **`w:commentReference` and `w:annotationRef` became raw fragments.** Word never writes a
   `w:commentReference` as a child of `w:p` — it is always inside a `w:r` — and `read_run` had no
   arm for it, so it fell through to the raw branch: every `.docx` with a comment showed a
@@ -114,6 +121,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from.
 
 ### Added
+
+- **`docsai edit <in> --ops <json>` and the `apply_edits` MCP tool** (plan v2 Phase 17, increment
+  E): the closed operation set of `docs/edit-operations.md`, applied in order and all-or-nothing,
+  through **two doors over one implementation**. The answer is the change report and nothing else —
+  the ids of what was created with their kind, the targets deleted, and the targets changed **with
+  their new etag** — which is what makes the phase's claim that no confirmation read is needed true
+  rather than asserted: an agent that retitled `n12` holds `n12`'s new etag and can guard its next
+  edit with it. `--dry-run` / `dry_run` runs everything except the replacement of the file and
+  returns a report equal to the real one, and `--output` / `output_path` writes elsewhere and
+  leaves the input byte-identical. A refusal is **typed at both doors** — `{"index":0,
+  "op":"set_notes","refusal":"StaleEtag","target":"n4","expected":"000000","actual":"da5e97",
+  "message":…}` — and never a sentence alone; on the CLI it also exits `2`. Neither door carries
+  logic the other lacks, and that is a test rather than an intention:
+  `crates/docsai-cli/tests/two_doors.rs` runs the same operations through the real binary and a
+  real MCP server on a transport and compares the written bytes and the reports. Cost: **+249
+  tokens** in the session preamble (2 228 → 2 477) for a schema deliberately written as one line of
+  prose instead of a thousand-token derived enum; the wire-cost suite moved 5 355 → 5 616 tokens,
+  **+4.9 %**, inside the gate's 5 % allowance and without the inflation hatch.
+- **A workbook whose formula has no cached value now asks to be recalculated.** `docs/edit-operations.md`
+  §6.7 left open whether a writer could state that; both can, so `set_cell` writing a formula no
+  longer emits a `Warning::Degraded` about a value that «reads as blank». `.xlsx` gains
+  `<calcPr calcId="0" fullCalcOnLoad="1"/>` in `xl/workbook.xml`, and only when the workbook really
+  holds an uncached formula — forcing a recalculation of a fully cached workbook would change values
+  nobody asked to change. `.ods` needs no flag: ODF keeps the cached result in `office:value`, so a
+  `table:formula` cell written without one is already a request to compute it, measured against
+  LibreOffice Calc rather than assumed. A warning that survives its reason is a false warning.
 
 - **`validate_docmark`: every problem in a DocMark document at once** (plan v2 Phase 17, increment
   F), with `docsai validate <file> [--json]` as its CLI door. An agent that handed bad DocMark to

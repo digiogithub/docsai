@@ -6,10 +6,10 @@ Bytes and tokens are of the framed JSON-RPC that actually crossed the transport,
 
 | scenario | request bytes | response bytes | request tokens | response tokens | total tokens |
 |---|---|---|---|---|---|
-| session-preamble | 295 | 9058 | 93 | 2135 | 2228 |
-| deck-retitle (read half) | 1131 | 2902 | 353 | 889 | 1242 |
-| report-fix-typo | 1204 | 2420 | 355 | 668 | 1023 |
-| sheet-add-row | 1004 | 2131 | 294 | 568 | 862 |
+| session-preamble | 295 | 10028 | 93 | 2384 | 2477 |
+| deck-retitle (read half) | 1131 | 2915 | 353 | 893 | 1246 |
+| report-fix-typo | 1204 | 2433 | 355 | 672 | 1027 |
+| sheet-add-row | 1004 | 2144 | 294 | 572 | 866 |
 
 ## Not measured yet
 

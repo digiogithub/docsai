@@ -798,7 +798,6 @@ impl<'a> Session<'a> {
             });
         }
 
-        let formula = matches!(value, Some(Scalar::Text(t)) if t.starts_with('='));
         let fallback = match self.format {
             Some(Format::Ods) => FormulaDialect::OpenFormula,
             _ => FormulaDialect::Ooxml,
@@ -820,17 +819,22 @@ impl<'a> Session<'a> {
                 because: String::new(),
             });
         }
-        if formula {
-            // §6.7: the cached value is cleared, and whether a writer can ask
-            // the application to recalculate is 17-E's question. Until it can,
-            // saying nothing would be the silent degradation rule 5 forbids.
-            self.report.warn(Warning::Degraded {
-                what: format!("`{canonical}`!{cell}"),
-                why: "a formula was written and its cached value cleared; the cell reads as blank \
-                      until the sheet recalculates"
-                    .into(),
-            });
-        }
+        // §6.7's recalculation question, settled in 17-E and no longer a
+        // warning. Writing a formula still clears the cached value — a new
+        // formula over an old number displays a number that is simply wrong —
+        // but both writers now *ask* for the recalculation rather than leaving
+        // the caller to:
+        //
+        // * **xlsx**: `xl/workbook.xml` gains `<calcPr fullCalcOnLoad="1"/>`
+        //   whenever a formula cell has no cached value (`xlsx/write.rs`).
+        // * **ods**: no flag exists and none is needed. ODF stores the cached
+        //   result in `office:value`, so a formula cell without one has nothing
+        //   to display and the application computes it; measured against
+        //   LibreOffice Calc, which returns 42 for an `of:=[.A1]*[.A2]` cell
+        //   written with no `office:value` at all.
+        //
+        // A warning here would therefore be a false warning (§0.5), which is as
+        // forbidden as a silent degradation.
         self.note(&canonical);
         Ok(())
     }
@@ -1070,7 +1074,9 @@ fn target_refusal(error: TargetError) -> Refusal {
             reason: error.to_string(),
         },
         TargetError::AmbiguousId { .. } | TargetError::ReservedId { .. } => {
-            Refusal::DocumentDefect(error.to_string())
+            Refusal::DocumentDefect {
+                reason: error.to_string(),
+            }
         }
     }
 }

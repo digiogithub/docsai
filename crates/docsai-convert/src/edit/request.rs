@@ -215,7 +215,8 @@ impl EditRequest {
 }
 
 /// The four document classes of §2, as a refusal names them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DocClass {
     Text,
     Workbook,
@@ -250,7 +251,15 @@ impl std::fmt::Display for DocClass {
 ///
 /// The set is closed with the operation set: a new variant that refines an
 /// existing case costs no version bump (§1.1), a new *case* is a new version.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+///
+/// **Serialized, because a refusal has to survive the door** (17-E). §0.4 and
+/// §8 require a refusal that «names both sides», and a caller that receives a
+/// sentence has to parse English to find them again. The tag is `kind` and the
+/// variant's own fields are the object's, so `StaleEtag` arrives as
+/// `{"kind":"StaleEtag","target":"n7","expected":"ab12cd","actual":"9f0011"}`
+/// and the `Display` text rides alongside it rather than instead of it.
+#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize)]
+#[serde(tag = "refusal")]
 pub enum Refusal {
     #[error("`{op}` is not an operation of set version {speaks}")]
     UnknownOperation { op: String, speaks: u32 },
@@ -269,6 +278,22 @@ pub enum Refusal {
     MissingField {
         op: &'static str,
         field: &'static str,
+    },
+
+    /// A key version 1 defines, holding a value of a shape it does not.
+    ///
+    /// §8's table did not list this case because §8 was written before either
+    /// door was, and a door is where JSON meets the set: `{"text": 5}` is
+    /// neither an unknown field nor a missing one. 17-E adds the variant and
+    /// §1.1's own rule keeps the version at 1 — «a refusal made *more*
+    /// specific (a new typed variant for a case that already refused)» does not
+    /// bump it, and before this variant existed the case refused as a
+    /// deserialization error with no type at all.
+    #[error("`{op}`'s `{field}` {reason}")]
+    MalformedField {
+        op: &'static str,
+        field: String,
+        reason: String,
     },
 
     #[error("malformed target `{target}`: {reason}")]
@@ -344,16 +369,19 @@ pub enum Refusal {
     /// Not a caller mistake: two nodes carrying one id, or a node whose id is
     /// the reserved root `doc`. Phase 10 guarantees neither happens; the
     /// guarantee is asserted rather than assumed (17-B).
-    #[error("{0}")]
-    DocumentDefect(String),
+    #[error("{reason}")]
+    DocumentDefect { reason: String },
 }
 
 /// A refusal, with the position of the operation that raised it (§8).
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize)]
 #[error("operation {index} (`{op}`) refused: {refusal}")]
 pub struct Refused {
     /// 0-based index into `operations`.
     pub index: usize,
     pub op: String,
+    /// Flattened, so a refusal is one object and not an object inside an
+    /// object: `{"index":0,"op":"replace_text","refusal":"StaleEtag",…}`.
+    #[serde(flatten)]
     pub refusal: Refusal,
 }

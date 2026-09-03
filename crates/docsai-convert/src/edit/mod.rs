@@ -169,6 +169,15 @@ pub struct EditOptions {
     /// Read and write settings. `fidelity` and `ids` are checked against §3:
     /// version 1 edits at `full` and `agent` only.
     pub convert: ConvertOptions,
+    /// Where the edited document goes.
+    ///
+    /// `None` is **in place**: the input is replaced, which is what an edit
+    /// ordinarily means. Any other path is written instead and the input is
+    /// left byte-identical — the transaction is the same one either way,
+    /// because the temporary file is created beside the *destination* and not
+    /// beside the input. 17-E: the doors need it and no operation does, so it
+    /// is here and not in [`EditRequest`].
+    pub output: Option<PathBuf>,
     #[doc(hidden)]
     pub fault: Option<FaultPoint>,
 }
@@ -212,7 +221,11 @@ pub fn edit_path(
     refuse_unaddressable(&options.convert)?;
 
     let input = input.to_path_buf();
-    let directory = input
+    // Everything downstream is written beside the *destination*: the temporary
+    // file, so the rename stays on one filesystem, and `assets/`, so a DocMark
+    // document's media land where the document it wrote points at them.
+    let destination = options.output.clone().unwrap_or_else(|| input.clone());
+    let directory = destination
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
@@ -227,6 +240,7 @@ pub fn edit_path(
     // it; a DocMark document keeps its media in `assets/`, which is where a
     // conversion would put them and where the document already points.
     let format = detect(&input)?;
+    refuse_reformat(&destination, format)?;
     let mut memory = MemoryAssetStore::new();
     let mut files = DirAssetStore::new(assets_dir.clone());
     let docmark = format == Format::DocMark;
@@ -332,7 +346,7 @@ pub fn edit_path(
         // `temp` is dropped here and takes the file with it.
         return Ok(EditOutcome {
             report: edit_report,
-            path: input,
+            path: destination,
             format,
             dry_run: true,
         });
@@ -342,19 +356,19 @@ pub fn edit_path(
     // original's are copied onto it first; otherwise a group-readable document
     // would come back private, which is a change to the document nobody asked
     // for.
-    if let Ok(metadata) = std::fs::metadata(&input) {
+    if let Ok(metadata) = std::fs::metadata(&destination).or_else(|_| std::fs::metadata(&input)) {
         let _ = std::fs::set_permissions(temp.path(), metadata.permissions());
     }
-    temp.persist(&input)
+    temp.persist(&destination)
         .map_err(|error| EditError::Transaction {
-            path: input.display().to_string(),
+            path: destination.display().to_string(),
             source: error.error,
         })?;
     sync_dir(&directory);
 
     Ok(EditOutcome {
         report: edit_report,
-        path: input,
+        path: destination,
         format,
         dry_run: false,
     })
@@ -410,6 +424,26 @@ fn refuse_unaddressable(options: &ConvertOptions) -> Result<(), EditError> {
         ));
     }
     Ok(())
+}
+
+/// An edit is not a conversion: the destination keeps the input's format.
+///
+/// A destination whose own name says a *different* format would otherwise hand
+/// the caller a `.docx` that is a `.pptx` inside, which is the silent
+/// degradation rule 5 forbids. A name the detector does not recognise is left
+/// alone — a caller is allowed to choose its own extension.
+fn refuse_reformat(destination: &Path, format: Format) -> Result<(), ConvertError> {
+    let named = destination
+        .extension()
+        .and_then(|e| e.to_str())
+        .and_then(Format::parse);
+    match named {
+        Some(other) if other != format => Err(ConvertError::Unsupported {
+            from: format,
+            to: other,
+        }),
+        _ => Ok(()),
+    }
 }
 
 fn detect(input: &Path) -> Result<Format, ConvertError> {

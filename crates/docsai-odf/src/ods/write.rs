@@ -17,6 +17,11 @@ use crate::write_error::WriteError;
 
 const MIME: &str = "application/vnd.oasis.opendocument.spreadsheet";
 const NS_OFFICE: &str = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
+/// OpenFormula. Declared because every formula this writer emits is written
+/// `of:=…` (`write_cell_attrs`), and an undeclared prefix in that attribute is
+/// not a formula at all: LibreOffice reads it as `Err:510`. 17-E found it while
+/// settling §6.7's recalculation question.
+const NS_OF: &str = "urn:oasis:names:tc:opendocument:xmlns:of:1.2";
 const NS_STYLE: &str = "urn:oasis:names:tc:opendocument:xmlns:style:1.0";
 const NS_TEXT: &str = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 const NS_TABLE: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
@@ -103,7 +108,7 @@ fn build_package(
 
     let content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
-<office:document-content xmlns:office="{NS_OFFICE}" xmlns:style="{NS_STYLE}" xmlns:text="{NS_TEXT}" xmlns:table="{NS_TABLE}" xmlns:draw="{NS_DRAW}" xmlns:fo="{NS_FO}" xmlns:svg="{NS_SVG}" xmlns:xlink="{NS_XLINK}" office:version="1.3">
+<office:document-content xmlns:office="{NS_OFFICE}" xmlns:style="{NS_STYLE}" xmlns:text="{NS_TEXT}" xmlns:table="{NS_TABLE}" xmlns:draw="{NS_DRAW}" xmlns:fo="{NS_FO}" xmlns:svg="{NS_SVG}" xmlns:xlink="{NS_XLINK}" xmlns:of="{NS_OF}" office:version="1.3">
  <office:automatic-styles/>
  <office:body>
   <office:spreadsheet>
