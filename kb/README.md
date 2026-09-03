@@ -98,6 +98,7 @@ Practical difference between the two folders:
 | [82 — Phase 16 E](82-phase-16-comments.md) | Comments read from both formats into one IR node, DocMark 1.3 and the anchor-plus-container syntax, and the `w:commentReference` that was becoming a raw fragment |
 | [83 — Phase 16 F](83-phase-16-comment-write.md) | Comments written back: the deck's comment parts spliced and still byte-identical, the docx thread through `w14:paraId`, the author table matched by name, and `p:cm/p:pos` proved to be master units and not EMU |
 | [84 — Phase 16 close](84-phase-16-close.md) | The three criteria answered with re-run evidence, the thirty things carried forward, the three places a budget or a golden moved — and risk P2 still open, with what that means for Phase 17 |
+| [85 — Phase 17 plan](85-phase-17-plan.md) | `apply_edits`: the nine operations, etags, the transaction, and the reading of the 2k-token budget decided before anyone is losing |
 
 ## Status in one line
 
