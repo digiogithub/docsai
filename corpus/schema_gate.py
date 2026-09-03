@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""CI gate 1: the parts this project *writes* into a `.pptx`, validated against
-the ECMA-376 XSDs (`docs/technical-analysis-presentations.md` §5.5).
+"""CI gate 1: the markup this project produces, validated against the grammar
+that describes it — the ECMA-376 XSDs for a `.pptx`
+(`docs/technical-analysis-presentations.md` §5.5), and the OpenDocument 1.3
+RELAX NG for an `.odp` (Phase 18-A, `kb/96-phase-18-corpus.md`).
 
-    python3 corpus/schema_gate.py                 # the whole pptx corpus
-    python3 corpus/schema_gate.py basic-slides    # one deck, by name
+    python3 corpus/schema_gate.py                 # both arms, the whole corpus
+    python3 corpus/schema_gate.py basic-slides    # one fixture, by name
     python3 corpus/schema_gate.py --keep /tmp/g   # leave the packages behind
+
+The two arms measure different things and say so: `odf_arm()` carries the
+argument for what it can and cannot assert while there is no `.odp` writer.
 
 Requires `xmllint` (Debian/Ubuntu `libxml2-utils`, macOS built in) and a built
 CLI (`cargo build -p docsai-cli`). Neither is guessed at: a missing tool exits 2
@@ -52,6 +57,16 @@ ROOT = Path(__file__).resolve().parent.parent
 CORPUS = ROOT / "corpus" / "pptx"
 SCHEMA = ROOT / "schemas" / "ooxml-transitional.xsd"
 TEMPLATE = ROOT / "crates" / "docsai-office" / "assets" / "default-template.pptx"
+
+# ODF is described by a RELAX NG grammar, not by an XSD: a different validation
+# technology, which is why the ODF arm below is a second xmllint invocation with
+# `--relaxng` rather than another entry in the OOXML schema set. Provenance and
+# licence are in `schemas/README.md`.
+ODP_CORPUS = ROOT / "corpus" / "odp"
+ODF_SCHEMA = ROOT / "schemas" / "odf-1.3" / "OpenDocument-v1.3-schema.rng"
+ODF_MANIFEST_SCHEMA = (
+    ROOT / "schemas" / "odf-1.3" / "OpenDocument-v1.3-manifest-schema.rng"
+)
 
 # `## Title {#n1 .slide …}`: the one line a person would edit first, and the one
 # that forces the writer to rebuild the slide part it belongs to.
@@ -209,23 +224,18 @@ def written_parts(package, baseline):
         return parts
 
 
-def validate(parts, workdir):
-    """xmllint over one package's parts. Returns {part: [problem, …]}, empty
-    lists for the parts that validate."""
-    if not parts:
-        return {}, set()
-    files, processed = {}, set()
-    for name, blob in parts:
-        path = workdir / name.replace("[", "_").replace("]", "_")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        blob, touched = markup_compatibility(blob)
-        if touched:
-            processed.add(name)
-        path.write_bytes(blob)
-        files[str(path)] = name
+def xmllint(files, schema_args):
+    """Run xmllint over `files` — a `{path: reported name}` map — with
+    `schema_args` naming the grammar, and turn its stderr into
+    `{name: [problem, …]}`.
 
+    Split out of `validate()` so the ODF arm below can reuse it: the grammar is
+    a different technology (`--relaxng` against a RELAX NG file rather than
+    `--schema` against an XSD set) but xmllint reports its verdicts in exactly
+    the same three shapes, and a second copy of this parser would be a second
+    place for a silent pass to hide."""
     proc = subprocess.run(
-        ["xmllint", "--nonet", "--noout", "--schema", str(SCHEMA), *files],
+        ["xmllint", "--nonet", "--noout", *schema_args, *files],
         capture_output=True,
         text=True,
         check=False,
@@ -260,7 +270,24 @@ def validate(parts, workdir):
                 "xmllint reached no verdict on this part "
                 "(did the schema set compile?)"
             )
-    return problems, processed
+    return problems
+
+
+def validate(parts, workdir):
+    """xmllint over one package's parts. Returns {part: [problem, …]}, empty
+    lists for the parts that validate."""
+    if not parts:
+        return {}, set()
+    files, processed = {}, set()
+    for name, blob in parts:
+        path = workdir / name.replace("[", "_").replace("]", "_")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob, touched = markup_compatibility(blob)
+        if touched:
+            processed.add(name)
+        path.write_bytes(blob)
+        files[str(path)] = name
+    return xmllint(files, ["--schema", str(SCHEMA)]), processed
 
 
 def package_for(binary, deck, workdir, variant):
@@ -294,6 +321,172 @@ VARIANTS = {
 }
 
 
+# --------------------------------------------------------------------------
+# The ODF arm (Phase 18-A)
+# --------------------------------------------------------------------------
+
+
+def odf_namespaces():
+    """The namespaces the vendored grammar itself declares.
+
+    Derived from the schema rather than listed here, so that refreshing the
+    schema cannot leave a stale list behind."""
+    # The `xml:` namespace is bound by the XML specification itself and is
+    # never declared, so no schema's namespace map mentions it. Without it here
+    # `xml:id` is read as foreign and stripped, and every `smil:targetElement`
+    # that points at one becomes a dangling IDREF — which is how this line came
+    # to be written.
+    allowed = {"http://www.w3.org/XML/1998/namespace"}
+    for _, (prefix, uri) in ET.iterparse(ODF_SCHEMA, events=["start-ns"]):
+        del prefix
+        allowed.add(uri)
+    for _, (prefix, uri) in ET.iterparse(ODF_MANIFEST_SCHEMA, events=["start-ns"]):
+        del prefix
+        allowed.add(uri)
+    return allowed
+
+
+def strip_foreign(blob, allowed):
+    """Remove foreign elements and attributes, and return the bytes to validate.
+
+    This is the ODF counterpart of `markup_compatibility()` above, and it rests
+    on the same kind of clause: ODF 1.3 conformance defines an *extended*
+    document as one that may carry elements and attributes from namespaces the
+    grammar does not define, which a consumer ignores. The grammar describes the
+    conformant subset, so validating the raw bytes reports every extension as an
+    unexpected element.
+
+    There is a concrete one in this corpus. LibreOffice Impress stores a slide
+    comment as `officeooo:annotation` (namespace
+    `http://openoffice.org/2009/office`) directly under `draw:page`, and that is
+    the only spelling that works: ODF 1.3 admits `office:annotation` in
+    paragraph content, LibreOffice refuses to open a deck that has one there
+    («source file could not be loaded», measured), and a page-level
+    `office:annotation` it opens and silently discards. Every real `.odp` with
+    comments in it therefore carries markup this grammar cannot describe.
+
+    The limit, stated rather than discovered: an extension that *wraps*
+    conformant content is stripped with its children, so nothing inside it is
+    validated. No part here does that; one that did would be under-measured
+    rather than reported, and the printed "(after foreign markup removal)" is
+    what says a part was touched at all."""
+    root = ET.fromstring(blob)
+    touched = False
+    parents = {child: parent for parent in root.iter() for child in parent}
+    for node in list(root.iter()):
+        namespace = node.tag[1:].partition("}")[0] if node.tag.startswith("{") else ""
+        if namespace and namespace not in allowed:
+            parent = parents.get(node)
+            if parent is not None:
+                parent.remove(node)
+                touched = True
+            continue
+        for key in list(node.attrib):
+            if not key.startswith("{"):
+                continue
+            if key[1:].partition("}")[0] not in allowed:
+                del node.attrib[key]
+                touched = True
+    if not touched:
+        return blob, False
+    return ET.tostring(root, encoding="utf-8"), True
+
+
+def odf_parts(package):
+    """Every XML part of an ODF package, paired with the grammar that describes
+    it. `META-INF/manifest.xml` has a schema of its own — it is not written in
+    the document grammar and validating it against the big one reports "Did not
+    expect element manifest there"."""
+    parts = []
+    with zipfile.ZipFile(package) as zf:
+        for name in sorted(zf.namelist()):
+            if not name.endswith(".xml"):
+                continue
+            schema = ODF_MANIFEST_SCHEMA if name.startswith("META-INF/") else ODF_SCHEMA
+            parts.append((name, zf.read(name), schema))
+    return parts
+
+
+def validate_odf(package, workdir):
+    """Every XML part of one ODF package against the vendored RELAX NG.
+
+    Two grammars means two xmllint runs; both are reported into one dictionary
+    so the caller cannot tell — or forget — that there were two."""
+    problems = {}
+    by_schema = {}
+    processed = set()
+    allowed = odf_namespaces()
+    for name, blob, schema in odf_parts(package):
+        # A space in a part name — `Object 1/content.xml` is where an ODF chart
+        # lives — comes back from xmllint percent-escaped, and the escaped path
+        # matches nothing this function wrote. Renaming it on disk keeps every
+        # error attributable to the part it came from.
+        path = workdir / name.replace(" ", "_")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob, touched = strip_foreign(blob, allowed)
+        if touched:
+            processed.add(name)
+        path.write_bytes(blob)
+        by_schema.setdefault(schema, {})[str(path)] = name
+    for schema, files in by_schema.items():
+        problems.update(xmllint(files, ["--relaxng", str(schema)]))
+    return problems, processed
+
+
+def odf_arm(scratch, wanted):
+    """The `.odp` corpus against ODF 1.3.
+
+    What this measures, stated plainly because it is **weaker** than the OOXML
+    arm above and must not be mistaken for it: the OOXML arm validates what the
+    *writer* produces, found by diffing a written package against the package it
+    was written on. There is no `.odp` writer until 18-D, so what is validated
+    here is what `corpus/generate.py` produces — the fixtures themselves. That
+    is still a real measurement (the generator is this repository's code, and it
+    is the code every later increment is measured against), and it is the
+    difference between a gated new format and an ungated one. When 18-D lands
+    the writer, this arm gains the writer's output the same way the OOXML arm
+    has it, and this paragraph gets shorter.
+
+    `odt/` and `ods/` are deliberately **not** here, and not because the
+    machinery cannot reach them: it is one glob away, and switching it on today
+    reports exactly one failure, `corpus/odt/images-transformed.odt`. Its
+    `style:graphic-properties` carries `draw:rotation-angle`, which ODF 1.3 has
+    nowhere — a shape is rotated by `draw:transform` on the shape, not by a
+    style attribute — and `crates/docsai-odf/src/styles.rs:187` is what reads
+    it, so correcting the fixture drops the rotation from its golden. That is
+    reader work, in a crate this increment does not touch. `kb/96-phase-18-corpus.md`
+    carries it forward."""
+    if not ODF_SCHEMA.exists() or not ODF_MANIFEST_SCHEMA.exists():
+        print(f"schema_gate: no ODF schema set under {ODF_SCHEMA.parent}",
+              file=sys.stderr)
+        return 0, 0, [f"the whole odp corpus: no schema at {ODF_SCHEMA}"]
+
+    decks = sorted(ODP_CORPUS.iterdir()) if ODP_CORPUS.exists() else []
+    decks = [d for d in decks if d.suffix == ".odp"]
+    if wanted:
+        decks = [d for d in decks if d.stem in wanted]
+    checked = invalid = 0
+    failures = []
+    for deck in decks:
+        print(f"{deck.name} [fixture: the package corpus/generate.py wrote]")
+        problems, processed = validate_odf(deck, scratch / "odf" / deck.stem)
+        if not problems:
+            failures.append(f"{deck.name}: the package has no XML part at all")
+            print("  SKIP  no XML part to validate")
+            continue
+        for name in sorted(problems):
+            checked += 1
+            if problems[name]:
+                invalid += 1
+                print(f"  FAIL  {name}")
+                for problem in problems[name]:
+                    print(f"        {problem}")
+            else:
+                foreign = " (after foreign markup removal)" if name in processed else ""
+                print(f"  ok    {name}{foreign}")
+    return checked, invalid, failures
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -309,14 +502,20 @@ def main():
     binary = find_binary(args.binary)
 
     decks = sorted(p for p in CORPUS.iterdir() if p.suffix in (".pptx", ".pptm"))
+    odp_decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
+    wanted_odf = None
     if args.decks:
-        wanted = {d.removesuffix(".pptx").removesuffix(".pptm") for d in args.decks}
+        wanted = {
+            d.removesuffix(".pptx").removesuffix(".pptm").removesuffix(".odp")
+            for d in args.decks
+        }
         decks = [d for d in decks if d.stem in wanted]
-        if not decks:
+        wanted_odf = wanted
+        if not decks and not [d for d in odp_decks if d.stem in wanted]:
             sys.exit(f"schema_gate: no corpus deck named {', '.join(sorted(wanted))}")
 
     scratch = Path(args.keep) if args.keep else Path(tempfile.mkdtemp(prefix="schema-gate-"))
-    checked = invalid = skipped = 0
+    checked = invalid = skipped = odp_count = 0
     failures = []
     try:
         for deck in decks:
@@ -349,13 +548,21 @@ def main():
                     else:
                         mce = " (after mc: fallback selection)" if name in processed else ""
                         print(f"  ok    {name}{mce}")
+
+        print(f"\n--- ODF: corpus/odp against {ODF_SCHEMA.name} ---")
+        odf_checked, odf_invalid, odf_failures = odf_arm(scratch, wanted_odf)
+        checked += odf_checked
+        invalid += odf_invalid
+        failures += odf_failures
+        odp_count = odf_checked
     finally:
         if not args.keep:
             shutil.rmtree(scratch, ignore_errors=True)
 
     print(
         f"\n{len(decks)} deck(s), {len(decks) * len(VARIANTS)} package(s), "
-        f"{checked} part(s) validated, {invalid} invalid, {skipped} not measured"
+        f"{checked} part(s) validated ({odp_count} of them .odp), "
+        f"{invalid} invalid, {skipped} not measured"
     )
     if invalid:
         return 1

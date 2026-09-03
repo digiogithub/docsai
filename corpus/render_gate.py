@@ -58,7 +58,13 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from schema_gate import CORPUS, find_binary, run, without_skeleton  # noqa: E402
+from schema_gate import (  # noqa: E402
+    CORPUS,
+    ODP_CORPUS,
+    find_binary,
+    run,
+    without_skeleton,
+)
 
 # The rasterisation resolution. 100 dpi puts a 10 x 7.5 inch slide on a
 # 1000 x 750 raster: fine enough that a lost picture or a shifted paragraph is
@@ -434,6 +440,18 @@ def identical(one, other):
         return names == b.namelist() and all(a.read(n) == b.read(n) for n in names)
 
 
+def draw_pages(deck):
+    """How many `draw:page` elements an `.odp` declares.
+
+    Counted from the bytes rather than parsed, because the question is not what
+    the page *is* — that is 18-B's job — but how many of them a renderer owes
+    us. `<draw:page ` cannot appear anywhere else in `content.xml`: the
+    only other element whose name starts that way is `draw:page-thumbnail`, and
+    the trailing space excludes it."""
+    with zipfile.ZipFile(deck) as zf:
+        return zf.read("content.xml").count(b"<draw:page ")
+
+
 class Report:
     def __init__(self):
         self.by_bytes = self.by_render = self.pages = self.failures = 0
@@ -508,6 +526,50 @@ def check_generated(report, deck, original, generated):
             )
 
 
+def check_odp(renderer, report, scratch, wanted):
+    """The `.odp` corpus, rendered (Phase 18-A).
+
+    What this arm can assert, and why it is not the same assertion as the pptx
+    one above: there is no `.odp` reader until 18-B and no writer until 18-D, so
+    there is no round trip to compare against. What is left is still worth
+    having and is the thing schema validation cannot see — that LibreOffice,
+    which reads `.odp` natively, **opens every fixture, draws the number of
+    pages the fixture declares, and leaves ink on each of them**. A `draw:page`
+    that renders blank is a fixture that isolates nothing, and the trait matrix
+    of 18-E would be measuring an empty rectangle.
+
+    When 18-D lands the writer this arm gains the round-trip comparison the
+    pptx side has, on the same comparator and the same threshold."""
+    decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
+    if wanted:
+        decks = [d for d in decks if d.stem in wanted]
+    for deck in decks:
+        print(f"{deck.name} [fixture: rendered, not round-tripped]")
+        declared = draw_pages(deck)
+        pages, why = renderer.render(deck, scratch / "odp" / deck.stem)
+        if pages is None:
+            report.note(deck.name, f"not rendered: {why}")
+            continue
+        if len(pages) != declared:
+            report.fail(
+                f"{deck.name}: {declared} draw:page in content.xml, "
+                f"{len(pages)} page(s) rendered"
+            )
+            continue
+        report.by_render += 1
+        blank = []
+        for index, page in enumerate(pages, start=1):
+            report.pages += 1
+            width, height, pixels = read_pgm(page)
+            covered = ink(width, height, pixels)
+            if covered < MIN_INK:
+                blank.append(f"page {index} (ink {covered:.4%})")
+        if blank:
+            report.fail(f"{deck.name}: rendered blank: {', '.join(blank)}")
+        else:
+            print(f"  ok    {len(pages)} page(s), all with ink")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -548,10 +610,16 @@ def main():
 
         binary = find_binary(args.binary)
         decks = sorted(p for p in CORPUS.iterdir() if p.suffix in (".pptx", ".pptm"))
+        odp_decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
+        wanted = None
         if args.decks:
-            wanted = {d.removesuffix(".pptx").removesuffix(".pptm") for d in args.decks}
+            wanted = {
+                d.removesuffix(".pptx").removesuffix(".pptm").removesuffix(".odp")
+                for d in args.decks
+            }
             decks = [d for d in decks if d.stem in wanted]
-            if not decks:
+            odp_decks = [d for d in odp_decks if d.stem in wanted]
+            if not decks and not odp_decks:
                 sys.exit(f"render_gate: no corpus deck named {', '.join(sorted(wanted))}")
 
         renderer = Renderer(scratch / "profile")
@@ -588,12 +656,16 @@ def main():
                 report.note(deck.name, f"generated package not rendered: {why or why2}")
                 continue
             check_generated(report, deck.name, source, written)
+
+        print(f"\n--- ODF: corpus/odp, rendered by LibreOffice ---")
+        check_odp(renderer, report, scratch, wanted)
     finally:
         if not args.keep:
             shutil.rmtree(scratch, ignore_errors=True)
 
     print(
-        f"\n{len(decks)} deck(s): {report.by_bytes} round trip(s) identical by bytes, "
+        f"\n{len(decks)} deck(s) + {len(odp_decks)} .odp: "
+        f"{report.by_bytes} round trip(s) identical by bytes, "
         f"{report.by_render} rendered, {report.pages} page(s) compared, "
         f"{report.failures} failure(s), {len(report.unmeasured)} not measured"
     )

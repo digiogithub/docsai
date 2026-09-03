@@ -2356,6 +2356,10 @@ ODP_NS = ODF_NS + (
     ' xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"'
     ' xmlns:anim="urn:oasis:names:tc:opendocument:xmlns:animation:1.0"'
     ' xmlns:smil="urn:oasis:names:tc:opendocument:xmlns:smil-compatible:1.0"'
+    # LibreOffice's own namespace, for the one construct in this corpus that
+    # OpenDocument 1.3 has no element for: a slide comment. See
+    # `odp_comments_slide()`.
+    ' xmlns:officeooo="http://openoffice.org/2009/office"'
 )
 
 MIME_ODP = b"application/vnd.oasis.opendocument.presentation"
@@ -3222,51 +3226,56 @@ def odp_ole_embedded() -> None:
 
 
 def odp_comments_slide() -> None:
-    """`office:annotation`: author, date and body, the `.odp` half of
-    `pptx/comments-slide.pptx`.
+    """A commented page, the `.odp` half of `pptx/comments-slide.pptx`.
 
-    Where the annotation may sit is a finding, not a detail. ODF 1.3 admits
-    `office:annotation` in paragraph content and in a table cell, and **not** as
-    a child of `draw:page`, which is where a slide comment intuitively belongs
-    and where a first draft of this fixture put it. Two things then said so:
-    the RELAX NG arm of `schema_gate.py` («Did not expect element annotation
-    there») and LibreOffice, which opened that deck and dropped both comments
-    without a word. So the annotations live in the text they are about, which
-    is both legal and what survives a renderer.
+    Where a slide comment may sit turned out to be the finding of this fixture,
+    and all three answers were measured rather than assumed:
+
+    - `office:annotation` as a child of `draw:page` — the intuitive place. ODF
+      1.3's grammar does not allow it there («Did not expect element annotation
+      there»), and LibreOffice opens such a deck and **silently discards** both
+      comments.
+    - `office:annotation` inside a paragraph — where ODF 1.3 does allow it.
+      Valid, and LibreOffice Impress refuses to open the deck at all: «source
+      file could not be loaded».
+    - `officeooo:annotation` as a child of `draw:page`, in LibreOffice's own
+      `http://openoffice.org/2009/office` namespace. Not in the grammar, read
+      and written back unchanged by LibreOffice, and what every real `.odp` with
+      comments in it carries.
+
+    The third is what this fixture uses, because a corpus that isolates a trait
+    no application produces isolates nothing. ODF conformance has a place for
+    it — an *extended* document may carry foreign elements, which a consumer
+    ignores — and `schema_gate.py`'s `strip_foreign()` applies exactly that rule
+    before validating, the way its `markup_compatibility()` applies ECMA-376
+    Part 3 before validating a `.pptx`.
 
     The other half of the mirror: OOXML keeps comments in their own part with a
     separate author table, so `pptx/comments-slide.pptx` can have the two fall
     out of step. ODF writes the author into the annotation, so it cannot."""
-    def annotation(name: str, author: str, date: str, body: str) -> str:
+    def annotation(author: str, date: str, body: str, y: str) -> str:
         return (
-            f'<office:annotation office:name="{name}" '
-            f'svg:x="24cm" svg:y="1cm" svg:width="3cm" svg:height="2cm">'
+            f'<officeooo:annotation svg:x="24cm" svg:y="{y}" '
+            f'svg:width="3cm" svg:height="2cm">'
             f"<dc:creator>{author}</dc:creator>"
             f"<dc:date>{date}</dc:date>"
             f"<text:p>{body}</text:p>"
-            f"</office:annotation>"
+            f"</officeooo:annotation>"
         )
 
-    first = annotation("__Annot__1", "Ana Revisora", "2026-01-02T10:15:00",
-                       "Confirmar la cifra del norte antes del consejo.")
-    second = annotation("__Annot__2", "Luis Editor", "2026-01-02T11:40:00",
-                        "De acuerdo, lo verifico.")
+    comments = (
+        annotation("Ana Revisora", "2026-01-02T10:15:00",
+                   "Confirmar la cifra del norte antes del consejo.", "1cm")
+        + annotation("Luis Editor", "2026-01-02T11:40:00",
+                     "De acuerdo, lo verifico.", "4cm")
+    )
     build_odp(
         "comments-slide.odp",
         odp_page(
             "page1",
-            odp_frame(
-                odp_text_box(
-                    f"<text:p>{first}Página comentada</text:p>"
-                ),
-                cls="title", box=ODP_TITLE_BOX, style="pr-title")
-            + odp_frame(
-                odp_text_box(
-                    "<text:list><text:list-item>"
-                    f"<text:p>Cifra pendiente de confirmar{second}</text:p>"
-                    "</text:list-item></text:list>"
-                ),
-                cls="outline", box=ODP_OUTLINE_BOX, style="pr-outline"),
+            odp_title("Página comentada")
+            + odp_outline([("Cifra pendiente de confirmar", 0)]),
+            extra=comments,
         ),
         title="Comentarios de página",
     )
@@ -4934,7 +4943,11 @@ def pptx_forty_slides() -> None:
 #   the constant — a step a person takes deliberately, with the recipe below —
 #   and not a dependency of running the generator or the gates. That is the cost
 #   and it is paid knowingly: the bytes cannot be reviewed in a diff the way the
-#   XML of a `.pptx` can, so their provenance is written down instead.
+#   XML of a `.pptx` can, so their provenance is written down instead. What is
+#   *written* is the recorded output with LibreOffice's preview thumbnail taken
+#   out of it and the space that frees given back — see the strip below, which
+#   turns 608 KB of mostly-bitmap into 23 KB while leaving every stream a reader
+#   of this format touches byte for byte the stream LibreOffice wrote.
 #
 #   The recipe, reproducible by anyone with the same LibreOffice:
 #
@@ -5818,6 +5831,189 @@ def _cfb_patch_mini(data: bytes, name: str, at: int, blob: bytes) -> bytes:
     return bytes(b)
 
 
+# --------------------------------------------------------------------------
+# Removing LibreOffice's thumbnail, and compacting what that frees
+# --------------------------------------------------------------------------
+#
+# LibreOffice embeds a `PIDSI_THUMBNAIL` (property 17, `VT_CF`) in
+# `\5SummaryInformation`: 588 344 bytes of preview bitmap in a deck whose actual
+# content is eleven kilobytes. It is **optional** in [MS-OSHARED] 2.3.3.2.1, no
+# increment of Phase 19 reads it — 19-B hands the file to LibreOffice, 19-D walks
+# the text atoms and the `Pictures` stream — and there is no way to switch it off
+# from the command line (`Common/Save/Document/GenerateThumbnail` governs the ODF
+# package thumbnail, and setting it in the profile changes nothing here). Left in,
+# it would be ~2.3 MB of permanent weight in every clone of this repository.
+#
+# So it is removed, and the removal is a *derivation*: the recorded constants
+# above stay LibreOffice's exact output, and every byte that differs from it is
+# produced by the three functions below, which are reviewable in a way the
+# constant is not. Nothing else changes — after the strip, `PowerPoint Document`,
+# `Pictures`, `Current User`, `\1CompObj`, `\1Ole` and
+# `\5DocumentSummaryInformation` are byte for byte the streams LibreOffice
+# wrote, which is what keeps these fixtures files this project did not author.
+#
+# Verified rather than assumed: the result is opened by the `cfb` crate, and
+# LibreOffice converts it back to `.pptx` with both slides and all their text.
+
+
+def _property_set_without_thumbnail(data: bytes) -> bytes:
+    """An OLE property set rebuilt without `PIDSI_THUMBNAIL`.
+
+    Rebuilt, not blanked: the property count and every offset are restated, so
+    the set that comes out is well-formed at its new, much smaller size rather
+    than a valid one with a hole in it.
+    """
+    assert data[:2] == b"\xfe\xff", "not a property set"
+    assert struct.unpack_from("<I", data, 24)[0] == 1, "expected one section"
+    fmtid = data[28:44]
+    base = struct.unpack_from("<I", data, 44)[0]
+    section, count = struct.unpack_from("<II", data, base)
+    props = [struct.unpack_from("<II", data, base + 8 + 8 * i) for i in range(count)]
+    # A property's value has no length of its own: it runs to the next offset,
+    # and the last one runs to the end of the section.
+    by_offset = sorted(props, key=lambda p: p[1])
+    end = {
+        pid: (by_offset[i + 1][1] if i + 1 < len(by_offset) else section)
+        for i, (pid, _) in enumerate(by_offset)
+    }
+    kept = [p for p in by_offset if p[0] != _PIDSI_THUMBNAIL]
+    assert len(kept) == count - 1, "no thumbnail property to remove"
+    head = 8 + 8 * len(kept)
+    table, body, at = [], b"", head
+    for pid, off in kept:
+        value = data[base + off:base + end[pid]]
+        table.append((pid, at))
+        body += value
+        at += len(value)
+    return (
+        data[:24] + struct.pack("<I", 1) + fmtid + struct.pack("<I", 48)
+        + struct.pack("<II", head + len(body), len(kept))
+        + b"".join(struct.pack("<II", pid, off) for pid, off in table)
+        + body
+    )
+
+
+def _cfb_shrink_stream(data: bytes, name: str, content: bytes, floor: int) -> bytes:
+    """Replace a main-FAT stream's content with something shorter.
+
+    ``floor`` is what the stream is padded to. It exists for one reason: a
+    stream below the mini stream cutoff must live in the mini stream, a
+    different allocation entirely, and a 276-byte property set left in the FAT
+    with a size of 276 would be read as mini-sector indices. Padding to the
+    cutoff keeps it where it already is, and costs one sector-aligned block.
+    """
+    b, sector, difat = _cfb_open(data)
+    entry = _cfb_entry(b, sector, difat, name)
+    start = struct.unpack_from("<I", b, entry + 116)[0]
+    old = struct.unpack_from("<Q", b, entry + 120)[0]
+    cutoff = struct.unpack_from("<I", b, 56)[0]
+    size = max(len(content), floor)
+    assert old >= cutoff, f"{name} is not a main-FAT stream"
+    assert cutoff <= size < old, f"{size} is not a shrink that stays out of the mini stream"
+    chain = _cfb_chain(b, sector, difat, start)
+    kept = -(-size // sector)
+    padded = content + bytes(kept * sector - len(content))
+    for index, sec in enumerate(chain[:kept]):
+        b[512 + sec * sector:512 + (sec + 1) * sector] = padded[index * sector:(index + 1) * sector]
+    for dropped in chain[kept:]:
+        _fat_set(b, sector, difat, dropped, _FREESECT)
+        b[512 + dropped * sector:512 + (dropped + 1) * sector] = bytes(sector)
+    _fat_set(b, sector, difat, chain[kept - 1], _ENDOFCHAIN)
+    struct.pack_into("<Q", b, entry + 120, size)
+    return bytes(b)
+
+
+def _cfb_directory(b: bytearray, sector: int, difat: list[int]) -> list[int]:
+    """File offsets of the live directory entries."""
+    out = []
+    for sec in _cfb_chain(b, sector, difat, struct.unpack_from("<I", b, 48)[0]):
+        for slot in range(sector // 128):
+            off = 512 + sec * sector + slot * 128
+            if b[off + 66]:
+                out.append(off)
+    return out
+
+
+def _cfb_compact(data: bytes) -> bytes:
+    """Drop the free sectors and shorten the file.
+
+    Freeing a sector does not make a file smaller — the directory of these
+    files lives in the *last* two sectors, so the 1 150 sectors the thumbnail
+    occupied would stay as a hole. This renumbers the sectors that are still in
+    use into a dense run at the front and truncates, which is a permutation of
+    an existing container and not a new one: no allocation policy is invented,
+    the FAT keeps the same number of sectors it already had, and every stream's
+    bytes are the bytes they were.
+    """
+    b, sector, difat = _cfb_open(data)
+    per = sector // 4
+    total = (len(b) - 512) // sector
+    cutoff = struct.unpack_from("<I", b, 56)[0]
+
+    live = set(difat)
+    live |= set(_cfb_chain(b, sector, difat, struct.unpack_from("<I", b, 48)[0]))
+    mini_fat = struct.unpack_from("<I", b, 60)[0]
+    if mini_fat <= _MAXREGSECT:
+        live |= set(_cfb_chain(b, sector, difat, mini_fat))
+    for entry in _cfb_directory(b, sector, difat):
+        start = struct.unpack_from("<I", b, entry + 116)[0]
+        size = struct.unpack_from("<Q", b, entry + 120)[0]
+        # Type 5 is the root, whose "stream" is the mini stream itself; every
+        # other entry below the cutoff lives inside it and owns no sector.
+        if start <= _MAXREGSECT and (b[entry + 66] == 5 or size >= cutoff):
+            live |= set(_cfb_chain(b, sector, difat, start))
+
+    order = sorted(live)
+    moved = {old: new for new, old in enumerate(order)}
+    fat = [_fat_get(b, sector, difat, i) for i in range(total)]
+
+    out = bytearray(b[:512]) + bytearray(len(order) * sector)
+    for old, new in moved.items():
+        out[512 + new * sector:512 + (new + 1) * sector] = b[512 + old * sector:512 + (old + 1) * sector]
+
+    difat = [moved[s] for s in difat]
+    for index in range(109):
+        struct.pack_into("<I", out, 76 + 4 * index,
+                         difat[index] if index < len(difat) else _FREESECT)
+    for old, new in moved.items():
+        value = fat[old]
+        _fat_set(out, sector, difat, new, moved[value] if value <= _MAXREGSECT else value)
+    for index in range(len(order), len(difat) * per):
+        _fat_set(out, sector, difat, index, _FREESECT)
+    for sec in difat:
+        _fat_set(out, sector, difat, sec, 0xFFFFFFFD)  # FATSECT
+    struct.pack_into("<I", out, 48, moved[struct.unpack_from("<I", out, 48)[0]])
+    if mini_fat <= _MAXREGSECT:
+        struct.pack_into("<I", out, 60, moved[mini_fat])
+    for entry in _cfb_directory(out, sector, difat):
+        start = struct.unpack_from("<I", out, entry + 116)[0]
+        size = struct.unpack_from("<Q", out, entry + 120)[0]
+        if start <= _MAXREGSECT and (out[entry + 66] == 5 or size >= cutoff):
+            struct.pack_into("<I", out, entry + 116, moved[start])
+    return bytes(out)
+
+
+# [MS-OSHARED] 2.3.3.2.1: the thumbnail is property 17 of the summary
+# information stream, and it is optional.
+_PIDSI_THUMBNAIL = 17
+_SUMMARY_INFORMATION = "\x05SummaryInformation"
+
+
+def _ppt_deck(blob: str) -> bytes:
+    """A recorded deck, with LibreOffice's preview thumbnail taken out of it."""
+    data = _ppt_bytes(blob)
+    stripped = _cfb_shrink_stream(
+        data, _SUMMARY_INFORMATION,
+        _property_set_without_thumbnail(_cfb_stream(data, _SUMMARY_INFORMATION)),
+        struct.unpack_from("<I", data, 56)[0])
+    compacted = _cfb_compact(stripped)
+    for name in ("PowerPoint Document", "Pictures", "Current User",
+                 "\x01CompObj", "\x01Ole", "\x05DocumentSummaryInformation"):
+        assert _cfb_stream(compacted, name) == _cfb_stream(data, name), \
+            f"{name} is no longer the stream LibreOffice wrote"
+    return compacted
+
+
 # The PowerPoint Document stream is a flat sequence of records, each an eight
 # byte header (`recVer`/`recInstance`, `recType`, `recLen`) followed by
 # `recLen` bytes. Walking it is how the cut below is chosen, so that the cut
@@ -5874,13 +6070,13 @@ def ppt_basic_slides() -> None:
     already carries and already pins with a golden.
     """
     _write_ppt("basic-slides.ppt",
-               _assert_ppt(_ppt_bytes(BASIC_SLIDES_PPT_Z), slides=2, pictures=False))
+               _assert_ppt(_ppt_deck(BASIC_SLIDES_PPT_Z), slides=2, pictures=False))
 
 
 def ppt_mixed_media() -> None:
     """Three slides, titles, bullets at two levels, and a picture."""
     _write_ppt("mixed-media.ppt",
-               _assert_ppt(_ppt_bytes(MIXED_MEDIA_PPT_Z), slides=3, pictures=True))
+               _assert_ppt(_ppt_deck(MIXED_MEDIA_PPT_Z), slides=3, pictures=True))
 
 
 def ppt_truncated() -> None:
@@ -5900,7 +6096,7 @@ def ppt_truncated() -> None:
 
     Both are the shape Phase 19-E has to refuse and Phase 20 will fuzz.
     """
-    base = _ppt_bytes(BASIC_SLIDES_PPT_Z)
+    base = _ppt_deck(BASIC_SLIDES_PPT_Z)
     stream = _cfb_stream(base, "PowerPoint Document")
     # Half the stream, rounded up to a whole sector so the allocation stays
     # tidy and only the *content* is what changed. The two assertions are the
@@ -5929,7 +6125,7 @@ def ppt_encrypted() -> None:
     first thing a conforming reader looks at. It proves the refusal. It does not
     prove anything about decryption, and nothing in this phase claims to.
     """
-    base = _assert_ppt(_ppt_bytes(BASIC_SLIDES_PPT_Z), slides=2, pictures=False)
+    base = _assert_ppt(_ppt_deck(BASIC_SLIDES_PPT_Z), slides=2, pictures=False)
     out = _cfb_patch_mini(base, "Current User", _CURRENT_USER_TOKEN_AT,
                           struct.pack("<I", _PPT_TOKEN_ENCRYPTED))
     token = struct.unpack_from(
@@ -6223,9 +6419,14 @@ def digest_tree() -> dict[str, str]:
         d = ROOT / sub
         if not d.exists():
             continue
-        for f in sorted(d.iterdir()):
+        # `rglob`, not `iterdir`: a corpus subdirectory used to be invisible
+        # here, so a fixture inside one was written by the generator and then
+        # checked by nothing. A check that silently does not check is the same
+        # class of defect as a warning that does not warn.
+        for f in sorted(d.rglob("*")):
             if f.is_file():
-                out[f"{sub}/{f.name}"] = hashlib.sha256(f.read_bytes()).hexdigest()
+                out[f.relative_to(ROOT).as_posix()] = hashlib.sha256(
+                    f.read_bytes()).hexdigest()
     return out
 
 

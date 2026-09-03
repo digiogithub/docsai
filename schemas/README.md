@@ -1,7 +1,9 @@
-# `schemas/` — the ECMA-376 XSDs, vendored
+# `schemas/` — the grammars, vendored
 
 The schema set `corpus/schema_gate.py` validates generated `.pptx` parts against
-(Phase 15 increment 15-I; `docs/technical-analysis-presentations.md` §5.5).
+(Phase 15 increment 15-I; `docs/technical-analysis-presentations.md` §5.5), and
+the OpenDocument RELAX NG it validates `.odp` against (Phase 18-A;
+`kb/96-phase-18-corpus.md`). Two standards, two validation technologies, one gate.
 
 Nothing in this directory is compiled into any binary. It is read by one Python
 script, in CI and on a developer's machine, and by nothing else.
@@ -42,6 +44,49 @@ migration features as errors. Strict is not vendored.
 `w3c/xml.xsd` is the schema for the `xml:` namespace (`xml:lang`, `xml:space`).
 The published OOXML schemas reference it and do not ship it; without it the
 schema set does not compile. It is W3C's, unmodified.
+
+## OpenDocument 1.3 (`odf-1.3/`)
+
+ODF is not described by an XSD. It is described by a **RELAX NG** grammar, which is a
+different technology with a different validator invocation — `xmllint --relaxng` rather
+than `xmllint --schema` — and that is why these files sit in a directory of their own
+rather than being imported into `ooxml-transitional.xsd`. There is no driver file to
+write: unlike the OOXML set, the ODF grammar is a single self-contained file whose
+`rng:start` already admits every document root (`office:document`,
+`office:document-content`, `-styles`, `-meta`, `-settings`).
+
+| file | bytes | sha256 |
+| --- | --- | --- |
+| `OpenDocument-v1.3-schema.rng` | 596 938 | `40bad03efdbb02825230d357da0aa6ac679934c5bf56c6281752c0c24d58e4e6` |
+| `OpenDocument-v1.3-manifest-schema.rng` | 7 826 | `8aee71f03484be112af972d622cc9031280c007b0a454ae8815e8e333c9bdd17` |
+
+Both retrieved on 2026-09-03 from
+`https://docs.oasis-open.org/office/OpenDocument/v1.3/os/schemas/`, byte for byte as
+published by OASIS: *Open Document Format for Office Applications (OpenDocument) Version
+1.3*, OASIS Standard, 27 April 2021. The copyright notice is inside each file's own
+header comment, which is the reason not to edit them — and the same reason as for the
+ECMA files: a locally patched grammar makes the gate measure a standard nobody else has.
+
+**Two files, because `META-INF/manifest.xml` is not written in the document grammar.**
+Validating a manifest against the big schema reports «Did not expect element manifest
+there». The manifest has a schema of its own and the gate uses it.
+
+**1.3, not 1.2 or 1.4.** 1.3 is the current OASIS Standard and the version every fixture
+in `corpus/odp` declares (`office:version="1.3"`). 1.2 is what older LibreOffice writes
+and is a subset of what 1.3 admits; a 1.2 document validates against the 1.3 grammar.
+
+**What the grammar cannot describe**, and what the gate does about it: ODF conformance
+distinguishes a *conformant* document from an *extended* one, and an extended document
+may carry elements and attributes from namespaces the grammar does not define, which a
+consumer ignores. `schema_gate.py`'s `strip_foreign()` applies exactly that rule before
+validating — the ODF counterpart of the ECMA-376 Part 3 processing its
+`markup_compatibility()` applies to a `.pptx`. The concrete case in this repository is
+LibreOffice's `officeooo:annotation`, the only spelling of a slide comment that
+LibreOffice will actually open; see `corpus/odp/comments-slide.odp`.
+
+Licence: OASIS material is redistributable under the OASIS IPR Policy's copyright terms,
+which permit copying and distribution in full with the copyright notice included and
+without modification. The notice travels inside each file.
 
 ## Licence
 

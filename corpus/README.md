@@ -38,15 +38,37 @@ anything the project ships:
 
 ```bash
 python3 corpus/opc_check.py deck.pptx   # structural: content types, r:ids, relationship targets
-python3 corpus/schema_gate.py           # CI gate 1: the .pptx parts we write, against the XSDs
+python3 corpus/schema_gate.py           # CI gate 1: markup, against the grammars
+python3 corpus/render_gate.py           # CI gate 2: what a renderer makes of it
 ```
 
-`opc_check.py` asks whether a package hangs together; `schema_gate.py` asks whether the markup this
-project *writes* is legal ECMA-376, validating with `xmllint` against the schemas vendored in
-[`schemas/`](../schemas/). They are complementary, and a package can pass one and fail the other.
-`schema_gate.py` round-trips every deck in `pptx/` twice — edited on its preserved package, and with
-its `skeleton:` removed so the whole package is generated — and validates every part whose bytes the
-writer changed or created. See `kb/70-phase-15-xsd.md`.
+`opc_check.py` asks whether a package hangs together; `schema_gate.py` asks whether the markup is
+legal, validating with `xmllint` against the grammars vendored in [`schemas/`](../schemas/). They are
+complementary, and a package can pass one and fail the other. See `kb/70-phase-15-xsd.md` and
+`kb/96-phase-18-corpus.md`.
+
+### What each gate covers, per format
+
+Read this before assuming a format is checked. The two gates measure different formats to different
+depths, and the honest table is shorter than the excuses.
+
+| format | `schema_gate.py` | `render_gate.py` |
+|---|---|---|
+| `pptx/` | **Writer output**, against the ECMA-376 Transitional XSDs. Every deck is round-tripped twice — edited on its preserved package, and with `skeleton:` removed so the whole package is generated — and every part whose bytes the writer changed or created is validated. `mc:AlternateContent` gets ECMA-376 Part 3 fallback selection first | **Round trip**, against the deck it came from. All 21 decks round-trip byte-identical today, which a render can only agree with, so what is rendered is the *generated* package: same page count, no page that lost its ink |
+| `odp/` | **The fixtures**, against the OpenDocument 1.3 RELAX NG. There is no `.odp` writer until 18-D, so writer output cannot be validated; what is validated is what `generate.py` produces. Foreign markup (LibreOffice's `officeooo:` slide comment) is removed first, the way ODF conformance says a consumer ignores it | **The fixtures**, rendered. LibreOffice opens every one, draws exactly the number of `draw:page` the fixture declares, and leaves ink on each. The round-trip comparison arrives with the writer in 18-D |
+| `docx/`, `xlsx/` | Nothing. Neither writer's output is schema-validated | Nothing |
+| `odt/`, `ods/` | Nothing — see below | Nothing |
+| `doc/`, `ppt/` | Nothing, and nothing is owed: these convert *out of* the legacy format only, and there is no markup this project writes | Nothing |
+
+Two of those blanks are carried defects rather than decisions:
+
+- **Spreadsheets have no gate at all**, neither `xlsx/` nor `ods/`. Carried from Phase 17
+  (`kb/93-phase-17-close.md`) and not closed here.
+- **`odt/` and `ods/` are one glob away from the ODF arm** and are left out of it because switching
+  it on today reports exactly one failure: `odt/images-transformed.odt` puts `draw:rotation-angle`
+  on `style:graphic-properties`, which ODF 1.3 has nowhere — a shape is rotated by `draw:transform`
+  on the shape — and `crates/docsai-odf/src/styles.rs:187` is the code that reads it, so correcting
+  the fixture drops the rotation from its golden. That is reader work.
 
 ## Golden files
 
@@ -142,18 +164,30 @@ That LibreOffice's `.ppt` output is byte-deterministic was **measured before it 
 assumed: LibreOffice 24.2.7.2 wrote the same bytes twice in a row, again ninety-five seconds later,
 and again on a freshly created user profile. It embeds no timestamp and no UUID.
 
-The costs, both real:
+**What is written is not quite what LibreOffice wrote**, and the difference is one derivation the
+generator owns. LibreOffice embeds a `PIDSI_THUMBNAIL` — property 17, `VT_CF`, 588 344 bytes of
+preview bitmap — in `\5SummaryInformation`, and there is no way to switch it off from the command
+line (`Common/Save/Document/GenerateThumbnail` governs the ODF package thumbnail; setting it in the
+profile changes nothing here). It is optional in [MS-OSHARED] 2.3.3.2.1 and no part of this phase
+reads it, so `_ppt_deck()` removes the property — rebuilding the property set with its count and
+offsets restated, not blanking it — and then compacts the container, renumbering the sectors still
+in use into a dense run and truncating. **608 KB becomes 23 KB.**
 
-- The bytes are **not reviewable in a diff** the way a generated `.pptx`'s XML is. Provenance
-  written down is the compensation, and it is weaker.
-- The files are **large for what they carry**: ~600 KB each, of which about 95 % is a thumbnail
-  LibreOffice embeds in `\5SummaryInformation` (`PIDSI_THUMBNAIL`, 588 580 bytes) and which no
-  command-line option suppresses. Removing it would mean rewriting the compound file, i.e. writing
-  one, which this phase does not do.
+Every other stream is untouched: `PowerPoint Document`, `Pictures`, `Current User`, `\1CompObj`,
+`\1Ole` and `\5DocumentSummaryInformation` come out byte for byte as LibreOffice wrote them, and
+the generator asserts exactly that. Verified rather than assumed: the `cfb` crate opens the result,
+and LibreOffice converts it back to `.pptx` with every slide, every line of text and the picture.
+
+The cost that remains: the bytes are **not reviewable in a diff** the way a generated `.pptx`'s XML
+is. Provenance written down is the compensation, and it is weaker. `corpus/ppt/` is **116 KB** in
+total.
 
 **The two fixtures that exist to be refused are derived**, by the [MS-CFB] surgery in `generate.py`.
 Every byte in which they differ from `basic-slides.ppt` is computed by this repository:
 `encrypted.ppt` differs in exactly **four** (asserted), `truncated.ppt` in the region it cuts.
+Stripping the thumbnail moves no offset either of them depends on — those are offsets *inside* the
+`PowerPoint Document` stream, whose content is unchanged — so the numbers below are the same before
+and after the strip, and the generator re-checks them.
 
 ### Why the truncation is dangerous rather than decorative
 
@@ -246,3 +280,47 @@ OpenDocument Spreadsheet packages for **Phase 4**.
 | `formulas-basic.ods` | OpenFormula with `of:` prefix |
 | `merged-cells.ods` | Column/row spans and covered cells |
 | `images-anchored.ods` | Frames anchored to cells / sheet |
+
+## Presentations (`odp/`)
+
+OpenDocument Presentation packages for **Phase 18**. Named after the `corpus/pptx` deck each one
+mirrors, so that the cross-conversion matrix of 18-E pairs the two sides by name. Both gates cover
+them — see *What each gate covers, per format* above for how deeply.
+
+| File | Mirrors | Trait it isolates |
+|---|---|---|
+| `basic-slides.odp` | `basic-slides.pptx` | Two pages, title + outline. The floor of the format |
+| `slide-order.odp` | `slide-order.pptx` | Page order **is** document order: ODF has no `p:sldIdLst` to disagree with the parts. `draw:name` is crossed on purpose, so a reader that sorts by name — as it must for `slideN.xml` — gets the deck backwards |
+| `placeholders-cascade.odp` | `placeholders-cascade.pptx` | A title and an outline stating no geometry at all: everything from `style:presentation-page-layout` and the master page. **One** level of inheritance where OOXML has two |
+| `placeholders-empty.odp` | `placeholders-empty.pptx` | An empty placeholder is content. Both spellings of emptiness: a `draw:text-box` with no paragraph, and one holding an empty `text:p` |
+| `presentation-classes.odp` | — (ODF only) | The `presentation:class` vocabulary: `title`, `subtitle`, `outline`, `text`, `graphic`, `object`, `header`, `footer`, `date-time`, `page-number` — and two `outline` frames on one page, which ODF cannot tell apart and `p:ph`'s `idx` can. The mapping question 18-B has to settle, in a file |
+| `bullets-levels.odp` | `bullets-levels.pptx` | Nested `text:list` with both bullet kinds. ODF nests a list *inside the item above it*; OOXML flattens the depth into `a:pPr@lvl` |
+| `notes-speaker.odp` | `notes-speaker.pptx` | `presentation:notes` as a child of its page |
+| `reading-order.odp` | `reading-order.pptx` | Document order that is not reading order, plus an explicit `draw:z-index` that disagrees with both — ODF states the stacking order where OOXML leaves it implicit in `spTree` order |
+| `raw-preserved.odp` | `raw-preserved.pptx` | The four things with no IR node: `draw:g`, a `draw:custom-shape` whose `draw:enhanced-geometry` is the shape, a page transition as drawing-page properties, and an `anim:par` tree |
+| `tables-simple.odp` | `tables-simple.pptx` | `table:table` inside a `draw:frame` |
+| `images-anchored.odp` | `images-anchored.pptx` | A picture with explicit geometry — in centimetres, where the pptx side is in EMU |
+| `shapes-geometry.odp` | `shapes-geometry.pptx` | `draw:rect` with rounded corners, a `draw:custom-shape` naming a preset through `draw:type`, and a `draw:line`. `draw:transform` states a rotation as an affine matrix where `a:xfrm@rot` states an angle |
+| `charts-embedded.odp` | `charts-embedded.pptx` | An embedded chart sub-document (`Object 1/`), one series, with its numbers in the chart's own `local-table` |
+| `charts-multi-series.odp` | `charts-multi-series.pptx` | Two series and a legend |
+| `ole-embedded.odp` | `ole-embedded.pptx` | `draw:object-ole` with its replacement image under `ObjectReplacements/` |
+| `comments-slide.odp` | `comments-slide.pptx` | A commented page. Carries `officeooo:annotation` under `draw:page` — LibreOffice's namespace, not ODF's, because that is the only spelling that both survives a renderer and appears in real decks. The generator docstring records all three placements and what each one did |
+| `forty-slides.odp` | `forty-slides.pptx` | Not a trait but a **size**: forty pages |
+
+### pptx traits with no `.odp` mirror
+
+Each is absent for a reason in the format, not for lack of effort:
+
+| pptx deck | Why there is no `.odp` |
+|---|---|
+| `notes-crossed.pptx` | `presentation:notes` is a *child* of its page, not a part bound by a relationship. Nothing can be crossed |
+| `autofit-stale.pptx` | ODF has `draw:auto-grow-height` and `draw:fit-to-size`, and no cached `fontScale` — there is no stale number to go stale |
+| `charts-stale-workbook.pptx` | An ODF chart holds its numbers in a `table:table` inside itself. There is no second copy, so there is nothing for a cache to disagree with |
+| `smartart-fallback.pptx` | `mc:AlternateContent` is an ECMA-376 Part 3 mechanism. ODF's answer to unknown markup is foreign elements a consumer ignores, which is a different shape and is exercised by `comments-slide.odp` |
+| `macro-enabled.pptm` | ODF has no macro-enabled variant of the MIME type: a macro lives in `Basic/` inside an ordinary `.odp`. The trait exists, the *format distinction* does not, and no fixture carries it yet |
+
+### Adding an `.odp`
+
+Same recipe as the rest of the corpus, with one addition: `python3 corpus/schema_gate.py <name>` and
+`python3 corpus/render_gate.py <name>` both take a fixture name, and a new fixture that neither
+validates nor renders is a fixture that isolates nothing.
