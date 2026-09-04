@@ -24,6 +24,14 @@ targets = [
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+# Sign the binaries before the release is created. dist has no code-signing of
+# its own, so each job reopens the finished archives, signs the binaries inside
+# them and puts them back: macOS with the Developer ID identity plus
+# notarization (needs the MACOS_SIGNING_BUNDLE secret), Windows with Azure
+# Trusted Signing (needs no secret — OIDC from the `release` environment).
+# sign-windows runs after sign-macos; see docs/release-signing.md.
+host-jobs = ["./sign-macos", "./sign-windows"]
+
 # Publish jobs to run in CI
 # github-releases is automatic when ci = github and tags are pushed
 # Releases are cut from tags only; a PR builds nothing. CI already covers PRs.

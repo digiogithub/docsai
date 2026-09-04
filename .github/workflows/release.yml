@@ -44,6 +44,14 @@ permissions:
 #   1. No `pull_request` trigger — a release is a tag, not a push.
 #   2. A `test` job calling `.github/workflows/test.yml`, which `plan` needs, so
 #      nothing is built or published until the suite is green on all three OSes.
+#   3. The `custom-sign-macos` and `custom-sign-windows` jobs and the `host`
+#      dependency on them. They mirror
+#      `host-jobs = ["./sign-macos", "./sign-windows"]` in dist-workspace.toml,
+#      so `dist generate` regenerates equivalent wiring — possibly under
+#      different job ids, in which case drop these copies rather than keeping
+#      both. One hand-edit `dist generate` will NOT reproduce: custom-sign-windows
+#      needs custom-sign-macos, so the two never rewrite artifacts-build-global
+#      at the same time.
 on:
   push:
     tags:
@@ -223,14 +231,50 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+  # Sign and notarize the macOS binaries before anything is published.
+  # Generated from `host-jobs = ["./sign-macos"]` in dist-workspace.toml.
+  custom-sign-macos:
+    needs:
+      - plan
+      - build-local-artifacts
+      - build-global-artifacts
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    uses: ./.github/workflows/sign-macos.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+
+  # Authenticode-sign the Windows binaries. Runs after custom-sign-macos rather
+  # than beside it: both rewrite artifacts-build-global, and two concurrent
+  # uploads of the same artifact name would race.
+  # Generated from `host-jobs = [..., "./sign-windows"]` in dist-workspace.toml.
+  custom-sign-windows:
+    needs:
+      - plan
+      - build-local-artifacts
+      - build-global-artifacts
+      - custom-sign-macos
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && (needs.custom-sign-macos.result == 'skipped' || needs.custom-sign-macos.result == 'success') }}
+    # A called workflow can only narrow the caller's token, never widen it, so
+    # id-token: write has to be granted here for the OIDC login to work.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/sign-windows.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    secrets: inherit
+
   # Determines if we should publish/announce
   host:
     needs:
       - plan
       - build-local-artifacts
       - build-global-artifacts
+      - custom-sign-macos
+      - custom-sign-windows
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && (needs.custom-sign-macos.result == 'skipped' || needs.custom-sign-macos.result == 'success') && (needs.custom-sign-windows.result == 'skipped' || needs.custom-sign-windows.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"

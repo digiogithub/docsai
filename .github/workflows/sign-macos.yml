@@ -1,0 +1,180 @@
+name: Sign macOS artifacts
+
+# Signs and notarizes the macOS binaries dist produced, BEFORE the release is
+# created. dist has no macOS code-signing support, and its build job packages
+# the archive in the same command that compiles it, so there is no hook between
+# "binary exists" and "binary is inside the tarball". This job therefore reopens
+# the finished tarballs, signs the Mach-O binaries inside them with the
+# Developer ID identity (hardened runtime + timestamp), notarizes them, repacks
+# the archives under their original names and overwrites the workflow artifacts.
+# `host` then publishes signed archives as if they had always been signed.
+#
+# Wired in through `host-jobs` in dist-workspace.toml, which makes `host` — the
+# job that creates the GitHub Release — wait for this one.
+#
+# The artifact names below follow dist's own scheme
+# (artifacts-build-local-<target>, artifacts-build-global) and must be kept in
+# step with the `targets` list in dist-workspace.toml.
+#
+# Requires the MACOS_SIGNING_BUNDLE secret — see docs/release-signing.md.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: 'The dist plan. Unused here, but dist passes it to every custom job.'
+        required: false
+        type: string
+    secrets:
+      MACOS_SIGNING_BUNDLE:
+        description: 'Base64 tar.gz with the Developer ID certificates.'
+        required: true
+
+jobs:
+  sign:
+    name: Sign and notarize
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download the build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-*
+          path: incoming
+
+      - name: Unpack the macOS archives
+        id: unpack
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob dotglob
+
+          mkdir -p work
+          : > work/archives.txt
+          : > work/binaries.txt
+
+          for tarball in incoming/*/*apple-darwin*.tar.gz; do
+            name="$(basename "$tarball" .tar.gz)"
+            dir="work/$name"
+            mkdir -p "$dir"
+            tar xzf "$tarball" -C "$dir"
+            echo "$tarball" >> work/archives.txt
+            while IFS= read -r f; do
+              # `file` is the only reliable way to tell the binary apart from
+              # the README and the licence dist ships alongside it.
+              file -b "$f" | grep -q '^Mach-O' && echo "$f" >> work/binaries.txt
+            done < <(find "$dir" -type f)
+          done
+
+          if [ ! -s work/archives.txt ]; then
+            echo "::error::No apple-darwin archive found in the dist artifacts."
+            ls -R incoming
+            exit 1
+          fi
+          if [ ! -s work/binaries.txt ]; then
+            echo "::error::No Mach-O binary found inside the macOS archives."
+            find work -type f
+            exit 1
+          fi
+
+          echo "Archives:";  sed 's/^/  /' work/archives.txt
+          echo "Binaries:";  sed 's/^/  /' work/binaries.txt
+
+          {
+            echo 'binaries<<ARTIFACT_EOF'
+            cat work/binaries.txt
+            echo 'ARTIFACT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up the signing keychain
+        uses: digiogithub/ci-actions/macos-signing-keychain@v1
+        with:
+          signing-bundle: ${{ secrets.MACOS_SIGNING_BUNDLE }}
+          env-file: kvagerc
+          keychain-name: docsai-build
+          notary-profile: docsai-notary
+
+      - name: Codesign the binaries
+        uses: digiogithub/ci-actions/macos-codesign@v1
+        with:
+          paths: ${{ steps.unpack.outputs.binaries }}
+
+      - name: Notarize the binaries
+        # A bare Mach-O cannot carry a stapled ticket, so this is submit-only:
+        # a downloaded copy passes Gatekeeper's online check by CDHash.
+        uses: digiogithub/ci-actions/macos-notarize@v1
+        with:
+          paths: ${{ steps.unpack.outputs.binaries }}
+
+      - name: Clean up the signing keychain
+        if: always()
+        uses: digiogithub/ci-actions/macos-keychain-cleanup@v1
+
+      - name: Repack the archives and refresh the checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob dotglob
+
+          while IFS= read -r tarball; do
+            [ -n "$tarball" ] || continue
+            name="$(basename "$tarball" .tar.gz)"
+            dir="work/$name"
+            rm -f "$tarball"
+            ( cd "$dir" && tar czf "$OLDPWD/$tarball" * )
+            echo "Repacked $tarball"
+
+            # dist ships a checksum next to the archive; whichever artifact it
+            # landed in, it now describes the pre-signature bytes.
+            for sum in incoming/*/"$name.tar.gz.sha256"; do
+              ( cd "$(dirname "$sum")" && shasum -a 256 "$name.tar.gz" > "$(basename "$sum")" )
+              echo "Refreshed $sum"
+            done
+          done < work/archives.txt
+
+      - name: Verify the signatures survived the round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          status=0
+          for tarball in incoming/*/*apple-darwin*.tar.gz; do
+            probe="$(mktemp -d)"
+            tar xzf "$tarball" -C "$probe"
+            while IFS= read -r f; do
+              file -b "$f" | grep -q '^Mach-O' || continue
+              info="$(codesign -dv --verbose=2 "$f" 2>&1 || true)"
+              case "$info" in
+                *"(runtime)"*) echo "ok: $(basename "$tarball") / $(basename "$f")" ;;
+                *) echo "::error::$(basename "$tarball") / $(basename "$f") lost its hardened-runtime signature."; status=1 ;;
+              esac
+            done < <(find "$probe" -type f)
+            rm -rf "$probe"
+          done
+          exit $status
+
+      # One upload per original artifact name, so `host` picks the signed files
+      # up through the same `artifacts-*` download it already does.
+      - name: Upload the signed aarch64 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-build-local-aarch64-apple-darwin
+          path: incoming/artifacts-build-local-aarch64-apple-darwin/
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Upload the signed x86_64 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-build-local-x86_64-apple-darwin
+          path: incoming/artifacts-build-local-x86_64-apple-darwin/
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Upload the refreshed global artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-build-global
+          path: incoming/artifacts-build-global/
+          overwrite: true
+          if-no-files-found: warn

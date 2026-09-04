@@ -1,0 +1,180 @@
+name: Sign Windows artifacts
+
+# Authenticode-signs the Windows binaries dist produced, BEFORE the release is
+# created. It is the Windows half of what sign-macos.yml does for darwin, and
+# for the same reason: dist compiles and packages in a single command, so the
+# only place to sign is inside the finished archive. This job reopens the
+# *pc-windows-*.zip artifacts, signs every .exe inside them with Azure Trusted
+# Signing, repacks the archives under their original names, refreshes the
+# .sha256 files and overwrites the workflow artifacts. `host` then publishes
+# signed archives as if they had always been signed.
+#
+# Wired in through `host-jobs` in dist-workspace.toml. It runs after
+# custom-sign-macos rather than beside it: both jobs rewrite the shared
+# artifacts-build-global artifact, and two concurrent uploads of the same
+# artifact name would race.
+#
+# Unlike the macOS side there is no secret. The job runs in the `release`
+# GitHub environment and mints an OIDC token that a federated credential on the
+# Entra application accepts; the Azure account, certificate profile and role
+# assignment are shared with pando and git-in-track. See docs/release-signing.md.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: 'The dist plan. Unused here, but dist passes it to every custom job.'
+        required: false
+        type: string
+
+jobs:
+  sign:
+    name: Sign with Azure Trusted Signing
+    runs-on: windows-latest
+    # The federated credential on the Entra app is scoped to
+    # repo:digiogithub/docsai:environment:release, so the OIDC token minted here
+    # only validates from within that environment.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 60
+    steps:
+      - name: Download the build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-*
+          path: incoming
+
+      - name: Unpack the Windows archives
+        id: unpack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $archives = @(Get-ChildItem -Path incoming -Recurse -Filter '*pc-windows-*.zip')
+          if ($archives.Count -eq 0) {
+            Write-Output "::error::No pc-windows archive found in the dist artifacts."
+            Get-ChildItem -Path incoming -Recurse | ForEach-Object { $_.FullName }
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Force -Path work | Out-Null
+          $names = @()
+          foreach ($archive in $archives) {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($archive.Name)
+            $dir = Join-Path 'work' $name
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Expand-Archive -Path $archive.FullName -DestinationPath $dir -Force
+            $names += $name
+            "Unpacked $($archive.FullName)"
+          }
+
+          $exes = @(Get-ChildItem -Path work -Recurse -Filter '*.exe')
+          if ($exes.Count -eq 0) {
+            Write-Output "::error::No .exe found inside the Windows archives."
+            Get-ChildItem -Path work -Recurse | ForEach-Object { $_.FullName }
+            exit 1
+          }
+          $exes | ForEach-Object { "Binary: $($_.FullName)" }
+
+          $names -join "`n" | Set-Content -Path work/archives.txt
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign with Azure Trusted Signing
+        # No credential inputs: the action falls back to the Azure CLI session
+        # established above, which is the federated GitHub identity.
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\work
+          files-folder-filter: exe
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify the signatures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = 0
+          Get-ChildItem -Path work -Recurse -Filter '*.exe' | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "-- $($_.Name): $($sig.Status) / $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') {
+              Write-Output "::error::Unsigned or invalid: $($_.Name) ($($sig.Status))"
+              $status = 1
+            }
+          }
+          exit $status
+
+      - name: Repack the archives and refresh the checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          foreach ($name in (Get-Content work/archives.txt)) {
+            if (-not $name) { continue }
+            $dir = Join-Path 'work' $name
+            $archive = Get-ChildItem -Path incoming -Recurse -Filter "$name.zip" | Select-Object -First 1
+            Remove-Item $archive.FullName -Force
+            Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $archive.FullName -Force
+            "Repacked $($archive.FullName)"
+
+            # dist ships a checksum next to the archive; whichever artifact it
+            # landed in, it now describes the pre-signature bytes.
+            $hash = (Get-FileHash -Algorithm SHA256 $archive.FullName).Hash.ToLower()
+            Get-ChildItem -Path incoming -Recurse -Filter "$name.zip.sha256" | ForEach-Object {
+              # sha256sum's format: the digest, two spaces, the bare file name.
+              [System.IO.File]::WriteAllText($_.FullName, "$hash  $name.zip`n")
+              "Refreshed $($_.FullName)"
+            }
+          }
+
+      - name: Verify the signatures survived the round trip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = 0
+          foreach ($archive in (Get-ChildItem -Path incoming -Recurse -Filter '*pc-windows-*.zip')) {
+            $probe = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
+            Expand-Archive -Path $archive.FullName -DestinationPath $probe -Force
+            Get-ChildItem -Path $probe -Recurse -Filter '*.exe' | ForEach-Object {
+              $sig = Get-AuthenticodeSignature $_.FullName
+              if ($sig.Status -eq 'Valid') {
+                "ok: $($archive.Name) / $($_.Name)"
+              } else {
+                Write-Output "::error::$($archive.Name) / $($_.Name) lost its signature ($($sig.Status))."
+                $status = 1
+              }
+            }
+            Remove-Item $probe -Recurse -Force
+          }
+          exit $status
+
+      # One upload per original artifact name, so `host` picks the signed files
+      # up through the same `artifacts-*` download it already does.
+      - name: Upload the signed x86_64 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-build-local-x86_64-pc-windows-msvc
+          path: incoming/artifacts-build-local-x86_64-pc-windows-msvc/
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Upload the refreshed global artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-build-global
+          path: incoming/artifacts-build-global/
+          overwrite: true
+          if-no-files-found: warn
