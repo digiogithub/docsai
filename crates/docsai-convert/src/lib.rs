@@ -174,7 +174,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Ppt,
         read: true,
         write: false,
-        note: "A legacy .ppt is read two ways, as a .doc is: Phase 19-B pre-converts it to .pptx with LibreOffice and hands the result to the unchanged Phase 13 reader, and Phase 19-D reads it natively and degraded (slides, shape text with its outline levels, and the Pictures stream). The same --use-loffice auto|never|require chooses, and `never` now reads rather than refuses. Writing .ppt is out of scope for the whole phase",
+        note: "A legacy .ppt is read two ways, as a .doc is: Phase 19-B pre-converts it to .pptx with LibreOffice and hands the result to the unchanged Phase 13 reader, and Phase 19-D reads it natively and degraded (slides, shape text with its outline levels, and the Pictures stream). The same --use-loffice auto|never|require chooses, and `never` now reads rather than refuses. An encrypted or password-protected .ppt is refused, with the reason and the remedy, in front of the choice of route — so it is refused the same way whether LibreOffice is installed or not. Writing .ppt is out of scope for the whole phase",
     },
     FormatSupport {
         format: Format::DocMark,

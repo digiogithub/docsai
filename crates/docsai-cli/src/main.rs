@@ -1311,8 +1311,8 @@ Pass a known extension or check the file is not corrupt. See `docsai formats`."
     {
         eprintln!(
             "docsai: install LibreOffice and ensure `soffice` is on PATH, \
-or set DOCSAI_LIBREOFFICE, or pass --use-loffice never for the native degraded path \
-where there is one — `.doc` has one, `.ppt` does not yet."
+or set DOCSAI_LIBREOFFICE, or pass --use-loffice never for the native degraded path — \
+both `.doc` and `.ppt` have one, and it reads less than LibreOffice does."
         );
     }
 }

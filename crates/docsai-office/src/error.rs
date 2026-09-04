@@ -31,13 +31,35 @@ pub enum ReadError {
     #[error("document is encrypted or password-protected")]
     Encrypted,
 
+    /// An encrypted or protected document, refused **in front of** whichever
+    /// route would have read it (Phase 19-E).
+    ///
+    /// Distinct from [`Encrypted`](ReadError::Encrypted), which states the fact
+    /// and nothing else. This one carries the evidence the refusal rests on and
+    /// what the reader of the message can do about it, because it is raised
+    /// before a route is chosen — there is no later stage that would get a
+    /// chance to explain it, and «unsupported» would send a user looking for a
+    /// fault in a file that has none.
+    #[error("{what} is encrypted or password-protected ({evidence}); {remedy}")]
+    EncryptedInput {
+        /// What the file is, in the user's terms rather than the format's.
+        what: String,
+        /// Where the refusal comes from: the field, its value and its stream.
+        evidence: String,
+        /// What can be done instead, in one sentence.
+        remedy: String,
+    },
+
     /// A format this build can recognise and route, but not parse itself.
     ///
-    /// Phase 19 introduces it for legacy `.ppt`: the file is well-formed and
-    /// the project knows exactly what it is, but the only reader it has for it
-    /// today lives outside the process (LibreOffice). `missing` says what is
-    /// absent and what to do about it, because "unsupported" on its own sends
-    /// a user looking for a fault in their file.
+    /// Introduced in Phase 19-B for legacy `.ppt`, whose only reader then lived
+    /// outside the process (LibreOffice); 19-D gave `.ppt` a native reader and
+    /// **nothing constructs this variant today**. It is kept rather than
+    /// removed because it is public API and because its shape — name what is
+    /// absent and what to do about it, instead of saying "unsupported" and
+    /// sending a user looking for a fault in a file that has none — is the one
+    /// the next legacy format routed before it is parsed will want. See
+    /// `kb/106-phase-19-close.md`.
     #[error("no native reader for `{format}`: {missing}")]
     NoNativeRoute { format: String, missing: String },
 

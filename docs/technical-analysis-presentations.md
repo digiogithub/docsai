@@ -108,6 +108,14 @@ stream for BLIPs — notably **simpler than the `.doc` piece table**, so the nat
 more per hour here than it was for `.doc`. `office_oxide` may cover it without writing the
 parser. Writing `.ppt` is out of scope, exactly like `.doc`/`.xls`.
 
+> **Delivered, Phase 19** (`kb/106-phase-19-close.md`). Both routes exist and are the same code
+> as `.doc`'s, chosen by one `--use-loffice auto|never|require`. `office_oxide` was weighed and
+> **not adopted** — cheap to link, but silent on both refusal fixtures and text-only in its model;
+> the argument is `docs/technical-analysis.md` §4.6. The native route was written against
+> [MS-PPT] as sketched above, and the prognosis held: it is 1 508 lines against the `.doc`
+> reader's ~1 004, and it recovers outline levels and picture geometry the sketch did not promise.
+> An encrypted or protected `.ppt` is refused in front of both routes; `.ppt` is never written.
+
 **`.odp`** — not in the original request, but leaving it out breaks the project's symmetry
 (`.odt`/`.ods` exist as the free counterparts). No mature crate exists — the same gap we had for
 `.odt`, which `docsai-odf` filled with a custom parser. Parser over `draw:page`, `draw:frame`,

@@ -6,7 +6,7 @@
 
 > **Project status: Phases 0–7 completed for the core path.**
 > `.docx` / `.odt` ⇄ DocMark, `.xlsx` / `.ods` ⇄ DocMark, `.xls` read, and legacy
-> `.doc` read (native degraded text, or full fidelity via LibreOffice headless).
+> `.doc` and `.ppt` read (native degraded text, or full fidelity via LibreOffice headless).
 > Phase 6 adds `inspect`, batch `--out-dir`, stdin/stdout pipelines, `--style-map`,
 > and `cargo-dist` release packaging. Phase 7 adds the MCP stdio server
 > (`docsai mcp`), now with eleven tools and one resource. That plan
@@ -15,7 +15,7 @@
 > **Next: [development plan v2](docs/development-plan-v2.md)** — agent-native docsai
 > (stable node ids, `outline`/`read --select`/`search`, `--fidelity agent`, measured token
 > budget, patch editing) and presentations (`.pptx` ⇄ DocMark, `.odp` ⇄ DocMark, `.ppt`
-> read). Analysis: [`docs/technical-analysis-presentations.md`](docs/technical-analysis-presentations.md).
+> read — **Phase 19 is closed**). Analysis: [`docs/technical-analysis-presentations.md`](docs/technical-analysis-presentations.md).
 
 ```bash
 cargo run -p docsai-cli -- convert report.docx -o report.dmk.md
@@ -38,13 +38,13 @@ cargo run -p docsai-cli -- mcp
 | OpenDocument Text | `.odt` | ✅ | ✅ | Free equivalent of `.docx` |
 | OpenDocument Spreadsheet | `.ods` | ✅ | ✅ | Free equivalent of `.xlsx` |
 | PowerPoint OOXML | `.pptx` | ✅ | 🚧 v2 P15 | Slides, placeholders, notes, tables, images, charts; original package skeleton preserved. `docsai convert deck.pptx -o deck.dmk.md` writes DocMark-P, and `inspect`, `outline`, `tokens`, `search` and `read --select` work over a deck. Writing goes back into the preserved package: a slide's **text**, its **pictures** (media re-injected as its own bytes, with the relationship and the content type it needs), its **tables** and its **hyperlinks** are rebuilt from the document, a **preserved object** (SmartArt, OLE, a group, a custom geometry, an animation) goes back as the original markup at its original z-order, and a chart's data is still copied from it with a warning. A deck with **no** preserved package — plain Markdown with no attributes — is written on an embedded default template, with the layout of each slide chosen from the shape of its content, and a slide or a notes page the package does not have is written rather than refused. `docsai roundtrip deck.pptx` closes the cycle and reports the per-category fidelity metric; the whole deck corpus round-trips idempotent, and a deck nobody edited comes back as the package that was read, byte for byte. **Phase 15 is closed with one item outstanding**: headless LibreOffice now opens and renders every one of the seventeen generated packages without failing and with no page coming out blank (the render gate, run for real), but **PowerPoint** has still never opened a written deck, and PowerPoint is the loader that decides — the checklist that would say so is prepared and unrun in [`docs/spikes/P2-powerpoint-gate.md`](docs/spikes/P2-powerpoint-gate.md), and risk P2 stays open until it is signed |
-| PowerPoint binary | `.ppt` | 🕓 v2 P19 | ➖ | Read only: native degraded text, or LibreOffice headless → pptx |
+| PowerPoint binary | `.ppt` | ✅ | ➖ | Read only, and read two ways, as a `.doc` is. With LibreOffice (`--use-loffice auto|require`) the deck is pre-converted to `.pptx` and handed to the unchanged `.pptx` reader, so the *content* — slides, order, titles, every bullet at its own level, the picture byte for byte, the document metadata — comes back equivalent to the `.pptx` path; the package around it is LibreOffice's reconstruction, because a `.ppt` has no OOXML layout parts to carry across. Without it (`--use-loffice never`, or no LibreOffice installed) a native [MS-PPT] reader recovers the slides in the deck's own order, the text of every shape with its outline levels, and the pictures of the `Pictures` stream placed by the shape that shows them; one warning names everything it does not read, and that list is invariant, so it is never false. An **encrypted or password-protected** `.ppt` is **refused** — in front of the choice of route, so it is refused identically with and without LibreOffice — and a truncated one is refused by name rather than half-read. Writing `.ppt` is out of scope, permanently |
 | OpenDocument Presentation | `.odp` | ✅ | ✅ | Free equivalent of `.pptx`, and the **same IR and the same DocMark-P** a `.pptx` goes through — the deck writer has no branch on the package it came from. Pages, frames, `presentation:class` as a placeholder type, master pages and presentation page layouts, nested lists, notes, comments, tables, pictures and embedded charts all read, with ODF's automatic styles resolved into the model, and everything the IR has no node for (`draw:g`, a custom shape, a page transition, an `anim:` tree, an OLE object) kept as a stub over its own preserved markup plus a warning. Writing **splices into the preserved archive** entry by entry, so a deck nobody edited comes back **byte for byte** — `mimetype` first and stored, as ODF requires — and a text body that changed is rewritten in place while everything else keeps its bytes; a slide or shape added or removed, and a table, chart, picture or preserved object that changed, are named in a warning rather than written. `pptx ⇄ odp` converts through the IR against a 22-cell matrix in which every drop is warned and no warning is false. Validated against the vendored OpenDocument 1.3 RELAX NG grammar and opened by LibreOffice on every fixture and every crossing |
 | Extended Markdown | `.dmk.md` | ✅ | ✅ | Pivot format **DocMark** (superset of CommonMark + GFM) |
 
 `docsai formats` prints this same matrix for what the binary can actually do.
 
-Writing `.doc` and `.xls` (legacy binary formats) is deliberately out of scope: the recommended output path into the Microsoft ecosystem is always OOXML (`.docx` / `.xlsx`).
+Writing `.doc`, `.xls` and `.ppt` (the legacy binary formats) is deliberately out of scope: the recommended output path into the Microsoft ecosystem is always OOXML (`.docx` / `.xlsx` / `.pptx`).
 
 ## What is DocMark?
 
@@ -109,6 +109,7 @@ docsai convert sheet.xlsx --max-cells 100000       # refuse oversized workbooks
 docsai convert legacy.doc -o legacy.dmk.md         # .doc: LO if installed, else native text
 docsai convert legacy.doc --use-loffice never      # force native degraded path
 docsai convert legacy.doc --use-loffice require    # fail if LibreOffice is missing
+docsai convert legacy.ppt -o deck.dmk.md          # .ppt: read-only, same three policies
 docsai inspect report.docx                         # metadata, styles, media, stats
 docsai inspect report.docx --json                  # same, machine-readable
 docsai outline report.docx                         # map of addressable nodes + cost

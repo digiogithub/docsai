@@ -299,7 +299,8 @@ Decisions:
 ## 7. Cross-platform and distribution
 
 - No system dependencies on the main path (pure Rust). `soffice` is searched at runtime
-  in standard locations per OS only for `.doc` and for slide rendering (`--thumbnails`,
+  in standard locations per OS only for the legacy binary formats it pre-converts —
+  `.doc` → `.docx` and `.ppt` → `.pptx` — and for slide rendering (`--thumbnails`,
   `render_slides`), which also needs `pdftoppm`. Both are off the main path: absent, they
   cost a warning and nothing else. Availability is decided by **running** the tool, not by
   finding the file — an installed LibreOffice whose loader cannot find its own libraries

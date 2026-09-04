@@ -16,6 +16,11 @@
 //! for every file and is never false — and nothing else here warns about a
 //! thing that was in fact recovered (AGENTS.md §7 rule 3, both halves).
 //!
+//! An **encrypted or password-protected** `.ppt` is refused rather than read,
+//! by [`refuse_if_encrypted`] — which `docsai-convert` calls *in front of* the
+//! choice between the two routes (increment 19-E), because LibreOffice does not
+//! consult `CurrentUserAtom.headerToken` and would otherwise read one happily.
+//!
 //! Bounds checking is structural rather than sprinkled: [`window::Window`] is
 //! the only way an offset becomes bytes, it has no clamping accessor at all,
 //! and `#![deny(clippy::indexing_slicing)]` below makes that mechanical for
@@ -84,6 +89,58 @@ const MASTER_UNITS_PER_INCH: i64 = 576;
 /// merely grouped.
 const MAX_SHAPE_DEPTH: u8 = 16;
 
+/// The refusal an encrypted `.ppt` gets, wherever it is caught.
+///
+/// One function, because the message is the deliverable of the phase's third
+/// acceptance criterion and two copies of it would drift. It says what the file
+/// is, why it cannot be read, and what its owner can do instead.
+fn encrypted() -> ReadError {
+    ReadError::EncryptedInput {
+        what: "this legacy PowerPoint file (.ppt)".into(),
+        evidence: format!(
+            "CurrentUserAtom.headerToken = {:#010X} in the `{CURRENT_USER}` stream, [MS-PPT] 2.3.2",
+            persist::TOKEN_ENCRYPTED
+        ),
+        remedy: "docsai decrypts nothing, on either route — neither the native reader nor the \
+                 LibreOffice pre-conversion — and reading it anyway would produce a document \
+                 that silently lacks its content. Open it with its password in PowerPoint or \
+                 LibreOffice, save it as .pptx (or as an unprotected .ppt), and convert that"
+            .into(),
+    }
+}
+
+/// Refuses an encrypted or password-protected `.ppt` **before any route reads
+/// it** — the phase's third acceptance criterion, and where it lives is most of
+/// it.
+///
+/// LibreOffice opens `corpus/ppt/encrypted.ppt` happily and hands back the
+/// whole deck, because it never consults `CurrentUserAtom.headerToken`
+/// (`kb/102-phase-19-loffice.md`). A check living only in [`read`] below would
+/// therefore leave `--use-loffice auto` reading encrypted decks through the
+/// other route. `docsai-convert` calls this in front of the route decision, so
+/// both routes refuse the same file for the same reason and with the same
+/// words.
+///
+/// It reads one 4-byte field of one small stream. It answers `Ok` for anything
+/// it cannot make sense of: a file that is broken rather than encrypted belongs
+/// to the reader, which can name the offset it failed on — a pre-flight that
+/// guessed here would replace a precise refusal with a vague one.
+pub(crate) fn refuse_if_encrypted<R: Read + Seek>(reader: R) -> Result<(), ReadError> {
+    let Ok(mut comp) = crate::doc::open_cfb(reader) else {
+        return Ok(());
+    };
+    if !comp.is_stream(CURRENT_USER) {
+        return Ok(());
+    }
+    let Ok(current_user) = crate::doc::read_stream(&mut comp, CURRENT_USER) else {
+        return Ok(());
+    };
+    match persist::read_current_user(&current_user) {
+        Ok(current) if current.is_encrypted() => Err(encrypted()),
+        _ => Ok(()),
+    }
+}
+
 /// Reads a legacy `.ppt` natively, degraded.
 ///
 /// Always emits one [`Warning::Degraded`]: the native route is *always* less
@@ -119,17 +176,9 @@ pub(crate) fn read<R: Read + Seek>(
     let current_user = crate::doc::read_stream(&mut comp, CURRENT_USER)?;
     let current = persist::read_current_user(&current_user)?;
     if current.is_encrypted() {
-        // Increment 19-E owns the refusal, and it must sit *in front of* the
-        // hand-off so the LibreOffice route refuses the same file — which this
-        // reader cannot do from here. What it can do is refuse to read an
-        // encrypted deck as if it were plain **silently**.
-        report.warn(Warning::UnsupportedElement {
-            kind: "encrypted .ppt (CurrentUserAtom.headerToken = 0xF3D1C4DF)".into(),
-            location: CURRENT_USER.into(),
-            action: "read anyway; whatever comes out is not this document's content, and \
-                     refusing it is increment 19-E"
-                .into(),
-        });
+        // The same refusal `refuse_if_encrypted` gives in front of the route
+        // decision, for a caller that reached this reader directly.
+        return Err(encrypted());
     } else if current.header_token != persist::TOKEN_PLAIN {
         report.warn(Warning::UnsupportedElement {
             kind: format!(
@@ -687,14 +736,39 @@ mod tests {
     }
 
     #[test]
-    fn the_encrypted_fixture_is_read_but_never_silently() {
-        // Increment 19-E owns the refusal, and it belongs in front of both
-        // routes rather than here. What 19-D owes is that the file is not read
-        // *as if it were plain*.
-        let (_, report) = read_fixture("encrypted.ppt").unwrap();
-        let flagged = report.warnings.iter().any(
-            |w| matches!(w, Warning::UnsupportedElement { kind, .. } if kind.contains("encrypted")),
-        );
-        assert!(flagged, "{:?}", report.warnings);
+    fn the_encrypted_fixture_is_refused_rather_than_read() {
+        // 19-E. The reader refuses it too — the shared pre-flight in front of
+        // the route decision is what covers the LibreOffice route, and this is
+        // what covers a caller who reaches this crate directly.
+        let err = read_fixture("encrypted.ppt").expect_err("an encrypted deck is not read");
+        match err {
+            ReadError::EncryptedInput {
+                what,
+                evidence,
+                remedy,
+            } => {
+                assert!(what.contains("legacy PowerPoint file"), "{what}");
+                assert!(evidence.contains("0xF3D1C4DF"), "{evidence}");
+                assert!(evidence.contains(CURRENT_USER), "{evidence}");
+                assert!(remedy.contains("save it as .pptx"), "{remedy}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_preflight_refuses_the_encrypted_fixture_and_nothing_else() {
+        let file = std::fs::File::open(fixture("encrypted.ppt")).unwrap();
+        assert!(matches!(
+            refuse_if_encrypted(file),
+            Err(ReadError::EncryptedInput { .. })
+        ));
+        for name in ["basic-slides.ppt", "mixed-media.ppt", "truncated.ppt"] {
+            let file = std::fs::File::open(fixture(name)).unwrap();
+            assert!(
+                refuse_if_encrypted(file).is_ok(),
+                "{name} is not encrypted, and a broken file is the reader's to refuse"
+            );
+        }
     }
 }

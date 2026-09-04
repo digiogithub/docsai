@@ -514,9 +514,44 @@ writer surface no application but LibreOffice has ever opened.
 `kb/104-phase-18-close.md` records the close, both criteria with re-run evidence, where every budget
 stands, what the gates cover and what they still do not, and the **fifty-two** things carried
 forward.
-Next is **Phase 19** (legacy `.ppt` reading, already under way and run concurrently with this one)
-and then **Phase 20** (hardening) — and, first, the P2 form, which should be signed before a
-hardening phase measures only the properties this repository already knows how to measure.
+**Phase 19 is closed**: legacy `.ppt`, **read-only and permanently so**. It is the `.doc` strategy
+applied to a second binary format, and it is the *same code*: `loffice_route` is a two-row policy
+table (`Doc → docx`, `Ppt → pptx`), `convert_with_loffice` is one sandboxed child under one
+timeout, and `try_loffice` is one function under one `--use-loffice auto|never|require`, so a third
+legacy format would be one line. With LibreOffice the deck is pre-converted and handed to the
+**unchanged** Phase 13 `.pptx` reader — which is what makes «fidelity equivalent to the pptx path»
+a measurement rather than a claim, taken against the `.pptx` originals the corpus keeps beside each
+legacy deck: identical slides, order, titles, bullets at their own levels, metadata, and the same
+content-hashed picture asset. What does **not** survive is the package around the content, because a
+`.ppt` has no OOXML layout parts at all and LibreOffice therefore synthesises a master, a layout and
+explicit run formatting; the route's single warning says exactly that and nothing file-specific, so
+it can never be false. Without LibreOffice, a **native [MS-PPT] reader** (1 508 lines) walks
+`CurrentUserAtom` → the `UserEditAtom` chain → the merged persist directory → the
+`SlideListWithTextContainer` at `recInstance` 0, and recovers the slides in the deck's own order,
+the text of every shape through the shape tree with its **outline levels** from
+`StyleTextPropAtom`, and the pictures of the `Pictures` stream **placed** by the shape that shows
+them (`pib` → `foDelay` → the client anchor). Its one `Degraded` warning lists an invariant set of
+losses, and nothing warns about a loss that did not happen. **Bounds checking is structural, not
+sprinkled**: one `Window` type is the only way an offset becomes bytes, it has **no clamping
+accessor at all**, `#![deny(clippy::indexing_slicing)]` covers every submodule, `recLen` is
+validated before any body is read, and there are depth, chain-length and run-length caps the
+specification does not require. **`office_oxide` was weighed and not adopted** — +98 KB and +30 s,
+so *not* on cost: it reads `corpus/ppt/encrypted.ppt` back as two ordinary slides and
+`truncated.ppt` as one slide of placeholder prompt text, both silently, and its model has no
+outline level to lose (`docs/technical-analysis.md` §4.6). **An encrypted or protected `.ppt` is
+refused in front of the choice of route** — `docsai_office::refuse_if_encrypted`, called before
+either route is picked, because LibreOffice never consults `CurrentUserAtom.headerToken` and a
+refusal living inside the native reader would leave `--use-loffice auto` reading encrypted decks on
+every machine that has LibreOffice. The message names the file, the token, the fact that docsai
+decrypts nothing on either route, and what to do instead. `.ppt` is also the **first format in this
+repository with no schema gate, no render gate and no OPC check** — none of the three is applicable
+to a binary record stream that is never written — so `corpus/generate.py`'s structural assertions
+are its only gate, and the reader's evidence is a comparison against `.pptx` originals rather than a
+golden. `kb/106-phase-19-close.md` records the close, the three criteria with re-run evidence, the
+security posture Phase 20 inherits, and the **sixty-four** things carried forward.
+Next is **Phase 20** (hardening) — and, first, the P2 form, unsigned after a **fourth** phase, which
+should be signed before a hardening phase measures only the properties this repository already knows
+how to measure.
 
 ## 2. Documents you must read before implementing
 

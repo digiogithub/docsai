@@ -213,7 +213,9 @@ The content behind that flag is **not ciphertext**. Nothing in this tree can wri
 binary PowerPoint, and LibreOffice cannot either — `--convert-to ppt` with `EncryptFile` and a
 password was tried and produced a byte-identical plaintext file. What the fixture carries is the
 *declaration* a conforming reader is required to honour before it parses anything else. It proves
-the refusal. It proves nothing about decryption, and nothing in Phase 19 claims otherwise.
+the refusal — which is what it is for, and since 19-E the refusal is real: `docsai convert
+corpus/ppt/encrypted.ppt` exits 2 with a message naming the token, on all three `--use-loffice`
+values. It proves nothing about decryption, and nothing in Phase 19 claims otherwise.
 
 ### What can and cannot gate a `.ppt`
 
@@ -225,8 +227,13 @@ spreadsheets:
 - `render_gate.py` — **not applicable**. Its property is a round trip, and `.ppt` is read-only by
   design. There is no written package to render against the one that was read.
 - `opc_check.py` — **not applicable**. There is no OPC package.
-- Golden DocMark — **not yet**. There is no `.ppt` reader until 19-B/19-D; the goldens arrive with
-  the reader that produces them.
+- Golden DocMark — **not taken**. Both readers exist (19-B, 19-D) and neither has a `.expected.dmk.md`
+  beside it, deliberately: the property worth pinning is not «this deck serialises to these bytes»
+  but «the legacy deck says what its `.pptx` original says», and `mixed-media.source.pptx` and
+  `pptx/basic-slides.pptx` are in the tree so that comparison can be made directly.
+  `crates/docsai-convert/tests/ppt_phase19.rs` is where it is asserted, on both routes. A golden
+  would additionally pin the *formatting* LibreOffice synthesises on export, which is LibreOffice's
+  and would move under it.
 - `generate.py` — **this is the gate**, and it is the only one. It asserts each recorded deck's
   `RT_Slide` count, its `Pictures` stream and its plaintext `headerToken`, and it asserts both
   dangerous properties of the truncation. `--check` runs the generators, so CI runs those

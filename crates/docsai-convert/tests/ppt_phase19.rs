@@ -257,26 +257,79 @@ fn the_native_route_refuses_the_truncated_deck_from_its_own_bounds_check() {
     assert!(!err.contains("LibreOffice"), "the refusal is ours: {err}");
 }
 
+/// The phase's third acceptance criterion, on **every** value of the flag.
+///
+/// `auto` is the one that matters and the one a check inside the native reader
+/// would have missed: on a machine with LibreOffice installed, `auto` hands the
+/// file to a program that reads it happily (`kb/102-phase-19-loffice.md`). The
+/// refusal is in front of that hand-off, so this test asserts the same message
+/// three times rather than three different outcomes — and it needs no
+/// LibreOffice, which is what makes it run everywhere.
 #[test]
-fn the_native_route_never_reads_an_encrypted_deck_silently() {
-    // Criterion 3 is 19-E's, and the check belongs in front of both routes.
-    // What 19-D owes is that the file is not read *as if it were plain*.
-    let scratch = scratch();
-    let outcome = convert(
-        &corpus("ppt/encrypted.ppt"),
-        UseLoffice::Never,
-        scratch.path(),
+fn an_encrypted_deck_is_refused_on_every_use_loffice_policy() {
+    for policy in [UseLoffice::Auto, UseLoffice::Never, UseLoffice::Require] {
+        let scratch = scratch();
+        let err = convert(&corpus("ppt/encrypted.ppt"), policy, scratch.path())
+            .expect_err("an encrypted deck is refused, not read");
+        // What it is, why it cannot be read, and what to do about it.
+        assert!(
+            err.contains("encrypted or password-protected"),
+            "{policy:?}: {err}"
+        );
+        assert!(err.contains("legacy PowerPoint file"), "{policy:?}: {err}");
+        assert!(
+            err.contains("CurrentUserAtom.headerToken = 0xF3D1C4DF"),
+            "{policy:?}: {err}"
+        );
+        assert!(err.contains("Current User"), "{policy:?}: {err}");
+        assert!(err.contains("save it as .pptx"), "{policy:?}: {err}");
+        // And nothing was produced: no half-read deck, no assets beside it.
+        assert!(
+            std::fs::read_dir(scratch.path())
+                .expect("the scratch directory exists")
+                .next()
+                .is_none(),
+            "{policy:?}: the refusal wrote something"
+        );
+    }
+}
+
+/// The same file through the *reader* door — stdin, and the in-memory MCP
+/// helpers, which never see a path and never reach the LibreOffice route.
+#[test]
+fn an_encrypted_deck_is_refused_through_the_reader_door_too() {
+    let bytes = std::fs::read(corpus("ppt/encrypted.ppt")).expect("the fixture reads");
+    let mut assets = docsai_model::MemoryAssetStore::new();
+    let err = docsai_convert::read_document_with_options(
+        std::io::Cursor::new(bytes),
+        Some("encrypted.ppt"),
+        &mut assets,
+        &ConvertOptions::default(),
     )
-    .unwrap();
-    assert!(outcome.report.has_severe(), "{:?}", outcome.report.warnings);
+    .expect_err("an encrypted deck is refused, not read");
     assert!(
-        outcome.report.warnings.iter().any(|w| matches!(
-            w,
-            docsai_model::Warning::UnsupportedElement { kind, .. } if kind.contains("encrypted")
-        )),
-        "{:?}",
-        outcome.report.warnings
+        matches!(
+            err,
+            docsai_convert::ConvertError::Read(docsai_office::ReadError::EncryptedInput { .. })
+        ),
+        "got {err}"
     );
+}
+
+/// The pre-flight refuses what is encrypted and *only* that: it must not turn
+/// a broken file into a vague complaint about encryption, because the reader's
+/// own refusal names the offset and the length.
+#[test]
+fn the_preflight_lets_every_other_deck_past() {
+    for fixture in [
+        "ppt/basic-slides.ppt",
+        "ppt/mixed-media.ppt",
+        "ppt/truncated.ppt",
+    ] {
+        let file = std::fs::File::open(corpus(fixture)).expect("the fixture opens");
+        docsai_office::refuse_if_encrypted(Format::Ppt, file)
+            .unwrap_or_else(|e| panic!("{fixture} is not encrypted, but: {e}"));
+    }
 }
 
 #[test]

@@ -429,9 +429,40 @@ Tasks:
 4. Corpus under `corpus/ppt/`, including a truncated and an encrypted sample.
 
 Acceptance criteria:
-- [ ] With LibreOffice: fidelity equivalent to the pptx path.
-- [ ] Without it: full text with correct slide boundaries, no panics.
-- [ ] Encrypted/protected `.ppt` rejected with a clear error.
+- [x] With LibreOffice: fidelity equivalent to the pptx path.
+      `the_libreoffice_route_reads_the_same_slides_as_the_pptx_original` and
+      `a_picture_survives_the_legacy_round_trip_byte_for_byte`
+      (`crates/docsai-convert/tests/ppt_phase19.rs`) convert each legacy deck **and the `.pptx` it
+      was made from** — both are in the tree for exactly this — and compare. Measured again by hand
+      at the close on `mixed-media`: every heading and every bullet identical at its own indent
+      level, and the same content-hashed asset `img-40e10599.png` on both sides. «Equivalent» is
+      precisely the *content*; the package around it is LibreOffice's reconstruction, because a
+      `.ppt` carries no OOXML layout parts, and the route's one warning says exactly that and no
+      more.
+- [x] Without it: full text with correct slide boundaries, no panics.
+      `the_native_route_reads_the_same_text_and_boundaries_as_the_pptx_original` measures the
+      native reader against the same `.pptx` originals with `--use-loffice never`, so «full» and
+      «correct» are a comparison rather than an opinion. By hand at the close: `mixed-media.ppt`'s
+      headings and bullets are **identical** to its `.pptx` source's, two levels deep, with the
+      same picture asset. No panic on any of the four fixtures; the truncated one is an `Err`
+      naming the offset it refused, and the reader has no clamping accessor to fall back on.
+- [x] Encrypted/protected `.ppt` rejected with a clear error.
+      `an_encrypted_deck_is_refused_on_every_use_loffice_policy` asserts one refusal on `auto`,
+      `never` **and** `require` — the point of the increment, since LibreOffice never consults
+      `CurrentUserAtom.headerToken` and would otherwise read an encrypted deck on `auto`. The check
+      is `docsai_office::refuse_if_encrypted`, called in front of the choice of route.
+      `docsai convert corpus/ppt/encrypted.ppt` exits 2 on all three, saying what the file is, the
+      token it was refused on, that docsai decrypts nothing on either route, and what to do
+      instead.
+
+**Phase 19 is closed** (`kb/106-phase-19-close.md`). Legacy `.ppt` reads two ways from one
+`--use-loffice` policy and one sandboxed child, sharing `.doc`'s code rather than copying it;
+`office_oxide` was weighed and **not adopted**, on behaviour rather than cost (`docs/technical-analysis.md`
+§4.6). The native reader is 1 508 lines over a `Window` with no clamping accessor and
+`#![deny(clippy::indexing_slicing)]`, and it recovers outline levels and picture geometry.
+`.ppt` is **read-only for ever** and is the first format here with **no schema gate, no render gate
+and no OPC check** — `corpus/generate.py` is its only gate. Risk **P2** is unsigned after a fourth
+phase.
 
 ## Phase 20 — Hardening and v2.0 (3–4 weeks, partially continuous)
 

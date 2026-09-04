@@ -240,6 +240,20 @@ pub fn read_path_with_options(
         return Ok((document, format, report));
     }
 
+    // Phase 19-E, and it is deliberately *above* the route decision rather than
+    // inside either route: LibreOffice never looks at
+    // `CurrentUserAtom.headerToken` and reads an encrypted deck happily, so a
+    // refusal living in the native reader alone would be skipped by
+    // `--use-loffice auto` on the very machines that have LibreOffice. Both
+    // routes are refused here, with one message.
+    {
+        let mut probe = File::open(input).map_err(|source| ConvertError::Io {
+            path: input.display().to_string(),
+            source,
+        })?;
+        docsai_office::refuse_if_encrypted(format, &mut probe)?;
+    }
+
     // Phase 5 for `.doc`, Phase 19-B for `.ppt`: optional LibreOffice
     // pre-conversion into the modern twin, then the ordinary reader.
     if crate::loffice::benefits_from_loffice(format) {

@@ -183,6 +183,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Legacy PowerPoint (`.ppt`) reads** (plan v2 **Phase 19**, closed; `kb/106-phase-19-close.md`).
+  `docsai formats` says `ppt: read yes, write no`, and `docsai convert deck.ppt -o deck.dmk.md`
+  works, as do `inspect`, `outline`, `tokens`, `search` and `read --select`, over the CLI and over
+  MCP alike. **Writing `.ppt` is out of scope permanently**, exactly as it is for `.doc` and
+  `.xls`: the output path into the Microsoft ecosystem is OOXML.
+
+  **Two routes, one policy, and it is `.doc`'s code rather than a copy of it.** With LibreOffice
+  installed (`--use-loffice auto`, the default, or `require`), the deck is pre-converted to `.pptx`
+  in a sandboxed temporary directory — an isolated user profile, a wall-clock timeout, nothing
+  written outside a directory that is removed afterwards — and handed to the **unchanged** `.pptx`
+  reader. Without it (`--use-loffice never`, or no LibreOffice on the machine), a native reader
+  built directly on [MS-PPT] and [MS-ODRAW] reads the file **degraded**. The route is chosen by one
+  two-row policy table and one function, so a third legacy format would be one line.
+
+  **What the LibreOffice route gives**: the content, equivalently to the `.pptx` path — slide count
+  and order, every title, every bullet at its own indent level, the document metadata, and the
+  picture byte for byte (the same content-hashed asset name on both sides). What it cannot give is
+  the package around that content: a `.ppt` has **no OOXML layout parts at all**, so LibreOffice
+  synthesises a master and a layout and, having no placeholder inheritance to rely on, writes every
+  run's formatting explicitly. The route emits one warning saying exactly that, and — because the
+  claim is invariant — it is never a warning about a loss that did not happen.
+
+  **What the native route gives**: the slides in the deck's own order (reconstructed the way the
+  specification says — `CurrentUserAtom` → the `UserEditAtom` chain → the merged persist directory
+  → the slide list at `recInstance` 0 — rather than by scanning for slide records, which would find
+  the masters), the text of every shape with its **outline levels**, and the pictures of the
+  `Pictures` stream **placed** where the shape that shows them sits. One `Degraded` warning names
+  everything it does not read — character and paragraph formatting, layouts, masters, themes,
+  tables, charts, speaker notes and any shape that is neither text nor picture — and that list is
+  invariant, so it is never false either. Any slide the deck's own list failed to name is counted
+  and reported rather than silently omitted.
+
+  **An encrypted or password-protected `.ppt` is refused, on every route.** The check is
+  `docsai_office::refuse_if_encrypted`, and where it sits is the substance of it: **in front of the
+  choice of route**, because LibreOffice never consults `CurrentUserAtom.headerToken` and reads such
+  a file happily, so a refusal inside the native reader alone would have been skipped by the default
+  policy on every machine with LibreOffice installed. `docsai convert` exits 2 with a message that
+  names the file, the token it was refused on, the fact that docsai decrypts nothing on either
+  route, and what to do instead. A **truncated** deck is refused too, and by our own bounds check
+  rather than by luck: the native reader names the offset the file declared and the length the
+  stream really has.
+
+  **Parsing bytes designed with no threat model, safely.** One `Window` type is the only way an
+  offset becomes bytes in the `.ppt` reader; it has **no clamping accessor at all**, so «refuse»
+  rather than «clamp» is what the API makes available, and `#![deny(clippy::indexing_slicing)]`
+  makes it mechanical. A record's declared length is validated before its body is read, and there
+  are caps on container recursion, shape nesting, the edit chain and a style run's length that the
+  specification does not require.
+
+  **`office_oxide` was evaluated and not adopted** (`docs/technical-analysis.md` §4.6). It is a
+  cheap dependency — +98 KB stripped, +30 s per clean release build — so the rejection is about
+  behaviour: it reads the encrypted fixture back as two ordinary slides and the truncated one as a
+  slide of placeholder prompt text, both without a word, and its `.ppt` model is text-only, with no
+  outline level, shape identity or geometry. It is kept as a cross-check on record layout, and the
+  decision is cheaply re-openable — the four corpus fixtures are the re-test.
+
 - **OpenDocument Presentation (`.odp`) reads and writes** (plan v2 **Phase 18**, closed;
   `kb/104-phase-18-close.md`). `docsai-odf` has read and written text documents and spreadsheets
   since Phase 4 and *refused* a presentation. The third ODF class is now a first-class citizen of

@@ -303,7 +303,11 @@ the crate does with the corpus:
   (`0xF3D1C4DF`, [MS-PPT] 2.3.2) is never consulted anywhere in the crate; upstream issue #119 is
   an open feature request for exactly this. Phase 19's third acceptance criterion —
   encrypted/protected `.ppt` **rejected with a clear error** — is therefore unreachable through
-  it, and not something a caller can add from outside.
+  it. What a caller *can* do from outside is read the token itself before handing the file to
+  anything, which is what Phase 19-E does (`docsai_office::refuse_if_encrypted`, called in front
+  of the choice of route, because LibreOffice ignores the token too). That closes the criterion;
+  it does not rescue the crate, because the silent degradation below happens on files no
+  pre-flight can tell apart from sound ones.
 - **`corpus/ppt/truncated.ppt` returns `Ok` with one slide of master placeholder prompt text.**
   When `offsetToCurrentEdit` does not resolve, the crate falls back to scanning for the
   highest-offset `UserEditAtom`; on a deck missing half its stream that finds the master slide,

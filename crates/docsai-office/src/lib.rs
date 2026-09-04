@@ -115,6 +115,33 @@ pub fn read_xls<R: Read + Seek>(
     xls::read(reader, assets)
 }
 
+/// Refuses an encrypted or password-protected document **before** anything
+/// decides how to read it (Phase 19-E).
+///
+/// Legacy binary formats are reached two ways — this crate's own degraded
+/// reader, or a LibreOffice pre-conversion in `docsai-convert` — and only the
+/// first of those is under this project's control. LibreOffice does not consult
+/// `CurrentUserAtom.headerToken`, so it reads an encrypted `.ppt` and hands back
+/// a deck; a refusal placed inside a reader would therefore be silently skipped
+/// on the other route. This function is the shared pre-flight both routes pass
+/// through, and it is the only place the refusal is worded.
+///
+/// It is cheap and conservative: it reads one field of one small OLE2 stream,
+/// and answers `Ok(())` both for a format with no such flag and for a file it
+/// cannot make sense of — refusing a *broken* file is the reader's job, which
+/// can say where and why.
+///
+/// Covers `.ppt` today. `.doc` is **not** covered: its `fEncrypted` flag is
+/// checked by the native reader (`FibBase`), so `--use-loffice never` refuses
+/// an encrypted `.doc` and the LibreOffice route does not reach that check —
+/// see `kb/106-phase-19-close.md`.
+pub fn refuse_if_encrypted<R: Read + Seek>(format: Format, reader: R) -> Result<(), ReadError> {
+    match format {
+        Format::Ppt => ppt::refuse_if_encrypted(reader),
+        _ => Ok(()),
+    }
+}
+
 /// Reads any Office document this crate supports.
 pub fn read<R: Read + Seek>(
     format: Format,
