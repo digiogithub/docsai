@@ -41,6 +41,28 @@ pub enum ReadError {
     #[error("no native reader for `{format}`: {missing}")]
     NoNativeRoute { format: String, missing: String },
 
+    /// A structure inside a binary container claimed bytes the stream does not
+    /// have.
+    ///
+    /// Phase 19 introduces it for legacy `.ppt`, where every offset a file
+    /// declares is one this project must check itself: `cfb` opens
+    /// `corpus/ppt/truncated.ppt` without a word. The four numbers are the
+    /// diagnostic — [`WrongShape`](ReadError::WrongShape) would flatten them
+    /// into prose, and «malformed» sends a reader looking in the wrong place.
+    #[error(
+        "`{part}` is truncated: {need} byte(s) wanted at offset {at}, but the stream holds {have}"
+    )]
+    Truncated {
+        /// The OLE2 stream, and which structure inside it was being read.
+        part: String,
+        /// Absolute offset in that stream where the read started.
+        at: usize,
+        /// How many bytes the structure declared it needed there.
+        need: usize,
+        /// How many bytes the stream actually holds.
+        have: usize,
+    },
+
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
 

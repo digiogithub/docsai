@@ -44,9 +44,9 @@ pub const READABLE: &[Format] = &[
     Format::Xlsx,
     Format::Xls,
     Format::Pptx,
-    // Phase 19: recognised and routed. The native route is degraded and lands
-    // in 19-D; until then reading one goes through the LibreOffice
-    // pre-conversion in `docsai-convert`, and `ppt::read` says so by name.
+    // Phase 19: read two ways, like `.doc` — the degraded native reader in
+    // `ppt/` (19-D) and the LibreOffice pre-conversion in `docsai-convert`
+    // (19-B), chosen by `--use-loffice`. Never written.
     Format::Ppt,
 ];
 
@@ -96,9 +96,10 @@ pub fn read_pptx<R: Read + Seek>(
 
 /// Reads a legacy `.ppt` presentation natively.
 ///
-/// Read-only by design (Phase 19 writes no `.ppt`, ever). The native degraded
-/// reader is increment 19-D; in this build the function returns
-/// [`ReadError::NoNativeRoute`] naming the LibreOffice route that does work.
+/// Read-only by design (Phase 19 writes no `.ppt`, ever). Degraded: it recovers
+/// slides, shape text with its outline levels and the `Pictures` stream's
+/// BLIPs, and says so in the report. For full fidelity prefer the LibreOffice
+/// fallback in `docsai-convert` (`--use-loffice`).
 pub fn read_ppt<R: Read + Seek>(
     reader: R,
     assets: &mut dyn AssetStore,

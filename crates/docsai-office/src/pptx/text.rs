@@ -388,7 +388,7 @@ fn flush_list(
 /// Turns a run of list paragraphs into a nested [`List`], exactly as the docx
 /// reader does with `w:numPr` — the tree shape is the format's, the algorithm
 /// is not.
-fn build_list(items: &[(bool, u8, Paragraph)]) -> Block {
+pub(crate) fn build_list(items: &[(bool, u8, Paragraph)]) -> Block {
     let base = items[0].1;
     let mut list = List {
         id: None,

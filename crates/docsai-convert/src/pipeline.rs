@@ -276,8 +276,9 @@ pub fn read_path_with_options(
 /// would be added.
 ///
 /// Returns `Ok(None)` when the policy says to skip or LO is unavailable under
-/// `Auto`; the caller then falls through to the native reader, which for `.ppt`
-/// is the 19-D seam and says by name what it does not have.
+/// `Auto`; the caller then falls through to the native reader — the degraded
+/// `.doc` path (Phase 5) or the degraded `.ppt` one (19-D), both of which say
+/// in the report what they could not recover.
 fn try_loffice(
     input: &Path,
     source_format: Format,

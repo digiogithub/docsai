@@ -174,7 +174,7 @@ pub const SUPPORT: &[FormatSupport] = &[
         format: Format::Ppt,
         read: true,
         write: false,
-        note: "Phase 19-B reads a legacy .ppt by pre-converting it to .pptx with LibreOffice and handing the result to the unchanged Phase 13 reader, governed by the same --use-loffice auto|never|require as .doc; `never` refuses by name because the native degraded route is 19-D. Writing .ppt is out of scope for the whole phase",
+        note: "A legacy .ppt is read two ways, as a .doc is: Phase 19-B pre-converts it to .pptx with LibreOffice and hands the result to the unchanged Phase 13 reader, and Phase 19-D reads it natively and degraded (slides, shape text with its outline levels, and the Pictures stream). The same --use-loffice auto|never|require chooses, and `never` now reads rather than refuses. Writing .ppt is out of scope for the whole phase",
     },
     FormatSupport {
         format: Format::DocMark,

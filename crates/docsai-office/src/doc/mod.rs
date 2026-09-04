@@ -131,7 +131,7 @@ pub(crate) fn open_cfb<R: Read + Seek>(reader: R) -> Result<cfb::CompoundFile<R>
         })
 }
 
-fn read_stream<R: Read + Seek>(
+pub(crate) fn read_stream<R: Read + Seek>(
     comp: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> Result<Vec<u8>, ReadError> {
@@ -197,7 +197,7 @@ fn split_paragraphs(text: &str) -> Vec<Paragraph> {
 }
 
 /// Best-effort OLE SummaryInformation parse (title/author only).
-fn read_summary_meta<R: Read + Seek>(comp: &mut cfb::CompoundFile<R>) -> DocumentMeta {
+pub(crate) fn read_summary_meta<R: Read + Seek>(comp: &mut cfb::CompoundFile<R>) -> DocumentMeta {
     let mut meta = DocumentMeta::default();
     // The stream name starts with the 0x05 property-set prefix.
     let name = "\u{0005}SummaryInformation";

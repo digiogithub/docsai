@@ -1,4 +1,4 @@
-//! Phase 19-B: the LibreOffice route for legacy `.ppt`.
+//! Phase 19-B and 19-D: the two routes into a legacy `.ppt`.
 //!
 //! The phase's first acceptance criterion is «with LibreOffice, fidelity
 //! equivalent to the pptx path», and `corpus/ppt/` was built to make that
@@ -11,6 +11,12 @@
 //! binary format and its import back are what stand between the two files, and
 //! what they change is recorded in `kb/102-phase-19-loffice.md` rather than
 //! asserted away.
+//!
+//! 19-D's criterion — «without LibreOffice, full text with correct slide
+//! boundaries, no panics» — is measured against the *same* two `.pptx`
+//! originals, with `--use-loffice never`, so «full» and «correct» are a
+//! comparison rather than an opinion. Those tests need no LibreOffice and are
+//! never skipped.
 
 use std::path::{Path, PathBuf};
 
@@ -123,20 +129,154 @@ fn a_ppt_is_detected_by_its_powerpoint_document_stream() {
 }
 
 #[test]
-fn never_refuses_by_saying_what_is_missing() {
+fn never_reads_the_deck_natively_instead_of_refusing_it() {
+    // Until 19-D this returned `ReadError::NoNativeRoute`. It reads now, and
+    // the three `--use-loffice` values keep their `.doc` meanings.
     let scratch = scratch();
-    let err = convert(
+    let outcome = convert(
         &corpus("ppt/basic-slides.ppt"),
         UseLoffice::Never,
         scratch.path(),
     )
-    .expect_err("there is no native .ppt route in this build");
-    // A generic "unsupported" would send a user looking for a fault in their
-    // file. The message names the increment that will land the native route and
-    // the flag that would have worked today.
-    assert!(err.contains("19-D"), "{err}");
-    assert!(err.contains("--use-loffice"), "{err}");
-    assert!(err.contains("LibreOffice"), "{err}");
+    .expect("the native degraded reader is 19-D and is in this build");
+    assert_eq!(outcome.source_format, Format::Ppt);
+    assert_eq!(
+        visible_lines(&outcome.markdown)
+            .into_iter()
+            .filter(|l| l.starts_with("## "))
+            .collect::<Vec<_>>(),
+        vec!["## Informe trimestral", "## Siguientes pasos"],
+    );
+}
+
+#[test]
+fn the_native_route_reads_the_same_text_and_boundaries_as_the_pptx_original() {
+    // 19-D's acceptance criterion, measured. No LibreOffice anywhere in this
+    // test: the legacy deck is read by our own atom walk and compared against
+    // the `.pptx` it was made from, read by the Phase 13 reader.
+    let scratch = scratch();
+    for (legacy, original) in [
+        ("ppt/basic-slides.ppt", "pptx/basic-slides.pptx"),
+        ("ppt/mixed-media.ppt", "ppt/mixed-media.source.pptx"),
+    ] {
+        let native = convert(&corpus(legacy), UseLoffice::Never, scratch.path()).expect(legacy);
+        let direct = convert(&corpus(original), UseLoffice::Never, scratch.path()).expect(original);
+        assert_eq!(native.source_format, Format::Ppt, "{legacy}");
+
+        let text = |markdown: &str| {
+            visible_lines(markdown)
+                .into_iter()
+                .filter(|l| l.starts_with("## ") || l.trim_start().starts_with("- "))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            text(&native.markdown),
+            text(&direct.markdown),
+            "every slide title and every bullet, at its own indent level ({legacy})"
+        );
+    }
+}
+
+#[test]
+fn the_native_route_recovers_the_picture_with_its_place_on_the_slide() {
+    let scratch = scratch();
+    let native = convert(
+        &corpus("ppt/mixed-media.ppt"),
+        UseLoffice::Never,
+        scratch.path(),
+    )
+    .unwrap();
+    let direct = convert(
+        &corpus("ppt/mixed-media.source.pptx"),
+        UseLoffice::Never,
+        scratch.path(),
+    )
+    .unwrap();
+    let asset_of = |markdown: &str| {
+        markdown
+            .split("assets/")
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(str::to_string)
+    };
+    // The asset name is a content hash: the same name is the same bytes.
+    assert_eq!(asset_of(&native.markdown), asset_of(&direct.markdown));
+    // And it is placed, which is why nothing warns that it is not.
+    assert!(
+        native.markdown.contains("pos=\"160px,240px\""),
+        "{}",
+        native.markdown
+    );
+    assert!(
+        !native
+            .report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, docsai_model::Warning::ImageGeometryDegraded { .. })),
+        "{:?}",
+        native.report.warnings
+    );
+}
+
+#[test]
+fn the_native_route_warns_once_and_only_about_what_it_really_lost() {
+    let scratch = scratch();
+    for name in ["ppt/basic-slides.ppt", "ppt/mixed-media.ppt"] {
+        let outcome = convert(&corpus(name), UseLoffice::Never, scratch.path()).unwrap();
+        assert_eq!(
+            outcome.report.warnings.len(),
+            1,
+            "{name}: {:?}",
+            outcome.report.warnings
+        );
+        match outcome.report.warnings.first() {
+            Some(docsai_model::Warning::Degraded { what, why }) => {
+                assert_eq!(what, "ppt");
+                assert!(why.contains("--use-loffice"), "{why}");
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn the_native_route_refuses_the_truncated_deck_from_its_own_bounds_check() {
+    // 19-B's refusal of this file was LibreOffice's. This one is ours, and it
+    // names the offset the `Current User` stream declared and the length the
+    // stream really has.
+    let scratch = scratch();
+    let err = convert(
+        &corpus("ppt/truncated.ppt"),
+        UseLoffice::Never,
+        scratch.path(),
+    )
+    .expect_err("half a deck is not a deck");
+    assert!(err.contains("truncated"), "{err}");
+    assert!(err.contains("10946"), "{err}");
+    assert!(err.contains("5632"), "{err}");
+    assert!(!err.contains("LibreOffice"), "the refusal is ours: {err}");
+}
+
+#[test]
+fn the_native_route_never_reads_an_encrypted_deck_silently() {
+    // Criterion 3 is 19-E's, and the check belongs in front of both routes.
+    // What 19-D owes is that the file is not read *as if it were plain*.
+    let scratch = scratch();
+    let outcome = convert(
+        &corpus("ppt/encrypted.ppt"),
+        UseLoffice::Never,
+        scratch.path(),
+    )
+    .unwrap();
+    assert!(outcome.report.has_severe(), "{:?}", outcome.report.warnings);
+    assert!(
+        outcome.report.warnings.iter().any(|w| matches!(
+            w,
+            docsai_model::Warning::UnsupportedElement { kind, .. } if kind.contains("encrypted")
+        )),
+        "{:?}",
+        outcome.report.warnings
+    );
 }
 
 #[test]

@@ -33,7 +33,7 @@ use crate::xml::Element;
 const ROW_BAND_EMU: i64 = 114_300;
 
 /// Sorts a slide's shapes into reading order, in place.
-pub(super) fn sort(shapes: &mut [Shape]) {
+pub(crate) fn sort(shapes: &mut [Shape]) {
     shapes.sort_by_key(key);
 }
 
