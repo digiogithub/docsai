@@ -259,6 +259,7 @@ pub(super) fn slide_xml(
     canvas: Size,
     parts: &mut dyn Parts,
     kept: &mut Vec<String>,
+    substituted: &mut Vec<(String, String)>,
 ) -> Result<String, String> {
     let mut out = String::from("<p:sld ");
     out.push_str(NS);
@@ -305,8 +306,9 @@ pub(super) fn slide_xml(
                     ph,
                     layout,
                     &mut body_used,
-                    id,
+                    Spot { id, frame },
                     parts,
+                    substituted,
                 )?);
             }
             ShapeKind::TextBox { body } => {
@@ -479,6 +481,13 @@ fn xfrm(frame: (Length, Length, Length, Length), prefix: &str) -> String {
     )
 }
 
+/// Where a generated shape goes: the `p:cNvPr@id` it takes and the rectangle it
+/// sits in. One argument rather than two, because they always travel together.
+struct Spot {
+    id: u32,
+    frame: (Length, Length, Length, Length),
+}
+
 /// A placeholder written against the chosen layout's own identity.
 ///
 /// The `p:ph` a slide states is what binds it to the layout, so the type and
@@ -490,9 +499,11 @@ fn placeholder_xml(
     ph: &Placeholder,
     layout: &LayoutOption,
     body_used: &mut bool,
-    id: u32,
+    spot: Spot,
     parts: &mut dyn Parts,
+    substituted: &mut Vec<(String, String)>,
 ) -> Result<String, String> {
+    let Spot { id, frame } = spot;
     let (ph_type, idx) = if ph.ph_type.is_title() {
         layout
             .title
@@ -511,7 +522,33 @@ fn placeholder_xml(
         Some(idx) => format!(" idx=\"{idx}\""),
         None => String::new(),
     };
-    let paragraphs = write_text::write_body(&ph.body, ph_type.is_body(), None, parts)?;
+    // `p:ph@type` is a **closed** enumeration in ECMA-376, and the IR's
+    // `PhType::Other` is not: 18-B put ODF's `text` class there because
+    // PresentationML has no keyword for it. Writing it out produced a
+    // `p:ph type="text"` that no schema accepts — invalid OOXML, and silent
+    // until 18-E pointed the gate at a crossed deck. The nearest keyword there
+    // is is `body`, which is what an ODF `text` frame is, and the substitution
+    // is named rather than made quietly.
+    let keyword = match pml_type(&ph_type) {
+        Some(keyword) => keyword,
+        None => {
+            substituted.push((
+                format!("a `{}` placeholder", ph_type.as_str()),
+                format!(
+                    "`{}` is a role the `odf` dialect names and PresentationML's closed p:ph@type vocabulary does not, so the frame was written as `body`, which is the nearest role this dialect names",
+                    ph_type.as_str()
+                ),
+            ));
+            "body"
+        }
+    };
+    // Bulleting follows the keyword that reaches the file, not the model's own
+    // type: a substituted `body` inherits the master's bullets, so a plain
+    // paragraph in it needs the `a:buNone` that only `bulleted` asks for.
+    // Asking `ph_type` instead turned every crossed ODF `text` frame's
+    // paragraphs into bullets, with nothing saying so.
+    let bulleted = PhType::parse(keyword).is_body();
+    let paragraphs = write_text::write_body(&ph.body, bulleted, None, parts)?;
     let paragraphs = if paragraphs.is_empty() {
         "<a:p/>".to_string()
     } else {
@@ -526,14 +563,41 @@ fn placeholder_xml(
             "Content Placeholder"
         },
     );
+    // A placeholder that states its own rectangle keeps it. Leaving `p:spPr`
+    // empty means «wherever the layout puts it», which is right for a deck
+    // typed by hand and wrong for a deck crossing from ODF: two `presentation:
+    // class` frames of one class both landed on the layout's single body
+    // rectangle and drew on top of each other, and nothing said so. The IR
+    // documents an absent rectangle as *inherited*, so an absent one still
+    // inherits.
+    let placement = match (shape.geometry.pos, shape.geometry.size) {
+        (Some(_), Some(_)) => format!("<p:spPr>{}</p:spPr>", xfrm(frame, "a:")),
+        _ => "<p:spPr/>".to_string(),
+    };
     Ok(format!(
         "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{}\"/>\
          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\
-         <p:nvPr><p:ph type=\"{}\"{idx}/></p:nvPr></p:nvSpPr><p:spPr/>\
+         <p:nvPr><p:ph type=\"{}\"{idx}/></p:nvPr></p:nvSpPr>{placement}\
          <p:txBody><a:bodyPr/><a:lstStyle/>{paragraphs}</p:txBody></p:sp>",
         super::write::esc_attr(&name),
-        ph_type.as_str(),
+        keyword,
     ))
+}
+
+/// The PresentationML keyword for a placeholder type, or `None` when the type
+/// is one only another dialect names.
+///
+/// [`PhType::as_str`] promises «the PresentationML keyword» and delivers it for
+/// every variant but [`PhType::Other`], which holds whatever the reader found.
+/// The enumeration below is ECMA-376's own, and it is checked rather than
+/// assumed because the schema checks it.
+fn pml_type(ph: &PhType) -> Option<&str> {
+    const PML: [&str; 16] = [
+        "title", "body", "ctrTitle", "subTitle", "dt", "sldNum", "ftr", "hdr", "obj", "chart",
+        "tbl", "clipArt", "dgm", "media", "sldImg", "pic",
+    ];
+    let keyword = ph.as_str();
+    PML.contains(&keyword).then_some(keyword)
 }
 
 fn text_box_xml(

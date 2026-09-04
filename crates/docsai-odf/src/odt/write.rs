@@ -486,7 +486,22 @@ fn write_table(table: &Table, ctx: &mut WriterCtx<'_>, out: &mut String) -> Resu
         }
         out.push_str("/>\n");
     }
-    for row in &table.rows {
+    // ODF states «the first row is a header» by *wrapping* it, in
+    // `table:table-header-rows`, and the reader (`odt/body.rs`) decides
+    // `Table::header_row` on exactly that element. Writing every row loose
+    // therefore lost the header of every table this crate wrote, silently —
+    // visible from Phase 18-E, where a `.pptx` table crossing into a `.odp`
+    // came back with its header demoted to a data row and an empty header
+    // drawn above it.
+    let mut header_open = false;
+    for (index, row) in table.rows.iter().enumerate() {
+        if index == 0 && table.header_row {
+            out.push_str("   <table:table-header-rows>\n");
+            header_open = true;
+        } else if header_open {
+            out.push_str("   </table:table-header-rows>\n");
+            header_open = false;
+        }
         out.push_str("    <table:table-row>\n");
         for cell in &row.cells {
             if cell.covered {
@@ -512,6 +527,9 @@ fn write_table(table: &Table, ctx: &mut WriterCtx<'_>, out: &mut String) -> Resu
             out.push_str("     </table:table-cell>\n");
         }
         out.push_str("    </table:table-row>\n");
+    }
+    if header_open {
+        out.push_str("   </table:table-header-rows>\n");
     }
     out.push_str("   </table:table>\n");
     ctx.report.stats.tables = ctx.report.stats.tables.saturating_add(1);
@@ -980,7 +998,7 @@ fn write_list_styles(lists: &ListCatalog, out: &mut String) {
     }
 }
 
-fn write_list_style(id: &ListId, def: &ListDef, out: &mut String) {
+pub(crate) fn write_list_style(id: &ListId, def: &ListDef, out: &mut String) {
     out.push_str(&format!(
         r#"  <text:list-style style:name="{}">"#,
         esc_attr(id.as_str())
@@ -1186,7 +1204,7 @@ fn write_font_attrs(font: &FontProps, out: &mut String) {
     }
 }
 
-fn write_meta_xml(meta: &DocumentMeta) -> String {
+pub(crate) fn write_meta_xml(meta: &DocumentMeta) -> String {
     let mut s = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <office:document-meta xmlns:office="{NS_OFFICE}" xmlns:dc="{NS_DC}" xmlns:meta="{NS_META}" office:version="1.3">

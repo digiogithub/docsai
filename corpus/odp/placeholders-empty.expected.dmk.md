@@ -1,7 +1,7 @@
 ---
 docmark: "1.2"
 source-format: odp
-next-id: 3
+next-id: 4
 title: "Marcadores vacíos"
 author: "docsai corpus"
 last-modified-by: "docsai corpus"
@@ -16,7 +16,10 @@ skeleton: assets/_skeleton/deck-dc2cdb95.odp
 
 ## Título con cuerpo vacío {#n1 .slide layout=AL1T19 name=page1}
 
-::: {#n2 .ph pos="1.4cm,13.8cm" size="25.2cm,1.4cm" type=text}
+::: {#n2 .ph pos="1.4cm,1326600emu" size="25.2cm,374.4px"}
+:::
+
+::: {#n3 .ph pos="1.4cm,13.8cm" size="25.2cm,1.4cm" type=text}
 Primera línea
 
 []{.empty}

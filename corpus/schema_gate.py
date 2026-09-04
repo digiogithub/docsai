@@ -59,6 +59,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CORPUS = ROOT / "corpus" / "pptx"
 SCHEMA = ROOT / "schemas" / "ooxml-transitional.xsd"
 TEMPLATE = ROOT / "crates" / "docsai-office" / "assets" / "default-template.pptx"
+ODF_TEMPLATE = ROOT / "crates" / "docsai-odf" / "assets" / "default-template.odp"
 
 # ODF is described by a RELAX NG grammar, not by an XSD: a different validation
 # technology, which is why the ODF arm below is a second xmllint invocation with
@@ -452,12 +453,12 @@ def odf_arm(scratch, wanted, binary):
     validated. That set is found by diffing, so it cannot drift: a part the
     writer starts rewriting turns up in it by itself.
 
-    There is no `generated` variant here, and that is the writer's design rather
-    than a gap in the gate: the `.odp` writer splices into the package a deck
-    was read from and ships no embedded ODF template, so a deck with its
-    `skeleton:` line removed is refused by name instead of being written on a
-    design nobody chose. `crates/docsai-convert/tests/odp_write.rs` pins the
-    refusal; there is nothing for a schema to validate.
+    The `generated` variant the OOXML arm has arrived with 18-E, and it is
+    measured by `cross_arm()` below rather than here, because the package a
+    generated `.odp` is written on is the same one a `.pptx` crosses into: an
+    embedded ODF template. 18-D had no such template and refused a deck with no
+    `skeleton:` by name; 18-E ships one, because a deck read from a `.pptx`
+    carries an OPC package and therefore has no ODF package to splice into.
 
     `odt/` and `ods/` are deliberately **not** here, and not because the
     machinery cannot reach them: it is one glob away, and switching it on today
@@ -547,6 +548,99 @@ def odp_package_for(binary, deck, workdir):
     return out, None
 
 
+# --------------------------------------------------------------------------
+# The cross arm (Phase 18-E)
+# --------------------------------------------------------------------------
+
+
+def crossed(binary, deck, workdir, suffix):
+    """`deck` -> DocMark -> a package of the *other* dialect.
+
+    No edit is made to the DocMark on the way: a cross conversion writes every
+    page from the model whatever anybody typed, so there is nothing a retitle
+    would provoke that the plain conversion does not."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    markdown = workdir / "deck.dmk.md"
+    run(binary, "convert", deck, "-o", markdown)
+    if not markdown.exists():
+        return None, "the deck did not convert to DocMark"
+    out = workdir / f"crossed{suffix}"
+    run(binary, "convert", markdown, "-o", out)
+    if not out.exists() or out.stat().st_size == 0:
+        return None, f"the DocMark did not convert to {suffix}"
+    return out, None
+
+
+def cross_arm(scratch, wanted, binary):
+    """Every deck of each corpus written out in the *other* dialect, validated.
+
+    This is 18-E's second acceptance criterion asked of the grammars rather than
+    of the text: `pptx -> DocMark -> odp` must be schema-valid ODF and
+    `odp -> DocMark -> pptx` must be schema-valid OOXML. Neither can be
+    byte-identical to anything — the two dialects are different packages — so
+    what is validated is what each writer *wrote*, found the same way both other
+    arms find it: by diffing against the template the deck was generated on.
+
+    A cross conversion always goes through the template, because a preserved
+    package of the wrong dialect is not spliced into (`odp/write.rs`,
+    `pptx/write.rs`), so the template is the honest baseline for both halves."""
+    checked = invalid = 0
+    failures = []
+
+    def report(problems, processed, note):
+        nonlocal checked, invalid
+        for name in sorted(problems):
+            checked += 1
+            if problems[name]:
+                invalid += 1
+                print(f"  FAIL  {name}")
+                for problem in problems[name]:
+                    print(f"        {problem}")
+            else:
+                extra = f" ({note})" if name in processed else ""
+                print(f"  ok    {name}{extra}")
+
+    decks = sorted(p for p in CORPUS.iterdir() if p.suffix in (".pptx", ".pptm"))
+    odp_decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
+    if wanted:
+        decks = [d for d in decks if d.stem in wanted]
+        odp_decks = [d for d in odp_decks if d.stem in wanted]
+
+    for deck in decks:
+        print(f"{deck.name} [crossed: written as .odp]")
+        workdir = scratch / "cross-odp" / deck.stem
+        package, why = crossed(binary, deck, workdir, ".odp")
+        if package is None:
+            failures.append(f"{deck.name} [crossed to .odp]: {why}")
+            print(f"  SKIP  {why}")
+            continue
+        names = [name for name, _ in written_parts(package, ODF_TEMPLATE)]
+        if not names:
+            failures.append(f"{deck.name} [crossed to .odp]: no part of the writer's")
+            print("  SKIP  the writer produced no part of its own")
+            continue
+        problems, processed = validate_odf(package, workdir / "parts", only=set(names))
+        report(problems, processed, "after foreign markup removal")
+
+    for deck in odp_decks:
+        print(f"{deck.name} [crossed: written as .pptx]")
+        workdir = scratch / "cross-pptx" / deck.stem
+        package, why = crossed(binary, deck, workdir, ".pptx")
+        if package is None:
+            failures.append(f"{deck.name} [crossed to .pptx]: {why}")
+            print(f"  SKIP  {why}")
+            continue
+        parts = written_parts(package, TEMPLATE)
+        if not parts:
+            failures.append(f"{deck.name} [crossed to .pptx]: no part of the writer's")
+            print("  SKIP  the writer produced no part of its own")
+            continue
+        problems, processed = validate(parts, workdir / "parts")
+        report(problems, processed, "after mc: fallback selection")
+
+    return checked, invalid, failures
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -615,6 +709,12 @@ def main():
         invalid += odf_invalid
         failures += odf_failures
         odp_count = odf_checked
+
+        print(f"\n--- cross conversion: each corpus written in the other dialect ---")
+        cross_checked, cross_invalid, cross_failures = cross_arm(scratch, wanted_odf, binary)
+        checked += cross_checked
+        invalid += cross_invalid
+        failures += cross_failures
     finally:
         if not args.keep:
             shutil.rmtree(scratch, ignore_errors=True)

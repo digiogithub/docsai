@@ -208,13 +208,53 @@ fn skeleton_bytes<'a>(
         });
         return Ok(TEMPLATE);
     };
-    assets.get(asset).ok_or_else(|| {
+    let bytes = assets.get(asset).ok_or_else(|| {
         WriteError::Invalid(format!(
             "the deck names its preserved package as `{}` and the asset store \
              does not hold it",
             asset.as_str()
         ))
-    })
+    })?;
+    if is_ooxml_package(bytes) {
+        return Ok(bytes);
+    }
+    // A deck read from a `.odp` carries an ODF package, which is a ZIP and
+    // therefore opens — and then names none of the parts this writer splices.
+    // Before 18-E it was copied to the output verbatim, so `convert deck.dmk.md
+    // -o deck.pptx` produced an ODF package under a `.pptx` name and said
+    // nothing at all. It is now the same substitution a skeleton-less deck
+    // takes, and it says which dialect the package was.
+    report.warn(Warning::Degraded {
+        what: "the deck's design".into(),
+        why: format!(
+            "the preserved package is {}, which this writer cannot splice a \
+             PresentationML slide into, so the deck was written on the embedded \
+             default template: its theme, its master and its layouts are docsai's, \
+             and each slide was given a layout chosen from the shape of its content",
+            dialect_of(bytes)
+        ),
+    });
+    Ok(TEMPLATE)
+}
+
+/// Whether the bytes are a package this writer can splice into.
+///
+/// Asked of the archive rather than of the deck's `source-format:`, because the
+/// skeleton is what the writer opens and a front-matter key is only a claim
+/// about it.
+fn is_ooxml_package(bytes: &[u8]) -> bool {
+    Package::open(Cursor::new(bytes)).is_ok_and(|package| package.has_part("[Content_Types].xml"))
+}
+
+/// What a package that is not this dialect's is, in words a warning can carry.
+fn dialect_of(bytes: &[u8]) -> &'static str {
+    match Package::open(Cursor::new(bytes)) {
+        Ok(package) if package.has_part("content.xml") => {
+            "an OpenDocument package (the `odf` dialect, which is what a .odp is)"
+        }
+        Ok(_) => "an archive with no `[Content_Types].xml` in it",
+        Err(_) => "not an archive this writer can open",
+    }
 }
 
 /// The package with the slides the model added in it, and which parts they are.
@@ -360,6 +400,7 @@ fn seed(
         };
 
         let mut kept = Vec::new();
+        let mut substituted: Vec<(String, String)> = Vec::new();
         let (xml, rels) = {
             let mut new = NewParts {
                 rels: PartRels::new(&package, &part),
@@ -370,14 +411,21 @@ fn seed(
             if let Some(notes) = &notes_part {
                 new.rels.relate(NOTES_REL, notes, false);
             }
-            let xml = write_gen::slide_xml(slide, layout, canvas, &mut new, &mut kept)
-                .map_err(|reason| format!("{label} holds {reason}"))?;
+            let xml =
+                write_gen::slide_xml(slide, layout, canvas, &mut new, &mut kept, &mut substituted)
+                    .map_err(|reason| format!("{label} holds {reason}"))?;
             (xml, new.rels.rewritten())
         };
         for reason in kept {
             report.warn(Warning::Degraded {
                 what: label.clone(),
                 why: reason,
+            });
+        }
+        for (what, why) in substituted {
+            report.warn(Warning::Degraded {
+                what: format!("{what} on {label}"),
+                why,
             });
         }
         generated.insert(part.clone());

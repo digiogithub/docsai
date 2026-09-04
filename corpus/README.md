@@ -55,7 +55,8 @@ depths, and the honest table is shorter than the excuses.
 | format | `schema_gate.py` | `render_gate.py` |
 |---|---|---|
 | `pptx/` | **Writer output**, against the ECMA-376 Transitional XSDs. Every deck is round-tripped twice — edited on its preserved package, and with `skeleton:` removed so the whole package is generated — and every part whose bytes the writer changed or created is validated. `mc:AlternateContent` gets ECMA-376 Part 3 fallback selection first | **Round trip**, against the deck it came from. All 21 decks round-trip byte-identical today, which a render can only agree with, so what is rendered is the *generated* package: same page count, no page that lost its ink |
-| `odp/` | **The fixtures**, against the OpenDocument 1.3 RELAX NG. There is no `.odp` writer until 18-D, so writer output cannot be validated; what is validated is what `generate.py` produces. Foreign markup (LibreOffice's `officeooo:` slide comment) is removed first, the way ODF conformance says a consumer ignores it | **The fixtures**, rendered. LibreOffice opens every one, draws exactly the number of `draw:page` the fixture declares, and leaves ink on each. The round-trip comparison arrives with the writer in 18-D |
+| `odp/` | **The fixtures and the writer's output.** The fixtures against the OpenDocument 1.3 RELAX NG, with foreign markup (LibreOffice's `officeooo:` slide comment) removed first the way ODF conformance says a consumer ignores it; then, as the OOXML arm does, every deck retitled through DocMark, written back on its preserved package, and every part whose bytes changed validated | **The fixtures and the round trip.** LibreOffice opens every fixture, draws exactly the number of `draw:page` it declares, and leaves ink on each; and the round trip is compared on the pptx arm's comparator, which all 17 pass byte for byte |
+| cross (`pptx/` ⇄ `odp/`) | **Every deck of each corpus written in the other dialect** (18-E) and validated against the other grammar, diffed against the embedded template each was generated on — a cross conversion never splices, because a package of the wrong dialect cannot be spliced into | **Every crossed package opened.** Not compared against the deck it came from: the two dialects resolve through different masters and different default fonts, so a pixel diff would be measuring the template. What is asserted is that LibreOffice opens the crossed package, draws the number of pages the package declares, and leaves ink on each |
 | `docx/`, `xlsx/` | Nothing. Neither writer's output is schema-validated | Nothing |
 | `odt/`, `ods/` | Nothing — see below | Nothing |
 | `doc/`, `ppt/` | Nothing, and nothing is owed: these convert *out of* the legacy format only, and there is no markup this project writes | Nothing |
@@ -320,6 +321,19 @@ Each is absent for a reason in the format, not for lack of effort:
 | `charts-stale-workbook.pptx` | An ODF chart holds its numbers in a `table:table` inside itself. There is no second copy, so there is nothing for a cache to disagree with |
 | `smartart-fallback.pptx` | `mc:AlternateContent` is an ECMA-376 Part 3 mechanism. ODF's answer to unknown markup is foreign elements a consumer ignores, which is a different shape and is exercised by `comments-slide.odp` |
 | `macro-enabled.pptm` | ODF has no macro-enabled variant of the MIME type: a macro lives in `Basic/` inside an ordinary `.odp`. The trait exists, the *format distinction* does not, and no fixture carries it yet |
+
+### The cross-conversion matrix (18-E)
+
+The pairing this table's «Mirrors» column states is not documentation alone: it is a constant in
+`crates/docsai-convert/tests/cross_matrix.rs`, twenty-two cells wide — sixteen traits both corpora
+carry, the five with no `.odp` above, and `presentation-classes.odp` with no `.pptx`. The test walks
+it in both directions and asserts that every fixture of both corpora appears in exactly one cell, so
+a fixture added here without a cell fails the build rather than quietly not being measured.
+
+What each cell asserts is stated there and is deliberately not byte identity, which a cross
+conversion cannot have: **the visible text survives as a multiset**, minus the lines the cell
+declares lost, and **the warnings cover the losses exactly** — every warning declared and every
+warning raised, matched both ways.
 
 ### Adding an `.odp`
 

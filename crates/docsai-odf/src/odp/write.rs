@@ -66,9 +66,16 @@
 //! package** — a loss that did not happen must not be reported as one
 //! (`AGENTS.md` §7 rule 3).
 //!
-//! There is no embedded ODF template and no generated-from-nothing package: a
-//! deck with no preserved skeleton is an error by name, not a file that looks
-//! like a success.
+//! ## The one deck that has nothing to splice into (18-E)
+//!
+//! 18-D had none: a deck read from a `.odp` always carries its own package. The
+//! cross conversion produces one — a deck read from a `.pptx` carries an OPC
+//! package, which has no `content.xml` to splice a page into — and so does a
+//! deck typed by hand. Those go through [`super::write_gen`], which writes an
+//! `office:presentation` from the model onto an embedded ODF template, and then
+//! come back through every line below exactly as a preserved deck does. The
+//! substitution is a warning that names it, never a silence, and a preserved
+//! deck never reaches a line of it.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Seek, Write};
@@ -96,7 +103,7 @@ use super::{read_package, CONTENT_PART};
 const STYLE_PREFIX: &str = "ds";
 
 /// The manifest, which has to learn about a picture the package did not carry.
-const MANIFEST_PART: &str = "META-INF/manifest.xml";
+pub(super) const MANIFEST_PART: &str = "META-INF/manifest.xml";
 
 /// Writes a presentation as a `.odp` package.
 pub fn write_odp<W: Write + Seek>(
@@ -111,7 +118,19 @@ pub fn write_odp<W: Write + Seek>(
         )));
     };
     let mut report = ConversionReport::new();
-    let skeleton = skeleton_bytes(deck, assets)?;
+    let owned: Vec<u8>;
+    let generated_package;
+    let skeleton: &[u8] = match source_package(deck, assets, &mut report)? {
+        Source::Preserved(bytes) => {
+            generated_package = false;
+            bytes
+        }
+        Source::Generated => {
+            generated_package = true;
+            owned = super::write_gen::generate(deck, assets, &mut report)?;
+            &owned
+        }
+    };
     let package = Package::open(Cursor::new(skeleton)).map_err(|e| {
         WriteError::Invalid(format!("the preserved package cannot be read back: {e}"))
     })?;
@@ -143,7 +162,17 @@ pub fn write_odp<W: Write + Seek>(
             pic_seq: 0,
             note_seq: 0,
         };
-        plan_edits(deck, &before, &root, &source, &mut ctx, &mut plan)?;
+        // A generated package *is* the model, written out: there is nothing to
+        // compare it against and nothing to splice into it. Running the
+        // splicing pass over it would not merely be redundant — it would
+        // rewrite each body a second time from a model that has just been
+        // written, and the second writing knows nothing the first did (which
+        // list style a numbered list points at, where a picture sits), so it
+        // would undo it. Everything a generated deck lost was named by
+        // [`super::write_gen`] as it was lost.
+        if !generated_package {
+            plan_edits(deck, &before, &root, &source, &mut ctx, &mut plan)?;
+        }
         if !ctx.auto.is_empty() {
             plan.styles = automatic_style_bodies(&ctx.auto);
         }
@@ -201,32 +230,87 @@ pub fn write_odp<W: Write + Seek>(
     Ok(report)
 }
 
-/// The bytes of the preserved package.
+/// Where the package this writer splices into comes from.
+enum Source<'a> {
+    /// The deck's own, byte for byte: the ordinary case, and the only one that
+    /// can come back byte-identical.
+    Preserved(&'a [u8]),
+    /// Nothing to splice into, so [`super::write_gen`] writes one.
+    Generated,
+}
+
+/// The bytes of the preserved package, or the decision to generate one.
 ///
-/// Unlike the `.pptx` writer there is no embedded template to fall back on, and
-/// that is a decision rather than an omission: a `.odp` written from nothing
-/// would need a master page, a page layout and a presentation style family this
-/// project does not ship, and inventing one silently is exactly the
-/// «success that lost the design» the pptx side warns about. A deck with no
-/// skeleton is refused by name.
-fn skeleton_bytes<'a>(
+/// 18-D refused an embedded ODF template and the refusal was right for the deck
+/// it was arguing about: a deck read from a `.odp` always carries its own
+/// package, so generating one would have substituted a design nobody chose for
+/// a design the file states. **18-E is the case that argument does not cover.**
+/// A deck read from a `.pptx` carries an OPC package, which has no
+/// `content.xml`, no `office:presentation` and no `draw:page`; there is nothing
+/// to splice into, and refusing would refuse the cross conversion the plan asks
+/// for by name.
+///
+/// So there are now two doors, and both of them say out loud which one was
+/// taken. A package of the wrong dialect is **never** spliced into: it used to
+/// reach [`Package::open`], fail on the part that was missing, and report a
+/// `content.xml` the caller never had — which named the symptom and not the
+/// cause.
+fn source_package<'a>(
     deck: &Presentation,
     assets: &'a dyn AssetStore,
-) -> Result<&'a [u8], WriteError> {
+    report: &mut ConversionReport,
+) -> Result<Source<'a>, WriteError> {
     let Some(SkeletonRef { asset, .. }) = deck.skeleton.as_ref() else {
-        return Err(WriteError::Invalid(
-            "this deck carries no preserved package, and the `.odp` writer splices \
-             into the package a deck was read from rather than generating one: \
-             convert it to .pptx, or keep the `skeleton:` file beside its DocMark"
+        report.warn(Warning::Degraded {
+            what: "the deck's design".into(),
+            why: "this deck carries no preserved package, so it was written on the \
+                  embedded default ODF template: its master page, its page layouts \
+                  and its presentation styles are docsai's, and every page was written \
+                  from the model rather than spliced"
                 .into(),
-        ));
+        });
+        return Ok(Source::Generated);
     };
-    assets.get(asset).ok_or_else(|| {
+    let bytes = assets.get(asset).ok_or_else(|| {
         WriteError::Invalid(format!(
             "the deck names its preserved package as `{}` and the asset store does not hold it",
             asset.as_str()
         ))
-    })
+    })?;
+    if is_odf_presentation(bytes) {
+        return Ok(Source::Preserved(bytes));
+    }
+    report.warn(Warning::Degraded {
+        what: "the deck's design".into(),
+        why: format!(
+            "the preserved package is {}, which this writer cannot splice an ODF page \
+             into, so the deck was written on the embedded default ODF template: its \
+             master page, its page layouts and its presentation styles are docsai's, \
+             and every page was written from the model",
+            dialect_of(bytes)
+        ),
+    });
+    Ok(Source::Generated)
+}
+
+/// Whether the bytes are a package this writer can splice into.
+///
+/// The question is asked of the archive rather than of the deck's
+/// `source-format:`, because the skeleton is what the writer actually opens and
+/// a front-matter key is a claim about it.
+fn is_odf_presentation(bytes: &[u8]) -> bool {
+    Package::open(Cursor::new(bytes)).is_ok_and(|package| package.has_part(CONTENT_PART))
+}
+
+/// What a package that is not this dialect's is, in words a warning can carry.
+fn dialect_of(bytes: &[u8]) -> &'static str {
+    match Package::open(Cursor::new(bytes)) {
+        Ok(package) if package.has_part("[Content_Types].xml") => {
+            "an OOXML package (the `ooxml` dialect, which is what a .pptx is)"
+        }
+        Ok(_) => "an archive with no `content.xml` in it",
+        Err(_) => "not an archive this writer can open",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +382,7 @@ fn style_anchor(root: &Element, styles: &str) -> Option<Edit> {
     })
 }
 
-fn qualified(element: &Element) -> String {
+pub(super) fn qualified(element: &Element) -> String {
     if element.prefix.is_empty() {
         element.name.clone()
     } else {
@@ -309,7 +393,7 @@ fn qualified(element: &Element) -> String {
 /// The element's start tag, rebuilt from the parse rather than sliced out of
 /// the source: an attribute value may legally contain `>`, so scanning for one
 /// is a bug waiting for the file that has it.
-fn open_tag(element: &Element) -> String {
+pub(super) fn open_tag(element: &Element) -> String {
     let mut out = format!("<{}", qualified(element));
     for (name, value) in &element.attrs {
         out.push_str(&format!(r#" {}="{}""#, name, esc_attr(value)));
@@ -746,7 +830,10 @@ fn plan_notes(
 
 /// `META-INF/manifest.xml` with `entries` added to it, spliced rather than
 /// rewritten so that everything already declared keeps its bytes.
-fn manifest_with(package: &Package, entries: &[(String, String)]) -> Result<Vec<u8>, String> {
+pub(super) fn manifest_with(
+    package: &Package,
+    entries: &[(String, String)],
+) -> Result<Vec<u8>, String> {
     let source = package
         .text(MANIFEST_PART)
         .map_err(|e| e.to_string())?
@@ -1007,20 +1094,48 @@ mod tests {
         );
     }
 
-    /// A deck with no preserved package is an error and says which one.
+    /// A deck with no preserved package is written on the embedded template,
+    /// and the substitution is a warning rather than a silence.
+    ///
+    /// 18-D refused it, because there was no template to offer. 18-E ships one
+    /// — the cross conversion cannot work without it, a `.pptx` carrying an OPC
+    /// package and therefore no ODF package at all — so the refusal becomes the
+    /// warning the `.pptx` writer has given since 15-G.
     #[test]
-    fn a_deck_with_no_skeleton_is_refused() {
-        let deck = Presentation::default();
+    fn a_deck_with_no_skeleton_is_written_on_the_template_and_says_so() {
+        let mut deck = Presentation::default();
+        deck.slides.push(docsai_model::presentation::Slide {
+            shapes: vec![Shape::new(
+                0,
+                ShapeKind::Placeholder(docsai_model::presentation::Placeholder {
+                    ph_type: docsai_model::presentation::PhType::Title,
+                    body: vec![Block::Paragraph(docsai_model::text::Paragraph::text(
+                        "Título",
+                    ))],
+                    ..Default::default()
+                }),
+            )],
+            ..Default::default()
+        });
         let assets = docsai_model::MemoryAssetStore::new();
-        let error = write_odp(
-            &Document::Presentation(deck),
-            &assets,
-            &mut Cursor::new(Vec::new()),
-        )
-        .expect_err("a deck with no package cannot be written");
+        let mut out = Cursor::new(Vec::new());
+        let report = write_odp(&Document::Presentation(deck), &assets, &mut out)
+            .expect("a deck with no package is written on the template");
         assert!(
-            error.to_string().contains("preserved package"),
-            "the refusal does not say why: {error}"
+            report.warnings.iter().any(|w| {
+                let message = w.message();
+                message.contains("no preserved package") && message.contains("template")
+            }),
+            "the substitution was not warned: {:?}",
+            report.warnings
+        );
+        let bytes = out.into_inner();
+        let package = Package::open(Cursor::new(&bytes)).expect("a readable package");
+        let content = package.text(CONTENT_PART).expect("content.xml");
+        assert!(content.contains("<draw:page"), "no page was written");
+        assert!(
+            content.contains("Título"),
+            "the title did not reach the page"
         );
     }
 

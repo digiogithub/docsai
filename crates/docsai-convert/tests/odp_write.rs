@@ -333,15 +333,17 @@ fn a_transition_declared_in_styles_xml_survives_the_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A deck with no preserved package is refused by name.
+/// A deck with no preserved package is written on the embedded template, and
+/// the substitution is said out loud.
 ///
-/// There is no embedded ODF template to fall back on and inventing a master
-/// page, a page layout and a presentation style family would be a design
-/// nobody chose, silently substituted. The `.pptx` writer's own answer to the
-/// same question is an embedded template *and* a warning; the honest answer
-/// here, with no template to offer, is an error.
+/// This **reverses 18-D**, which refused such a deck by name because there was
+/// no ODF template to fall back on and inventing a master page would have been
+/// a design nobody chose, silently substituted. 18-E ships the template — the
+/// cross conversion needs it, since a deck read from a `.pptx` has an OPC
+/// package and therefore no ODF package at all — so the second half of that
+/// argument is what stands: the substitution happens and it is warned.
 #[test]
-fn a_deck_with_no_preserved_package_is_refused_by_name() {
+fn a_deck_with_no_preserved_package_is_written_on_the_embedded_template() {
     let dir = scratch("no-skeleton");
     let deck = corpus().join("basic-slides.odp");
     let markdown = dir.join("deck.dmk.md");
@@ -360,13 +362,24 @@ fn a_deck_with_no_preserved_package_is_refused_by_name() {
     let orphan = dir.join("orphan.dmk.md");
     std::fs::write(&orphan, stripped).expect("writes the stripped DocMark");
 
-    let error = convert_file(&orphan, Some(&dir.join("out.odp")), &options())
-        .expect_err("a deck with no package cannot be written as .odp");
-    let message = error.to_string();
+    let written = dir.join("out.odp");
+    let report = convert_file(&orphan, Some(&written), &options())
+        .expect("a deck with no package is written on the template");
     assert!(
-        message.contains("preserved package"),
-        "the refusal does not say why: {message}"
+        report.report.warnings.iter().any(|w| {
+            let message = w.message();
+            message.contains("no preserved package") && message.contains("template")
+        }),
+        "the substitution was not warned: {:?}",
+        report.report.warnings
     );
+
+    // And the file is a real `.odp`: both slides, both titles.
+    let back = dir.join("back.dmk.md");
+    convert_file(&written, Some(&back), &options()).expect("reads the written deck back");
+    let text = std::fs::read_to_string(&back).expect("reads the DocMark");
+    assert!(text.contains("Informe trimestral"), "{text}");
+    assert!(text.contains("Siguientes pasos"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

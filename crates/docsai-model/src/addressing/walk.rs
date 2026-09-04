@@ -561,20 +561,40 @@ pub fn implicit_shapes(slide: &Slide, layouts: &LayoutCatalog) -> Vec<usize> {
     );
     implicit.extend(title);
 
-    // The layout says which body is the primary one; without a layout the
-    // first body-like placeholder in reading order is the best available
-    // answer, and it is the one the writer will use too.
-    let primary_idx = slide
+    // The layout says which body is the primary one. **Whether it says
+    // anything at all is a different question from what it says** (18-E): a
+    // layout the catalogue does not hold states nothing, and the first
+    // body-like placeholder in reading order is then the best answer there is;
+    // a layout the catalogue *does* hold and which declares no body index has
+    // said there is no primary body, and rule 2's own words — «*the layout's*
+    // primary body placeholder is implicit» — leave nothing to be implicit.
+    //
+    // Conflating the two is how `corpus/odp/presentation-classes.odp` lost a
+    // `subtitle`: its layout `AL2T1` declares a title and no body, the subtitle
+    // was written as the slide's implicit blocks, and it came back a
+    // `PhType::Body` with nothing saying so.
+    let declared = slide
         .layout
         .as_ref()
         .and_then(|id| layouts.layout(id))
-        .and_then(|layout| layout.body())
-        .map(|ph| ph.idx);
+        .map(|layout| layout.body().map(|ph| ph.idx));
     let body = slide.shapes.iter().position(|shape| match &shape.kind {
-        ShapeKind::Placeholder(ph) if ph.ph_type.is_body() => match primary_idx {
-            Some(idx) => ph.idx == idx,
+        ShapeKind::Placeholder(ph) if ph.ph_type.is_body() && !ph.body.is_empty() => match declared
+        {
+            // The layout names an index: that placeholder and no other.
+            Some(Some(idx)) => ph.idx == idx,
+            // The layout is known and declares no body.
+            Some(None) => false,
+            // No layout to ask.
             None => true,
         },
+        // An **empty** body is not implicit, whatever the layout says. Rule 2
+        // writes its blocks at slide level and it has none, so an implicit
+        // empty body reaches the file as nothing at all and comes back as a
+        // placeholder the deck no longer has — the silent loss `AGENTS.md` §7
+        // rule 3 forbids, measured on `corpus/odp/placeholders-empty.odp`,
+        // which read three shapes and parsed back two. Written through rule 4
+        // as its own container it costs one line and survives.
         _ => false,
     });
     implicit.extend(body);

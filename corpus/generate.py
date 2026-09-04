@@ -6319,6 +6319,68 @@ def office_default_template() -> None:
     write_package(TEMPLATE_PATH, parts)
 
 
+# --------------------------------------------------------------------------
+# The `.odp` writer's embedded default template (plan v2 Phase 18-E)
+# --------------------------------------------------------------------------
+#
+# The ODF counterpart of `office_default_template()`, and it exists for exactly
+# one reason: **the cross conversion**. 18-D refused an embedded ODF template
+# because a deck read from a `.odp` always has its own package to splice into,
+# and inventing a design nobody chose would have been a silent substitution.
+# 18-E is the case that argument does not cover — a deck read from a `.pptx`
+# carries an OPC package, which the `.odp` writer cannot splice into by any
+# amount of care, so *there is no package* and the choice is between a template
+# whose substitution is warned and refusing the conversion the plan asks for.
+#
+# The same provenance rule as the pptx template: every byte is source in this
+# file, under the repository's own licence, and `--check` says so. It carries no
+# `draw:page` at all — a page is what the writer generates — and the master page
+# and the two `style:presentation-page-layout` the fixtures already declare, so
+# a generated deck resolves through the same cascade the corpus does.
+
+ODF_TEMPLATE_PATH = (
+    ROOT.parent / "crates" / "docsai-odf" / "assets" / "default-template.odp"
+)
+
+
+def odf_default_template() -> None:
+    """The package `docsai-odf` embeds and generates a skeleton-less deck on.
+
+    Two page layouts, because that is what a layout chooser has to choose
+    between: `AL1T19` is a title with an outline under it and `AL2T1` is a title
+    alone. They are the same two the corpus declares, by the same names, so a
+    deck generated here and a deck read from a fixture name the same layouts.
+    """
+    content = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<office:document-content {ODP_NS} office:version="1.3">'
+        f"<office:scripts/>"
+        f"<office:font-face-decls>"
+        f'<style:font-face style:name="Liberation Sans" '
+        f'svg:font-family="&apos;Liberation Sans&apos;"/>'
+        f"</office:font-face-decls>"
+        f"<office:automatic-styles>{ODP_CONTENT_AUTOMATIC}</office:automatic-styles>"
+        f"<office:body><office:presentation>"
+        f'<presentation:settings presentation:full-screen="false"/>'
+        f"</office:presentation></office:body></office:document-content>"
+    ).encode()
+    parts: dict[str, bytes] = {
+        "mimetype": MIME_ODP,
+        "content.xml": content,
+        "styles.xml": odf_styles_odp(),
+        "meta.xml": odf_meta("docsai"),
+        "settings.xml": odf_settings(ODP_NS),
+    }
+    parts["META-INF/manifest.xml"] = odf_manifest(sorted([
+        ("/", "application/vnd.oasis.opendocument.presentation"),
+        ("content.xml", "text/xml"),
+        ("styles.xml", "text/xml"),
+        ("meta.xml", "text/xml"),
+        ("settings.xml", "text/xml"),
+    ]))
+    write_odf_package(ODF_TEMPLATE_PATH, parts)
+
+
 GENERATORS = [
     docx_basic_text,
     docx_basic_styles,
@@ -6404,6 +6466,7 @@ GENERATORS = [
     ppt_truncated,
     ppt_encrypted,
     office_default_template,
+    odf_default_template,
 ]
 
 
@@ -6411,10 +6474,11 @@ def digest_tree() -> dict[str, str]:
     out = {}
     # Not corpus, but generated here and checked here: the writer's embedded
     # template is source in this file too, and `--check` is what says so.
-    if TEMPLATE_PATH.exists():
-        out[str(TEMPLATE_PATH.relative_to(ROOT.parent))] = hashlib.sha256(
-            TEMPLATE_PATH.read_bytes()
-        ).hexdigest()
+    for template in (TEMPLATE_PATH, ODF_TEMPLATE_PATH):
+        if template.exists():
+            out[str(template.relative_to(ROOT.parent))] = hashlib.sha256(
+                template.read_bytes()
+            ).hexdigest()
     for sub in ("docx", "xlsx", "odt", "ods", "odp", "doc", "ppt", "pptx"):
         d = ROOT / sub
         if not d.exists():

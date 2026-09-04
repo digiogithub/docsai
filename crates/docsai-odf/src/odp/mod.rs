@@ -49,6 +49,7 @@
 mod chart;
 pub(crate) mod skeleton;
 pub(crate) mod write;
+mod write_gen;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek};

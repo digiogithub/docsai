@@ -545,9 +545,9 @@ def check_odp(binary, renderer, report, scratch, wanted):
     renderer time. The moment the writer produces different bytes the pair is
     rendered and scored, which is what this arm exists to catch.
 
-    There is no *generated* variant here, unlike the pptx arm: the `.odp` writer
-    ships no embedded template and refuses a deck with no preserved package by
-    name, so there is nothing to render."""
+    The *generated* variant the pptx arm has arrives with 18-E and is measured
+    by `check_cross()` below, because the package a generated `.odp` is written
+    on is the same embedded template a crossed `.pptx` lands in."""
     decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
     if wanted:
         decks = [d for d in decks if d.stem in wanted]
@@ -608,6 +608,79 @@ def odp_roundtrip(binary, deck, workdir):
     if not roundtrip.exists():
         return None, "the DocMark did not convert back to a package"
     return roundtrip, None
+
+
+def slide_parts(deck):
+    """How many `ppt/slides/slideN.xml` a `.pptx` declares."""
+    with zipfile.ZipFile(deck) as zf:
+        return sum(
+            1
+            for name in zf.namelist()
+            if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+        )
+
+
+def check_cross(binary, renderer, report, scratch, wanted):
+    """Each corpus written in the other dialect, and opened (Phase 18-E).
+
+    A cross conversion cannot be compared against the deck it came from the way
+    a round trip can: the two dialects are different packages, they resolve
+    through different masters and different default fonts, and a render diff
+    between them would be measuring the template rather than the conversion. So
+    what this arm asserts is the same thing the fixture arm asserts, and it is
+    the assertion schema validation cannot make: **LibreOffice opens the crossed
+    package, draws exactly the number of pages the package declares, and leaves
+    ink on each of them.** A deck that crossed into a file no application can
+    open is a conversion that reported success and produced nothing."""
+    decks = sorted(p for p in CORPUS.iterdir() if p.suffix in (".pptx", ".pptm"))
+    odp_decks = sorted(ODP_CORPUS.glob("*.odp")) if ODP_CORPUS.exists() else []
+    if wanted:
+        decks = [d for d in decks if d.stem in wanted]
+        odp_decks = [d for d in odp_decks if d.stem in wanted]
+
+    def one(deck, suffix, declared_by):
+        print(f"{deck.name} [crossed to {suffix}]")
+        workdir = scratch / f"cross{suffix}" / deck.stem
+        workdir.mkdir(parents=True, exist_ok=True)
+        markdown = workdir / "deck.dmk.md"
+        run(binary, "convert", deck, "-o", markdown)
+        if not markdown.exists():
+            report.note(deck.name, "the deck did not convert to DocMark")
+            return
+        crossed = workdir / f"crossed{suffix}"
+        run(binary, "convert", markdown, "-o", crossed)
+        if not crossed.exists() or crossed.stat().st_size == 0:
+            report.note(deck.name, f"the DocMark did not convert to {suffix}")
+            return
+        declared = declared_by(crossed)
+        pages, why = renderer.render(crossed, workdir / "render")
+        if pages is None:
+            report.note(deck.name, f"crossed package not rendered: {why}")
+            return
+        if len(pages) != declared:
+            report.fail(
+                f"{deck.name} [crossed to {suffix}]: the package declares {declared} "
+                f"page(s), {len(pages)} rendered"
+            )
+            return
+        report.by_render += 1
+        blank = []
+        for index, page in enumerate(pages, start=1):
+            report.pages += 1
+            width, height, pixels = read_pgm(page)
+            covered = ink(width, height, pixels)
+            if covered < MIN_INK:
+                blank.append(f"page {index} (ink {covered:.4%})")
+        if blank:
+            report.fail(f"{deck.name} [crossed to {suffix}]: rendered blank: "
+                        f"{', '.join(blank)}")
+        else:
+            print(f"  ok    crossed: {len(pages)} page(s), all with ink")
+
+    for deck in decks:
+        one(deck, ".odp", draw_pages)
+    for deck in odp_decks:
+        one(deck, ".pptx", slide_parts)
 
 
 def main():
@@ -699,6 +772,9 @@ def main():
 
         print("\n--- ODF: corpus/odp, rendered and round-tripped ---")
         check_odp(binary, renderer, report, scratch, wanted)
+
+        print("\n--- cross conversion: each corpus opened in the other dialect ---")
+        check_cross(binary, renderer, report, scratch, wanted)
     finally:
         if not args.keep:
             shutil.rmtree(scratch, ignore_errors=True)
