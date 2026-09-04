@@ -181,6 +181,8 @@ pub enum Format {
     /// OpenDocument presentation, the third ODF class (Phase 18).
     Odp,
     Pptx,
+    /// Legacy binary PowerPoint, read-only (Phase 19).
+    Ppt,
     /// The DocMark pivot itself.
     DocMark,
 }
@@ -197,6 +199,7 @@ impl Format {
             Format::Ods => "ods",
             Format::Odp => "odp",
             Format::Pptx => "pptx",
+            Format::Ppt => "ppt",
             Format::DocMark => "docmark",
         }
     }
@@ -217,6 +220,7 @@ impl Format {
             "ods" => Some(Format::Ods),
             "odp" => Some(Format::Odp),
             "pptx" | "pptm" => Some(Format::Pptx),
+            "ppt" | "pot" => Some(Format::Ppt),
             "docmark" | "dmk" | "md" | "markdown" => Some(Format::DocMark),
             _ => None,
         }
@@ -229,7 +233,7 @@ impl Format {
 
     /// True when documents of this format become a [`Document::Presentation`].
     pub fn is_presentation(self) -> bool {
-        matches!(self, Format::Pptx | Format::Odp)
+        matches!(self, Format::Pptx | Format::Odp | Format::Ppt)
     }
 }
 
@@ -254,6 +258,7 @@ mod tests {
             Format::Ods,
             Format::Odp,
             Format::Pptx,
+            Format::Ppt,
             Format::DocMark,
         ] {
             assert_eq!(Format::parse(f.as_str()), Some(f));

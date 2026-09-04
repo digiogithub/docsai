@@ -548,7 +548,22 @@ fn rasterise(
 /// child is spawned with them redirected to `null` when nothing is waiting —
 /// here they are captured, and the ceiling is enforced by polling rather than
 /// by blocking on a read that a hung child would never end.
-fn run(mut command: Command, timeout: Duration, tool: &str) -> Result<String, ConvertError> {
+fn run(command: Command, timeout: Duration, tool: &str) -> Result<String, ConvertError> {
+    run_with_status(command, timeout, tool).map(|(_, log)| log)
+}
+
+/// [`run`], but handing back the child's exit status as well as its log.
+///
+/// The legacy-format fallback in [`crate::loffice`] does check the status —
+/// `--convert-to docx` on a file LibreOffice cannot open exits non-zero — where
+/// the PDF export checks the produced file instead. Both want the same wall
+/// clock ceiling and the same captured output, so they share this and neither
+/// grows a second child-process discipline.
+pub(crate) fn run_with_status(
+    mut command: Command,
+    timeout: Duration,
+    tool: &str,
+) -> Result<(std::process::ExitStatus, String), ConvertError> {
     let temp = tempfile::Builder::new()
         .prefix("docsai-render-log-")
         .tempfile()
@@ -575,9 +590,9 @@ fn run(mut command: Command, timeout: Duration, tool: &str) -> Result<String, Co
         })?;
 
     let started = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(source) => {
                 return Err(ConvertError::Renderer {
@@ -593,8 +608,8 @@ fn run(mut command: Command, timeout: Duration, tool: &str) -> Result<String, Co
             });
         }
         std::thread::sleep(Duration::from_millis(25));
-    }
-    Ok(std::fs::read_to_string(&log).unwrap_or_default())
+    };
+    Ok((status, std::fs::read_to_string(&log).unwrap_or_default()))
 }
 
 fn last_line(output: &str) -> String {

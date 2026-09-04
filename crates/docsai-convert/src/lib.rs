@@ -239,6 +239,7 @@ mod tests {
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), total);
-        assert_eq!(total, 9);
+        // Ten since Phase 19-B added `Format::Ppt`.
+        assert_eq!(total, 10);
     }
 }

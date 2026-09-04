@@ -22,6 +22,7 @@ mod docx;
 mod drawingml;
 mod error;
 mod package;
+mod ppt;
 mod pptx;
 mod write_error;
 mod xls;
@@ -43,6 +44,10 @@ pub const READABLE: &[Format] = &[
     Format::Xlsx,
     Format::Xls,
     Format::Pptx,
+    // Phase 19: recognised and routed. The native route is degraded and lands
+    // in 19-D; until then reading one goes through the LibreOffice
+    // pre-conversion in `docsai-convert`, and `ppt::read` says so by name.
+    Format::Ppt,
 ];
 
 /// Formats this crate can write today.
@@ -89,6 +94,18 @@ pub fn read_pptx<R: Read + Seek>(
     pptx::read(reader, assets)
 }
 
+/// Reads a legacy `.ppt` presentation natively.
+///
+/// Read-only by design (Phase 19 writes no `.ppt`, ever). The native degraded
+/// reader is increment 19-D; in this build the function returns
+/// [`ReadError::NoNativeRoute`] naming the LibreOffice route that does work.
+pub fn read_ppt<R: Read + Seek>(
+    reader: R,
+    assets: &mut dyn AssetStore,
+) -> Result<(Document, ConversionReport), ReadError> {
+    ppt::read(reader, assets)
+}
+
 /// Reads a legacy `.xls` workbook (values and formulas only).
 pub fn read_xls<R: Read + Seek>(
     reader: R,
@@ -109,9 +126,10 @@ pub fn read<R: Read + Seek>(
         Format::Xlsx => read_xlsx(reader, assets),
         Format::Xls => read_xls(reader, assets),
         Format::Pptx => read_pptx(reader, assets),
+        Format::Ppt => read_ppt(reader, assets),
         other => Err(ReadError::WrongShape {
             part: other.to_string(),
-            expected: "a format supported in this phase (docx, doc, xlsx, xls, pptx)".into(),
+            expected: "a format supported in this phase (docx, doc, xlsx, xls, pptx, ppt)".into(),
         }),
     }
 }

@@ -48,6 +48,7 @@ pub fn detect<R: Read + Seek>(mut reader: R, hint: Option<&str>) -> (Format, Det
                 let _ = reader.seek(SeekFrom::Start(0));
                 let format = match extension(hint).as_deref() {
                     Some("xls") | Some("xlt") => Format::Xls,
+                    Some("ppt") | Some("pot") | Some("pps") => Format::Ppt,
                     _ => Format::Doc,
                 };
                 return (format, DetectScore::Maybe);

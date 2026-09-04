@@ -89,7 +89,7 @@ enum Command {
         /// Treat severe warnings as failures; with this flag, any warning fails.
         #[arg(long)]
         strict: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
         /// Also draw one PNG per slide of every presentation converted, through
@@ -113,7 +113,7 @@ enum Command {
         /// Print the inspection report as JSON on stdout.
         #[arg(long)]
         json: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
@@ -133,7 +133,7 @@ enum Command {
         /// Print the outline as JSON on stdout.
         #[arg(long)]
         json: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
@@ -158,7 +158,7 @@ enum Command {
         /// Print the selection and what it cost as JSON on stdout.
         #[arg(long)]
         json: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
@@ -184,7 +184,7 @@ enum Command {
         /// Print the hits as JSON on stdout.
         #[arg(long)]
         json: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
@@ -207,7 +207,7 @@ enum Command {
         /// Print the token report as JSON on stdout.
         #[arg(long)]
         json: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
@@ -272,7 +272,7 @@ enum Command {
         /// Print the fidelity report as JSON on stdout.
         #[arg(long)]
         json: bool,
-        /// LibreOffice headless for legacy `.doc`: `auto`, `never`, or `require`.
+        /// LibreOffice headless for legacy `.doc` and `.ppt`: `auto`, `never`, or `require`.
         #[arg(long, default_value = "auto", value_name = "MODE")]
         use_loffice: String,
     },
@@ -1311,7 +1311,8 @@ Pass a known extension or check the file is not corrupt. See `docsai formats`."
     {
         eprintln!(
             "docsai: install LibreOffice and ensure `soffice` is on PATH, \
-or set DOCSAI_LIBREOFFICE, or pass --use-loffice never for the native degraded path."
+or set DOCSAI_LIBREOFFICE, or pass --use-loffice never for the native degraded path \
+where there is one — `.doc` has one, `.ppt` does not yet."
         );
     }
 }

@@ -12,6 +12,13 @@ use docsai_model::Format;
 
 use crate::ConvertError;
 
+/// Wall-clock ceiling on one headless conversion.
+///
+/// The same 300 s the slide renderer allows itself: a legacy binary file is
+/// attacker-shaped input handed to a large C++ program, and a child with no
+/// ceiling is a hang, not an error.
+const CONVERT_TIMEOUT: std::time::Duration = crate::render::DEFAULT_TIMEOUT;
+
 /// How aggressively to use LibreOffice for formats that benefit from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UseLoffice {
@@ -145,6 +152,38 @@ pub fn convert_to_docx(
     input: &Path,
     out_dir: &Path,
 ) -> Result<PathBuf, ConvertError> {
+    convert_with_loffice(soffice, input, out_dir, "docx")
+}
+
+/// Converts `input` to `.pptx` via LibreOffice headless into a temp directory.
+///
+/// Phase 19-B. The deck that comes out is read by the Phase 13 `.pptx` reader
+/// with no accommodation of any kind, which is what makes the phase's first
+/// acceptance criterion — «with LibreOffice, fidelity equivalent to the pptx
+/// path» — a measurement rather than a claim.
+pub fn convert_to_pptx(
+    soffice: &Path,
+    input: &Path,
+    out_dir: &Path,
+) -> Result<PathBuf, ConvertError> {
+    convert_with_loffice(soffice, input, out_dir, "pptx")
+}
+
+/// Runs one headless `--convert-to` in a sandbox and returns what it produced.
+///
+/// The sandbox is the one [`crate::render`] established in Phase 16-G and is
+/// not a second discipline: an isolated `UserInstallation` profile inside
+/// `out_dir` (so concurrent runs never share a profile and nothing is written
+/// outside the caller's temporary directory), the library path derived at run
+/// time from the resolved `soffice` — never hard-coded — and a wall-clock
+/// ceiling enforced by polling, so a child that hangs on a hostile file is
+/// killed instead of blocking the process for ever.
+fn convert_with_loffice(
+    soffice: &Path,
+    input: &Path,
+    out_dir: &Path,
+    extension: &str,
+) -> Result<PathBuf, ConvertError> {
     std::fs::create_dir_all(out_dir).map_err(|source| ConvertError::Io {
         path: out_dir.display().to_string(),
         source,
@@ -176,22 +215,22 @@ pub fn convert_to_docx(
         .arg("--nodefault")
         .arg(format!("-env:UserInstallation={profile_uri}"))
         .arg("--convert-to")
-        .arg("docx")
+        .arg(extension)
         .arg("--outdir")
         .arg(out_dir)
         .arg(input);
     crate::render::apply_library_path(&mut command, library_path.as_deref());
-    let status = command.output().map_err(|source| ConvertError::Loffice {
-        message: format!("failed to spawn `{}`: {source}", soffice.display()),
-    })?;
+    let (status, log) = crate::render::run_with_status(command, CONVERT_TIMEOUT, "LibreOffice")
+        .map_err(|error| ConvertError::Loffice {
+            message: error.to_string(),
+        })?;
 
-    if !status.status.success() {
-        let stderr = String::from_utf8_lossy(&status.stderr);
-        let stdout = String::from_utf8_lossy(&status.stdout);
+    if !status.success() {
         return Err(ConvertError::Loffice {
             message: format!(
-                "LibreOffice conversion failed (exit {:?}): {stderr}{stdout}",
-                status.status.code()
+                "LibreOffice conversion to {extension} failed (exit {:?}): {}",
+                status.code(),
+                log.trim()
             ),
         });
     }
@@ -201,23 +240,28 @@ pub fn convert_to_docx(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("converted");
-    let candidate = out_dir.join(format!("{stem}.docx"));
+    let candidate = out_dir.join(format!("{stem}.{extension}"));
     if candidate.is_file() {
         return Ok(candidate);
     }
-    // Some LO builds may alter the name; pick any .docx in out_dir (except nested).
+    // Some LO builds may alter the name; pick any match in out_dir (not nested).
     if let Ok(entries) = std::fs::read_dir(out_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("docx") {
+            if path.extension().and_then(|e| e.to_str()) == Some(extension) {
                 return Ok(path);
             }
         }
     }
     Err(ConvertError::Loffice {
         message: format!(
-            "LibreOffice reported success but no .docx appeared in {}",
-            out_dir.display()
+            "LibreOffice reported success but no .{extension} appeared in {}{}",
+            out_dir.display(),
+            if log.trim().is_empty() {
+                String::new()
+            } else {
+                format!(": {}", log.trim())
+            }
         ),
     })
 }
@@ -246,7 +290,20 @@ pub(crate) fn path_to_file_uri(path: &Path) -> String {
 
 /// Whether this source format may benefit from a LibreOffice pre-conversion.
 pub fn benefits_from_loffice(format: Format) -> bool {
-    matches!(format, Format::Doc)
+    loffice_route(format).is_some()
+}
+
+/// The modern format a legacy one is pre-converted into, and its extension.
+///
+/// `.doc` → `.docx` since Phase 5, `.ppt` → `.pptx` since Phase 19-B. The pair
+/// is what keeps one policy — `--use-loffice auto|never|require` — governing
+/// both, instead of each legacy format inventing its own.
+pub fn loffice_route(format: Format) -> Option<(Format, &'static str)> {
+    match format {
+        Format::Doc => Some((Format::Docx, "docx")),
+        Format::Ppt => Some((Format::Pptx, "pptx")),
+        _ => None,
+    }
 }
 
 /// Resolves whether to attempt LO given policy and availability.
@@ -287,6 +344,28 @@ mod tests {
         assert!(!should_use(UseLoffice::Auto, false).unwrap());
         assert!(should_use(UseLoffice::Auto, true).unwrap());
         assert!(!should_use(UseLoffice::Never, true).unwrap());
+    }
+
+    #[test]
+    fn the_legacy_formats_route_through_their_modern_twin() {
+        assert_eq!(
+            loffice_route(Format::Doc),
+            Some((Format::Docx, "docx")),
+            "Phase 5"
+        );
+        assert_eq!(
+            loffice_route(Format::Ppt),
+            Some((Format::Pptx, "pptx")),
+            "Phase 19-B"
+        );
+        assert_eq!(
+            loffice_route(Format::Xls),
+            None,
+            "`.xls` reads natively through calamine and wants no pre-conversion"
+        );
+        assert!(benefits_from_loffice(Format::Doc));
+        assert!(benefits_from_loffice(Format::Ppt));
+        assert!(!benefits_from_loffice(Format::Pptx));
     }
 
     #[test]

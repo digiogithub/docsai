@@ -31,6 +31,16 @@ pub enum ReadError {
     #[error("document is encrypted or password-protected")]
     Encrypted,
 
+    /// A format this build can recognise and route, but not parse itself.
+    ///
+    /// Phase 19 introduces it for legacy `.ppt`: the file is well-formed and
+    /// the project knows exactly what it is, but the only reader it has for it
+    /// today lives outside the process (LibreOffice). `missing` says what is
+    /// absent and what to do about it, because "unsupported" on its own sends
+    /// a user looking for a fault in their file.
+    #[error("no native reader for `{format}`: {missing}")]
+    NoNativeRoute { format: String, missing: String },
+
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
 

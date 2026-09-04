@@ -325,7 +325,10 @@ fn try_loffice(
     report.warn(docsai_model::Warning::Degraded {
         what: format!("{}-via-libreoffice", source_format.as_str()),
         why: format!(
-            "legacy .{} pre-converted to {extension} with `{}` before the {extension} pipeline",
+            "legacy .{} pre-converted to {extension} with `{}` before the {extension} pipeline; \
+             the {extension} package this was read from is LibreOffice's reconstruction of the \
+             binary file, so its part structure — styles, layouts, placeholder identity — is \
+             LibreOffice's and not the document's own",
             source_format.as_str(),
             soffice.display()
         ),

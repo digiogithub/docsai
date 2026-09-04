@@ -45,6 +45,8 @@ pub(crate) const DATA_STREAM: &str = "Data";
 pub(crate) const XLS_WORKBOOK: &str = "Workbook";
 /// Very old Excel stream name.
 pub(crate) const XLS_BOOK: &str = "Book";
+/// PowerPoint 97–2003 document stream ([MS-PPT] 2.1.1), used by detection.
+pub(crate) const PPT_DOCUMENT: &str = "PowerPoint Document";
 
 /// Reads a legacy `.doc` into the IR using the degraded native path.
 ///
@@ -322,6 +324,8 @@ pub fn classify_ole2<R: Read + Seek>(reader: &mut R) -> Result<docsai_model::For
             docsai_model::Format::Doc
         } else if comp.is_stream(XLS_WORKBOOK) || comp.is_stream(XLS_BOOK) {
             docsai_model::Format::Xls
+        } else if comp.is_stream(PPT_DOCUMENT) {
+            docsai_model::Format::Ppt
         } else {
             // Unknown OLE2 payload; leave as Doc and let the reader fail clearly.
             docsai_model::Format::Doc
