@@ -136,9 +136,11 @@ not exist yet is **correct and useful**: it records a concept worth documenting 
 ## 1. What this project is
 
 `docsai` is a cross-platform Rust binary (Windows/Linux/macOS) that converts
-Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`) and LibreOffice documents
-(`.odt`, `.ods`) to an extended Markdown called **DocMark**, and back, with
-minimal format loss. It is invoked as a CLI or as an **MCP server over stdio**.
+Office documents (`.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`) and
+LibreOffice documents (`.odt`, `.ods`, `.odp`) to an extended Markdown called
+**DocMark**, and back, with minimal format loss — and, since Phase 17, **edits**
+one in place through a closed set of operations without converting the whole of
+it. It is invoked as a CLI or as an **MCP server over stdio**.
 
 **Current status**: **Phases 0–7 are closed** for the core path. The workspace
 has the seven crates, the IR (`docsai-model`), the `.docx` and `.xlsx` readers
@@ -467,7 +469,54 @@ the construction `docs/spikes/P2-powerpoint-gate.md` asks about, and the form is
 after two phases. `kb/93-phase-17-close.md` records the close, the criteria with re-run evidence,
 where every budget stands, what `apply_edits` can and cannot reach on a filesystem, and the
 **thirty-nine** things carried forward.
-Next is **Phase 18**: `.odp` ⇄ DocMark — and, first, the P2 form.
+**Phase 18 is closed**: `.odp` ⇄ DocMark, the third ODF class brought to parity with `.pptx`.
+`docsai-odf` read and wrote text documents and spreadsheets since Phase 4 and *refused* a
+presentation; a `.odp` now reads into `Document::Presentation` — the **same** IR root a `.pptx`
+reads into, which gained nothing structural — and serialises through the **same** DocMark-P writer,
+which needed no branch on the source format and gained none. That is a test rather than an
+intention: `the_deck_body_does_not_depend_on_the_package_it_came_from` serialises every `.odp`
+twice, once claiming each format, and asserts the bodies are identical. Pages, frames,
+`presentation:class` as a placeholder type, master pages and presentation page layouts as the IR's
+master and layout, nested lists, notes, comments, tables, pictures and embedded charts all read,
+with ODF's automatic styles resolved into the model the way `.odt` and `.ods` already do, and
+everything the IR has no node for kept as a stub over its own markup. **The two mappings the plan
+refused to settle in advance were settled against files.** `presentation:class` versus `p:ph` bends
+on the ODF side three times — eleven classes map straight across while `text` and the notes
+thumbnail keep the word both dialects share, a second frame of one class on one page gets an
+ordinal that is *warned* because no layout declares it and it therefore does not resolve against
+the cascade, and reading order comes from the canvas rather than from an index this reader invented.
+And the plan's «OOXML has two levels above a slide; ODF has one» was **wrong**: ODF has two
+references above a page (`style:master-page` and `style:presentation-page-layout`), simply not
+nested, which is why `LayoutPlaceholder::props` is empty and `Master::theme` is `None` for every
+`.odp` on purpose. **The writer splices into the preserved archive**, copying each member's stored
+bytes, compression method, CRC and timestamp, so an untouched `.odp` comes back **byte for byte** —
+`mimetype` first and stored *because it was*, at a cost of zero lines, bought by not rebuilding —
+and `rebuilt_parts` is one name, `content.xml`. Three ZIP fields and one directory entry are
+restored by hand because the `zip` crate derives them. `docsai formats` says `odp: read yes, write
+yes`. **`pptx ⇄ odp` crosses through the IR** against a **22-cell matrix** that asserts its own size
+and that every fixture of both corpora is in exactly one cell; the property is the visible text as a
+multiset minus the lines each cell declares lost, with **the warnings covering the losses exactly,
+both ways round** — a drop with no warning fails, and a warning for a loss that did not happen fails
+as hard. Nothing at all is lost going to `.pptx`; four things cannot cross into `.odp` and each is a
+`Degraded` warning naming the construct and the dialect. **Both CI gates learned ODF** against a
+vendored OpenDocument 1.3 RELAX NG grammar (`schemas/odf-1.3/`), with ODF's own extended-document
+rule applied before validating: `corpus/schema_gate.py` is at **691 parts validated** (106 of them
+`.odp`), 0 invalid, and `corpus/render_gate.py` at **38 round trips identical by bytes, 55 rendered,
+254 pages compared**, 0 failures. **The spreadsheet gap is still open** — `xlsx/` and `ods/` have
+neither gate, and are now the only format family with no oracle of any kind. The phase's two
+criteria are met and re-measured at the close: 17 of 17 fixtures identical on the second DocMark
+pass *and* byte for byte as packages, and the cross matrix green. Six shared defects were found and
+fixed because a deck was finally made to cross — among them an image title that was residue at
+`standard` and a **silent loss** at `plain`, an ODF table's header row lost on every write, and
+`p:ph type="text"`, invalid OOXML written silently and caught by the new gate arm. **Risk P2 is
+still OPEN**, unsigned after a **third** phase, and Phase 18 put a fourth package family on the
+writer surface no application but LibreOffice has ever opened.
+`kb/104-phase-18-close.md` records the close, both criteria with re-run evidence, where every budget
+stands, what the gates cover and what they still do not, and the **fifty-two** things carried
+forward.
+Next is **Phase 19** (legacy `.ppt` reading, already under way and run concurrently with this one)
+and then **Phase 20** (hardening) — and, first, the P2 form, which should be signed before a
+hardening phase measures only the properties this repository already knows how to measure.
 
 ## 2. Documents you must read before implementing
 

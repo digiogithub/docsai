@@ -387,8 +387,31 @@ Tasks:
    blocks dropped with a warning (the documented v1 behaviour).
 
 Acceptance criteria:
-- [ ] odp round-trip with DocMark identity on the second pass over the odp corpus.
-- [ ] pptx→DocMark→odp and back work for common traits; drops are warned, never silent.
+- [x] odp round-trip with DocMark identity on the second pass over the odp corpus.
+      `every_odp_round_trips_with_docmark_identity_on_the_second_pass`
+      (`crates/docsai-convert/tests/odp_write.rs`) asserts its own corpus size, so the criterion
+      cannot be met by a corpus that shrank. Measured again by hand at the close: **17 of 17**
+      fixtures identical on the second DocMark pass — and identical **byte for byte as packages**,
+      which is strictly stronger, because the writer splices into the preserved archive instead of
+      rebuilding it. `mimetype` stays the first member and stays stored *because it was*.
+- [x] pptx→DocMark→odp and back work for common traits; drops are warned, never silent.
+      `crates/docsai-convert/tests/cross_matrix.rs` is a **22-cell** constant — sixteen traits both
+      corpora carry, five `.pptx`-only, one ODF-only, thirty-eight crossings — walked cell by cell,
+      asserting its own size and that every fixture of both corpora appears in exactly one cell. Per
+      cell: the visible text survives **as a multiset** except the lines the cell declares lost
+      (verbatim), the warnings cover the losses **exactly, both ways round** (a drop with no warning
+      fails; a warning for a loss that did not happen fails as hard), and the written package is
+      readable back by this project's own reader. Nothing at all is lost on the way to `.pptx`; four
+      things cannot cross into `.odp` and each is a `Degraded` warning naming the construct **and**
+      the dialect.
+
+**Phase 18 is closed** (`kb/104-phase-18-close.md`). Both gates learned ODF against a vendored
+OpenDocument 1.3 RELAX NG grammar: `corpus/schema_gate.py` is at **691 parts validated** (106 of
+them `.odp`), 0 invalid, and `corpus/render_gate.py` at **38 round trips identical by bytes and 254
+pages compared**, 0 failures. No budget moved except `corpus/token-budget.md`, which fell 31 tokens
+at `standard` from a defect fix. **The spreadsheet gap is still open**: `xlsx/` and `ods/` have
+neither gate, and are now the only format family with no oracle of any kind. Risk **P2** is unsigned
+after a third phase, and Phase 18 extended the writer surface onto a fourth package family.
 
 ## Phase 19 — Legacy `.ppt` reading (2–3 weeks) — *parallelizable with Phase 18*
 

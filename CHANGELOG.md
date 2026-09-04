@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An image's title was residue at `standard` and a silent loss at `plain`.** The writer emitted
+  `{title="…"}` — an attribute block a plain Markdown viewer prints as text — at `standard`, and
+  dropped the title entirely at `plain` **with no warning at all**. Both levels now use CommonMark's
+  own title slot, `![alt](path "title")`, which is zero residue and zero loss, and the parser reads
+  it back. Not a specification version bump: the form is base CommonMark, valid in DocMark 1.0, and
+  the attribute still wins when a document carries both. Found by pointing the deck residue probe at
+  a new corpus. (Repro before the fix: `docsai convert corpus/docx/images-inline.docx --fidelity
+  plain` — the `Figura 1` title was gone and nothing said so.)
+- **`list=` leaked into `standard`.** The list writer wrote the numbering-definition name at every
+  level but `plain`. It names what the *writer* puts back and says nothing a reader can use, so it
+  belongs to the levels that write back; it is now gated on `Fidelity::addresses()`. It affected
+  `.docx`, `.odt` and `.odp` alike, and had never been measured because only decks have a residue
+  gate. Worth 31 tokens off the `standard` column of `corpus/token-budget.md`.
+- **The ODF table writer lost every table's header row, silently.** ODF states «the first row is a
+  header» by *wrapping* it in `table:table-header-rows`, and the reader decides `Table::header_row`
+  on exactly that element; the writer wrote every row loose. A table written to `.odt`, `.ods` or
+  `.odp` therefore came back with its header demoted to a data row and an **empty** header drawn
+  above it. Like the two `.ods` defects below, it survived because there is no gate for ODF
+  spreadsheets or text documents and the tests compare DocMark, which round-trips the flag fine.
+- **A dropped raw block named the wrong dialect.** The deck writer hard-coded *«source dialect is
+  pml»*, so an ODF page transition or `anim:` tree was reported as PresentationML markup — a false
+  warning, which this project treats as seriously as a missing one. The dialect now comes off the
+  fragment itself, which is the only source that can be right for both packages.
+- **A `.pptx` generated from a non-PresentationML deck carried `p:ph type="text"`,** which is
+  outside ECMA-376's **closed** `p:ph@type` enumeration and which `xmllint` refuses — invalid OOXML,
+  written silently. The nearest role the dialect names (`body`) is substituted and the substitution
+  is warned. Found by the schema gate, on four decks.
+- **DocMark-P silently lost an empty body placeholder, and silently turned a `subtitle` into a
+  body.** Both were one function — the single place the serializer and the addressing walk agree on
+  what a slide writes without a container — and both are fixed with the specification's own words.
+  §11.2 rule 2 says «**the layout's** primary body placeholder is implicit»: a layout the catalogue
+  does not hold states nothing, while a layout it *does* hold that declares no body index has said
+  there is no primary body, and rule 2 then leaves nothing to be implicit. And an **empty** body has
+  no blocks to write at slide level, so it reached the file as nothing at all and came back as a
+  placeholder the deck no longer had; an empty body is therefore never implicit, and rule 4's
+  ordinary container costs one line and survives. Neither is a specification change.
+- **A `.odp`'s preserved package was named `deck-<hash>.pptx`.** The front-matter helper hard-coded
+  the extension, so the `skeleton:` key of every `.odp` stated something about a file that did not
+  exist. It now takes the source format, and the hash accepts every package family's extension.
 - **`set_props` was a silent no-op on `.docx` and `.pptx`.** A font property was written only to the
   paragraph's `run_direct` — which is the *paragraph mark's* run properties. ODF puts that where it
   reaches the text; WordprocessingML puts it in `w:pPr/w:rPr` and PresentationML in `a:endParaRPr`,
@@ -143,6 +182,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from.
 
 ### Added
+
+- **OpenDocument Presentation (`.odp`) reads and writes** (plan v2 **Phase 18**, closed;
+  `kb/104-phase-18-close.md`). `docsai-odf` has read and written text documents and spreadsheets
+  since Phase 4 and *refused* a presentation. The third ODF class is now a first-class citizen of
+  the same machinery: `docsai formats` says `odp: read yes, write yes`, and `docsai convert
+  deck.odp -o deck.dmk.md` and the reverse both work, as do `inspect`, `outline`, `tokens`,
+  `search`, `read --select` and `roundtrip`, none of which needed a line of their own.
+
+  **The same IR, the same DocMark, no new crate.** A `.odp` reads into `Document::Presentation` —
+  the root a `.pptx` reads into — and serialises through the **same** deck writer, which needed no
+  branch on the source format and gained none. That is a test rather than an intention:
+  `the_deck_body_does_not_depend_on_the_package_it_came_from` serialises every `.odp` twice, once
+  claiming each format, and asserts the bodies are identical. Only the front matter may differ,
+  because only the front matter states a fact about the package.
+
+  **What reads.** Pages, frames, `presentation:class` as a placeholder type, master pages and
+  presentation page layouts as the IR's master and layout, nested lists, speaker notes, comments,
+  tables, pictures and embedded charts — with ODF's automatic styles resolved into the model
+  exactly as the `.odt` and `.ods` readers already do. Every construct the IR has no node for
+  (`draw:g`, a `draw:custom-shape`, a page transition, an `anim:` tree, an OLE object) comes back
+  as a visible stub over its own preserved markup plus a typed warning; a `Basic/` macro project is
+  ignored and named, never executed.
+
+  **An untouched `.odp` comes back byte for byte.** The writer copies the original archive entry by
+  entry — each member's stored bytes, compression method, CRC, timestamp and attributes — and
+  substitutes only the byte ranges of `content.xml` the model no longer agrees with. ODF's one rule
+  that OPC has no counterpart for, that `mimetype` must be the first member and stored
+  uncompressed, therefore costs **nothing**: it stays first and stays stored *because it was*, and
+  there is no rule about it written anywhere in the writer. All seventeen corpus fixtures make the
+  round trip with byte identity and with **identical DocMark on the second pass**. What the writer
+  cannot put back it keeps and names in a warning — a slide or shape added or removed, a table's
+  cells, a picture, a chart's data, an ODF annotation, a preserved object's payload — rather than
+  half-writing a file that looks like a success.
+
+  **`pptx ⇄ odp` conversion through the IR.** Both directions were broken before this phase and one
+  of them lied: `odp -> pptx` wrote an **ODF package under a `.pptx` name** with a warning about
+  slide naming. A preserved package of the wrong dialect is now never spliced into; the deck is
+  written on the target writer's embedded template and the dialect the package *was* is named. What
+  «works for common traits» means is a **22-cell matrix** the test walks cell by cell, asserting its
+  own size and that every fixture of both corpora is in exactly one cell: the visible text survives
+  as a multiset except the lines the cell declares lost, and **the warnings cover the losses
+  exactly, both ways round** — a drop with no warning fails the build, and a warning for a loss that
+  did not happen fails it just as hard. Nothing at all is lost on the way to `.pptx`. Four things
+  cannot cross into `.odp` — an ODF chart is a sub-document with its own numbers, an OLE payload is
+  a stream, an ODF annotation is markup no writer here writes, and a raw fragment is markup of the
+  dialect it was read in — and each is a warning naming the construct **and** the dialect.
+
+  **Both CI gates learned ODF.** `corpus/schema_gate.py` gained an arm validating against the
+  **OpenDocument 1.3 RELAX NG grammar**, vendored in `schemas/odf-1.3/` so the oracle cannot change
+  without a commit, applying ODF's own extended-document rule (foreign markup a consumer ignores)
+  before validating, with the allowed namespace set derived from the grammar's own declarations.
+  `corpus/render_gate.py` gained the `.odp` round trip on the pptx arm's comparator and threshold.
+  Together: **363 → 691 parts validated** across two grammars, 0 invalid, and **67 → 254 pages
+  compared**, 0 failures. Seventeen `.odp` fixtures, one trait per file, each named after the
+  `corpus/pptx` deck it mirrors, all generated by `corpus/generate.py` so `--check` asserts them.
+  **Spreadsheets still have no gate of any kind**, which is a carried defect and is stated as one in
+  `corpus/README.md`'s coverage table.
+
+  **What it cost in tokens: nothing.** No MCP tool and no resource was added, so the session
+  preamble every agent pays did not grow by a single token for a phase that added a whole format.
 
 - **Patch editing: `docsai` changes a document without rewriting it** (plan v2 **Phase 17**, closed;
   `kb/93-phase-17-close.md`). Until now the only way to change a document with this tool was to

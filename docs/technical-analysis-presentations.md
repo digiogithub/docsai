@@ -114,6 +114,15 @@ parser. Writing `.ppt` is out of scope, exactly like `.doc`/`.xls`.
 `presentation:class` and master pages; the effort is smaller than `.odt` was, because Impress is
 more regular than Writer.
 
+> **Delivered in plan v2 Phase 18** (`kb/104-phase-18-close.md`). The estimate held: `docsai-odf`
+> reads and writes `.odp` over exactly those constructs, into the **same** presentation IR and the
+> **same** DocMark-P profile a `.pptx` uses, with no new crate and no dependency. One correction to
+> the framing above and in the phase plan — ODF does not have *one* level above a page where OOXML
+> has two: it has **two references that are simply not nested**, `style:master-page` (the styles and
+> the background) and `style:presentation-page-layout` (a naked list of placeholder rectangles),
+> which map onto the IR's `Master` and `Layout` directly. An untouched `.odp` round-trips byte for
+> byte, and `pptx ⇄ odp` converts through the IR with every drop warned.
+
 ## 5. What no library gives you (the actual work)
 
 ### 5.1 Preserve the template package
